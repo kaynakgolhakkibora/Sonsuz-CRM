@@ -969,13 +969,3 @@ export default function App() {
     </div>
   );
 }open src/
-open .
-Ctrl+C
-cp ~/Downloads/sonsuz-crm.jsx src/App.jsx
-open -a TextEdit src/App.jsx
-touch src/App.jsx && open -e src/App.jsx
-nano src/App.jsx
-nano src/App.jsx
-ls src/
-
-
