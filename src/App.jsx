@@ -968,4 +968,3 @@ export default function App() {
       )}
     </div>
   );
-}open src/
