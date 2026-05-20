@@ -78,7 +78,7 @@ function midday(d = new Date()) {
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
 const TIMES = [];
-for (let h=8;h<=20;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
+for (let h=10;h<=19;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
 // ─── UI atoms ────────────────────────────────────────────────
 function Pill({ label, bg, color }) {
