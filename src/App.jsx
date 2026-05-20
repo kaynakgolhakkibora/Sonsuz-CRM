@@ -374,7 +374,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
 
 function AddSheet({ onClose, onAdd }) {
   const todayISO = new Date().toISOString().split("T")[0];
-  const [f, setF] = useState({ name:"", instrument:"Davul", day:"Pazartesi", time:"15:00", count:4, firstDate:todayISO });
+  const [f, setF] = useState({ name:"", phone:"", instrument:"Davul", day:"Pazartesi", time:"15:00", count:4, firstDate:todayISO });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const previewDates = () => {
     if (!f.name) return "";
@@ -385,6 +385,8 @@ function AddSheet({ onClose, onAdd }) {
     <Sheet title="Yeni Öğrenci" onClose={onClose}>
       <label style={LBL}>Ad Soyad</label>
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Öğrenci adı" />
+      <label style={LBL}>Telefon (WhatsApp)</label>
+      <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
       <label style={LBL}>Enstrüman</label>
       <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
         {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
@@ -430,7 +432,16 @@ function MesajSheet({ student, onClose }) {
     { key:"odeme2", icon:"⚠️", label:"Ödeme Hatırlatma (2.)", text:msgOdemeHatirlatma2(student) },
     { key:"dondur", icon:"🚨", label:"Dondurma Uyarısı", text:msgDondurmaUyarisi(student) },
   ];
-  const copy = (key, text) => { navigator.clipboard.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(null), 2500); }); };
+  const send = (key, text) => {
+    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    const encoded = encodeURIComponent(text);
+    if (phone) {
+      window.open(`https://wa.me/${phone}?text=${encoded}`, "_blank");
+    } else {
+      navigator.clipboard.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(null), 2500); });
+    }
+    setCopied(key); setTimeout(() => setCopied(null), 2500);
+  };
   return (
     <Sheet title="Mesaj Şablonları" subtitle={student.name} onClose={onClose}>
       <p style={{ fontSize:13, color:"#888", marginBottom:16 }}>Kopyala → WhatsApp'a yapıştır</p>
@@ -439,8 +450,8 @@ function MesajSheet({ student, onClose }) {
           <div key={m.key} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, overflow:"hidden" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #f0f0f0" }}>
               <span style={{ fontWeight:700, fontSize:14, color:"#111" }}>{m.icon} {m.label}</span>
-              <button onClick={() => copy(m.key, m.text)} style={{ background: copied===m.key ? "#10b981" : "#111", color:"#fff", border:"none", borderRadius:8, padding:"5px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
-                {copied===m.key ? "✓ Kopyalandı" : "Kopyala"}
+              <button onClick={() => send(m.key, m.text)} style={{ background: copied===m.key ? "#10b981" : "#111", color:"#fff", border:"none", borderRadius:8, padding:"5px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                {copied===m.key ? "✓ Gönderildi" : (student.phone ? "WhatsApp'ta Aç" : "Kopyala")}
               </button>
             </div>
             <div style={{ padding:"10px 14px" }}><p style={{ margin:0, fontSize:12, color:"#555", lineHeight:1.6, whiteSpace:"pre-line" }}>{m.text}</p></div>
@@ -561,6 +572,7 @@ export default function App() {
     const { error } = await supabase.from("students").upsert({
       id: student.id,
       name: student.name,
+      phone: student.phone || "",
       instrument: student.instrument,
       day: student.day,
       time: student.time,
@@ -673,6 +685,7 @@ export default function App() {
     const newStudent = {
       id: uid(),
       name: f.name,
+      phone: f.phone || "",
       instrument: f.instrument,
       day: f.day,
       time: f.time,
