@@ -25,7 +25,7 @@ function buildSchedule(day, count, from) {
   return dates;
 }
 
-function uid() { return Math.random().toString(36).slice(2); }
+function uid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16); }); }
 
 function addDays(iso, n) {
   const d = new Date(iso);
