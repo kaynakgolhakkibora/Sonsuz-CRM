@@ -104,7 +104,7 @@ function NoteArea({ value, onChange, placeholder="Açıklama ekle..." }) {
     <div style={{ marginBottom:12 }}>
       <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Açıklama (opsiyonel)</label>
       <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={3}
-        style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa" }} />
+        style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa", color:"#111" }#fafafa" }} />
     </div>
   );
 }
@@ -126,7 +126,7 @@ function Sheet({ title, subtitle, onClose, children }) {
   );
 }
 
-const INP = { width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fafafa" };
+const INP = { width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fafafa", color:"#111" };
 const LBL = { display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:4, marginTop:14 };
 
 function ActionSheet({ student, lessonId, onClose, onAction }) {
