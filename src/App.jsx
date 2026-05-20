@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://wuizpkfueudglmgdsavu.supabase.co";
-const SUPABASE_KEY = "sb_publishable_WTcQfalj1Mjn2LwdSYp-EA_-_fFxfV2";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1aXpwa2Z1ZXVkZ2xtZ2RzYXZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMTg4OTUsImV4cCI6MjA5NDc5NDg5NX0.p1-d04TxeQfa_sg6QfoL8eAD4A9DULCwaS3GEiUcqmk";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── Yardımcı ───────────────────────────────────────────────
