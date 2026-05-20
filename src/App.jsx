@@ -104,7 +104,7 @@ function NoteArea({ value, onChange, placeholder="Açıklama ekle..." }) {
     <div style={{ marginBottom:12 }}>
       <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Açıklama (opsiyonel)</label>
       <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={3}
-        style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa", color:"#111" }#fafafa" }} />
+        style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa", color:"#111" }} />
     </div>
   );
 }
@@ -549,7 +549,6 @@ export default function App() {
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
 
-  // Supabase'den öğrencileri yükle
   const loadStudents = async () => {
     const { data, error } = await supabase.from("students").select("*").order("created_at");
     if (!error && data) setStudents(data);
@@ -558,7 +557,6 @@ export default function App() {
 
   useEffect(() => { loadStudents(); }, []);
 
-  // Supabase'e kaydet
   const saveStudent = async (student) => {
     const { error } = await supabase.from("students").upsert({
       id: student.id,
