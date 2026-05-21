@@ -5,7 +5,6 @@ const SUPABASE_URL = "https://wuizpkfueudglmgdsavu.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1aXpwa2Z1ZXVkZ2xtZ2RzYXZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMTg4OTUsImV4cCI6MjA5NDc5NDg5NX0.p1-d04TxeQfa_sg6QfoL8eAD4A9DULCwaS3GEiUcqmk";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ─── Yardımcı ───────────────────────────────────────────────
 const DAY_IDX = { Pazartesi:1, Salı:2, Çarşamba:3, Perşembe:4, Cuma:5, Cumartesi:6, Pazar:0 };
 
 function nextWeekday(day, from = new Date()) {
@@ -75,12 +74,21 @@ function midday(d = new Date()) {
   const x = new Date(d); x.setHours(0,0,0,0); return x;
 }
 
+function isToday(iso) {
+  return midday(new Date(iso)).getTime() === midday().getTime();
+}
+
+function paymentOverdueDays(iso) {
+  if (!iso) return 0;
+  const diff = Math.floor((midday() - midday(new Date(iso))) / 86400000);
+  return diff > 0 ? diff : 0;
+}
+
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
 const TIMES = [];
 for (let h=10;h<=19;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
-// ─── UI atoms ────────────────────────────────────────────────
 function Pill({ label, bg, color }) {
   return <span style={{ fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:20, background:bg, color, whiteSpace:"nowrap" }}>{label}</span>;
 }
@@ -239,14 +247,40 @@ function ShiftSheet({ lesson, student, onClose, onShift }) {
   );
 }
 
-function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onOdeme, onDelete }) {
+function EkDersSheet({ student, onClose, onEkDersEkle }) {
+  const now = new Date();
+  const [date, setDate] = useState(now.toISOString().split("T")[0]);
+  const [time, setTime] = useState("10:00");
+  const [note, setNote] = useState("");
+  return (
+    <Sheet title="Ek Ders Ekle" subtitle={student.name} onClose={onClose}>
+      <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Bu ders pakete dahil değil, ayrıca ücretlendirilecek.</p>
+      <label style={LBL}>Tarih</label>
+      <input style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+      <label style={LBL}>Saat</label>
+      <select style={INP} value={time} onChange={e=>setTime(e.target.value)}>
+        {TIMES.map(t=><option key={t}>{t}</option>)}
+      </select>
+      <label style={LBL}>Not (opsiyonel)</label>
+      <input style={INP} value={note} onChange={e=>setNote(e.target.value)} placeholder="Konu, enstrüman vb." />
+      <div style={{ marginTop:16 }}>
+        <Btn bg="#6366f1" onClick={() => { onEkDersEkle(student.id, { id:uid(), date: date+"T"+time+":00", note, createdAt: new Date().toISOString() }); onClose(); }}>➕ Ek Ders Kaydet</Btn>
+        <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
+      </div>
+    </Sheet>
+  );
+}
+
+function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onOdeme, onDelete, onEkDersEkle }) {
   const [tab, setTab] = useState("takvim");
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
+  const [showEkDers, setShowEkDers] = useState(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
   const active = student.telafi_records.filter(r=>!r.done);
   const done = student.telafi_records.filter(r=>r.done);
+  const ekDersler = student.ek_dersler || [];
 
   return (
     <>
@@ -255,6 +289,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
           <Pill label={student.instrument} bg="#f3f4f6" color="#374151" />
           <Pill label={`${student.day} ${student.time}`} bg="#f3f4f6" color="#374151" />
           {student.frozen && <Pill label="❄️ Dondurulmuş" bg="#dbeafe" color="#1d4ed8" />}
+          {ekDersler.length > 0 && <Pill label={`+${ekDersler.length} ek ders`} bg="#ede9fe" color="#5b21b6" />}
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 }}>
           {[
@@ -290,13 +325,18 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
             )}
           </div>
         )}
-        <div style={{ display:"flex", gap:6, marginBottom:14 }}>
-          {[{ key:"takvim", label:"📅 Dersler" }, { key:"telafi", label:`🔄 Telafiler${active.length>0?" ("+active.length+")":""}` }].map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)} style={{ flex:1, background:tab===t.key?"#111":"#f3f4f6", color:tab===t.key?"#fff":"#555", border:"none", borderRadius:10, padding:"9px 12px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
+        <div style={{ display:"flex", gap:6, marginBottom:14, overflowX:"auto" }}>
+          {[
+            { key:"takvim", label:"📅 Dersler" },
+            { key:"telafi", label:`🔄 Telafi${active.length>0?" ("+active.length+")":""}` },
+            { key:"ekders", label:`➕ Ek Ders${ekDersler.length>0?" ("+ekDersler.length+")":""}` }
+          ].map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)} style={{ flex:1, background:tab===t.key?"#111":"#f3f4f6", color:tab===t.key?"#fff":"#555", border:"none", borderRadius:10, padding:"9px 8px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
               {t.label}
             </button>
           ))}
         </div>
+
         {tab === "takvim" && (
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
             {student.schedule.map(l => {
@@ -319,6 +359,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
             })}
           </div>
         )}
+
         {tab === "telafi" && (
           <div>
             {student.telafi_records.length === 0 && <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Aktif telafi hakkı yok</p>}
@@ -360,6 +401,23 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
             )}
           </div>
         )}
+
+        {tab === "ekders" && (
+          <div>
+            <Btn bg="#6366f1" mb={12} onClick={() => setShowEkDers(true)}>➕ Ek Ders Ekle</Btn>
+            {ekDersler.length === 0
+              ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Henüz ek ders yok</p>
+              : [...ekDersler].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e => (
+                  <div key={e.id} style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+                    <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#5b21b6" }}>{fmtDate(e.date)}</p>
+                    <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{new Date(e.date).toLocaleTimeString("tr-TR", {hour:"2-digit",minute:"2-digit"})}</p>
+                    {e.note && <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>📝 {e.note}</p>}
+                  </div>
+                ))
+            }
+          </div>
+        )}
+
         <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:8 }}>
           <Btn bg="#111" onClick={() => { onOdeme(student); onClose(); }}>+ Paket Yükle (4 Ders)</Btn>
           <Btn bg="#25D366" onClick={() => { onMesaj(student); onClose(); }}>💬 Mesaj Şablonları</Btn>
@@ -368,6 +426,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
       </Sheet>
       {telafiSel && <TelafiSheet record={telafiSel} studentName={student.name} onClose={() => setTelafiSel(null)} onDone={(id, note) => { onTelafiDone(student.id, id, note); setTelafiSel(null); }} />}
       {shiftSel && <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} />}
+      {showEkDers && <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} />}
     </>
   );
 }
@@ -406,9 +465,7 @@ function AddSheet({ onClose, onAdd }) {
 }
 
 function msgDersHatirlatma(student) {
-  const next = student.schedule.find(l => l.status === "upcoming");
-  if (!next) return "";
-  return `Merhaba 👋\n\n${student.name}'nın bugün saat ${student.time}'de *Sonsuz Sanat Müzik Okulu*'nda dersi bulunmaktadır.\n\nDerse zamanında gelmenizi rica ederiz. Görüşürüz! 🎵`;
+  return `Günaydın 🎵 ${student.name}'nın bugün saat ${student.time}'de Sonsuz Sanat'ta dersi bulunmaktadır. Lütfen 5 dakika önce hazır olunuz. Görüşürüz!`;
 }
 
 function msgOdemeHatirlatma(student) {
@@ -425,33 +482,27 @@ function msgDondurmaUyarisi(student) {
 }
 
 function MesajSheet({ student, onClose }) {
-  const [copied, setCopied] = useState(null);
   const msgs = [
     { key:"ders", icon:"📅", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
     { key:"odeme1", icon:"💳", label:"Ödeme Hatırlatma (1.)", text:msgOdemeHatirlatma(student) },
     { key:"odeme2", icon:"⚠️", label:"Ödeme Hatırlatma (2.)", text:msgOdemeHatirlatma2(student) },
     { key:"dondur", icon:"🚨", label:"Dondurma Uyarısı", text:msgDondurmaUyarisi(student) },
   ];
-  const send = (key, text) => {
+  const send = (text) => {
     const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
     const encoded = encodeURIComponent(text);
-    if (phone) {
-      window.open(`https://wa.me/${phone}?text=${encoded}`, "_blank");
-    } else {
-      navigator.clipboard.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(null), 2500); });
-    }
-    setCopied(key); setTimeout(() => setCopied(null), 2500);
+    if (phone) window.open(`https://wa.me/${phone}?text=${encoded}`, "_blank");
+    else navigator.clipboard.writeText(text);
   };
   return (
     <Sheet title="Mesaj Şablonları" subtitle={student.name} onClose={onClose}>
-      <p style={{ fontSize:13, color:"#888", marginBottom:16 }}>Kopyala → WhatsApp'a yapıştır</p>
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {msgs.map(m => (
           <div key={m.key} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, overflow:"hidden" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #f0f0f0" }}>
               <span style={{ fontWeight:700, fontSize:14, color:"#111" }}>{m.icon} {m.label}</span>
-              <button onClick={() => send(m.key, m.text)} style={{ background: copied===m.key ? "#10b981" : "#111", color:"#fff", border:"none", borderRadius:8, padding:"5px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
-                {copied===m.key ? "✓ Gönderildi" : (student.phone ? "WhatsApp'ta Aç" : "Kopyala")}
+              <button onClick={() => send(m.text)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"5px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                {student.phone ? "WhatsApp'ta Aç" : "Kopyala"}
               </button>
             </div>
             <div style={{ padding:"10px 14px" }}><p style={{ margin:0, fontSize:12, color:"#555", lineHeight:1.6, whiteSpace:"pre-line" }}>{m.text}</p></div>
@@ -464,11 +515,13 @@ function MesajSheet({ student, onClose }) {
 
 function OdemeSheet({ student, onClose, onOdemeAl, onMesajGonder }) {
   const [odemeDate, setOdemeDate] = useState(new Date().toISOString().split("T")[0]);
+  const ekDersler = student.ek_dersler || [];
   return (
     <Sheet title="Paket Yükle" subtitle={student.name} onClose={onClose}>
       <p style={{ fontSize:13, color:"#666", marginBottom:16 }}>Ödeme alındı mı?</p>
       <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
         <p style={{ margin:0, fontSize:13, color:"#166534" }}>4 yeni ders eklenecek ve program devam edecek.</p>
+        {ekDersler.length > 0 && <p style={{ margin:"6px 0 0", fontSize:13, color:"#5b21b6", fontWeight:700 }}>⚠️ {ekDersler.length} ek ders var — ek ücret alınacak.</p>}
       </div>
       <label style={LBL}>Ödeme Tarihi</label>
       <input style={{ ...INP, marginBottom:12 }} type="date" value={odemeDate} onChange={e=>setOdemeDate(e.target.value)} />
@@ -544,6 +597,112 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
   );
 }
 
+// ─── Bugünün Dersleri ─────────────────────────────────────────
+function BugunDersleri({ students, onWA }) {
+  const todayLessons = [];
+  students.forEach(s => {
+    s.schedule.forEach(l => {
+      if (isToday(l.date) && l.status === "upcoming") {
+        todayLessons.push({ student: s, lesson: l });
+      }
+    });
+  });
+  todayLessons.sort((a,b) => a.student.time.localeCompare(b.student.time));
+
+  if (todayLessons.length === 0) return null;
+
+  return (
+    <div style={{ background:"#f0f9ff", border:"1.5px solid #bae6fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+      <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#0369a1" }}>🎵 Bugünün Dersleri ({todayLessons.length})</p>
+      {todayLessons.map(({student, lesson}) => (
+        <div key={lesson.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #e0f2fe" }}>
+          <div>
+            <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
+            <p style={{ margin:"2px 0 0", fontSize:12, color:"#0369a1" }}>{student.time} · {student.instrument}</p>
+          </div>
+          {student.phone && (
+            <button onClick={() => onWA(student)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:10, padding:"7px 12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+              💬 WA
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Bugünün Ödemeleri ────────────────────────────────────────
+function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
+  const todayMid = midday();
+
+  // Bugün ödemesi olanlar (ilk upcoming dersi bugün olan ve yeni paket başlangıcı)
+  const bugunOdeme = students.filter(s => {
+    if (s.frozen) return false;
+    const upcomingLessons = s.schedule.filter(l => l.status === "upcoming");
+    if (upcomingLessons.length === 0) return false;
+    const firstUpcoming = upcomingLessons[0];
+    // Paketin ilk dersi mi? (önceki ders tamamlanmış veya ilk kayıt)
+    const completedCount = s.schedule.filter(l => l.status === "completed" || l.status === "noshow" || l.status === "lastminute").length;
+    const isFirstOfPacket = completedCount % 4 === 0;
+    return isToday(firstUpcoming.date) && isFirstOfPacket;
+  });
+
+  // Gecikenler (ödemesi geçmiş ama ödenmemiş)
+  const gecikenler = students.filter(s => {
+    if (s.frozen) return false;
+    const np = calcNextPayment(s.schedule);
+    if (!np) return false;
+    const npMid = midday(new Date(np));
+    return npMid < todayMid && !isToday(np);
+  });
+
+  if (bugunOdeme.length === 0 && gecikenler.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom:14 }}>
+      {bugunOdeme.length > 0 && (
+        <div style={{ background:"#fff7ed", border:"1.5px solid #fb923c", borderRadius:14, padding:"12px 16px", marginBottom:10 }}>
+          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#c2410c" }}>💳 Bugün Ödemesi Gelenler ({bugunOdeme.length})</p>
+          {bugunOdeme.map(s => (
+            <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fed7aa" }}>
+              <div>
+                <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
+                <p style={{ margin:"2px 0 0", fontSize:12, color:"#9a3412" }}>{s.instrument} · {s.day} {s.time}</p>
+                {(s.ek_dersler||[]).length > 0 && <p style={{ margin:"2px 0 0", fontSize:11, color:"#5b21b6", fontWeight:700 }}>+{(s.ek_dersler||[]).length} ek ders</p>}
+              </div>
+              <div style={{ display:"flex", gap:6 }}>
+                <button onClick={() => onMesaj(s)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>💬</button>
+                <button onClick={() => onOdemeAl(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ Alındı</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {gecikenler.length > 0 && (
+        <div style={{ background:"#fff1f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 16px" }}>
+          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#be123c" }}>🚨 Geciken Ödemeler ({gecikenler.length})</p>
+          {gecikenler.map(s => {
+            const np = calcNextPayment(s.schedule);
+            const geciken = paymentOverdueDays(np);
+            return (
+              <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fecdd3" }}>
+                <div>
+                  <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
+                  <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}>{fmtMed(np)} · <strong style={{ color:"#dc2626" }}>{geciken} gün gecikti</strong></p>
+                </div>
+                <div style={{ display:"flex", gap:6 }}>
+                  <button onClick={() => onMesaj(s)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>💬</button>
+                  <button onClick={() => onOdemeAl(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ Alındı</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── App ──────────────────────────────────────────────────────
 export default function App() {
   const [students, setStudents] = useState([]);
@@ -552,7 +711,7 @@ export default function App() {
   const [detailSt, setDetailSt] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState("all");
-  const [mainTab, setMainTab] = useState("liste");
+  const [mainTab, setMainTab] = useState("bugun");
   const [weekOffset, setWeekOffset] = useState(0);
   const [toast, setToast] = useState(null);
   const [mesajSt, setMesajSt] = useState(null);
@@ -581,6 +740,7 @@ export default function App() {
       odemeler: student.odemeler || [],
       telafi_records: student.telafi_records || [],
       schedule: student.schedule || [],
+      ek_dersler: student.ek_dersler || [],
     });
     if (error) console.error("Kayıt hatası:", error);
   };
@@ -694,20 +854,36 @@ export default function App() {
       odemeler: [],
       telafi_records: [],
       schedule: buildSchedule(f.day, f.count, from),
+      ek_dersler: [],
     };
     setStudents(p=>[...p, newStudent]);
     await saveStudent(newStudent);
     pop("✅ Öğrenci eklendi");
   };
 
-  const todayMid = midday();
+  const handleEkDersEkle = async (sid, ders) => {
+    const updated = students.map(s => s.id!==sid ? s : {
+      ...s, ek_dersler: [...(s.ek_dersler||[]), ders]
+    });
+    setStudents(updated);
+    await saveStudent(updated.find(s=>s.id===sid));
+    pop("➕ Ek ders eklendi");
+  };
+
+  const handleWADers = (student) => {
+    const text = msgDersHatirlatma(student);
+    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    if (phone) window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank");
+    else { navigator.clipboard.writeText(text); pop("📋 Mesaj kopyalandı"); }
+  };
+
   const isOdemeBekleyen = (s) => {
     if (s.frozen) return false;
     const bal = calcBalance(s.schedule);
     if (bal === 0) return true;
     const np = calcNextPayment(s.schedule);
     if (!np) return false;
-    return midday(new Date(np)).getTime() <= todayMid.getTime();
+    return midday(new Date(np)).getTime() <= midday().getTime();
   };
 
   const todayPayments = students.filter(isOdemeBekleyen);
@@ -752,8 +928,8 @@ export default function App() {
           <button onClick={()=>setShowAdd(true)} style={{ background:"#fff", color:"#111", border:"none", borderRadius:12, padding:"9px 18px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>+ Ekle</button>
         </div>
         <div style={{ maxWidth:600, margin:"0 auto", display:"flex", gap:4 }}>
-          {[{key:"liste",label:"📋 Liste"},{key:"takvim",label:"📅 Takvim"}].map(t=>(
-            <button key={t.key} onClick={()=>setMainTab(t.key)} style={{ flex:1, background:mainTab===t.key?"#fff":"transparent", color:mainTab===t.key?"#111":"#888", border:"none", borderRadius:"10px 10px 0 0", padding:"10px 0", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>
+          {[{key:"bugun",label:"☀️ Bugün"},{key:"liste",label:"📋 Liste"},{key:"takvim",label:"📅 Takvim"}].map(t=>(
+            <button key={t.key} onClick={()=>setMainTab(t.key)} style={{ flex:1, background:mainTab===t.key?"#fff":"transparent", color:mainTab===t.key?"#111":"#888", border:"none", borderRadius:"10px 10px 0 0", padding:"10px 0", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
               {t.label}
             </button>
           ))}
@@ -761,16 +937,26 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth:600, margin:"0 auto", padding:"14px 14px 80px" }}>
+
+        {mainTab === "bugun" && (
+          <div>
+            <BugunDersleri students={students} onWA={handleWADers} />
+            <BugunOdemeleri students={students} onOdemeAl={(s)=>setOdemeSt(s)} onMesaj={(s)=>setMesajSt(s)} />
+            {students.filter(s=>s.telafi_records.filter(r=>!r.done&&isToday(r.lessonDate||"")).length>0).length===0 &&
+             students.filter(s=>{ const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 &&
+             !students.some(s=>isOdemeBekleyen(s)) && (
+              <div style={{ textAlign:"center", padding:"48px 20px" }}>
+                <p style={{ fontSize:36 }}>☀️</p>
+                <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {mainTab === "takvim" && <WeekCal students={students} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} />}
 
         {mainTab === "liste" && (
           <div>
-            {todayPayments.length > 0 && (
-              <div style={{ background:"#fff7ed", border:"1.5px solid #fb923c", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-                <p style={{ margin:0, fontWeight:700, fontSize:13, color:"#c2410c" }}>💳 Bugün alınacak ödeme{todayPayments.length>1?"ler":""}:</p>
-                {todayPayments.map(s=>(<p key={s.id} style={{ margin:"4px 0 0", fontSize:13, color:"#9a3412" }}>· {s.name} — <strong>{fmtMed(calcNextPayment(s.schedule))}</strong></p>))}
-              </div>
-            )}
             {telafiWarnList.length > 0 && (
               <div style={{ background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 <p style={{ margin:0, fontWeight:700, fontSize:13, color:"#92400e" }}>⚠️ Telafi limitine yaklaşan öğrenci{telafiWarnList.length>1?"ler":""}:</p>
@@ -791,7 +977,7 @@ export default function App() {
               ))}
             </div>
             <div style={{ display:"flex", gap:6, marginBottom:14, overflowX:"auto", paddingBottom:2 }}>
-              {[{key:"all",label:"Tümü"},{key:"active",label:"Aktif"},{key:"frozen",label:"Dondurulmuş"},{key:"telafi",label:"Telafililer"},{key:"odeme",label:"💳 Ödeme Bekleyen"}].map(f=>(
+              {[{key:"all",label:"Tümü"},{key:"active",label:"Aktif"},{key:"frozen",label:"Dondurulmuş"},{key:"telafi",label:"Telafililer"},{key:"odeme",label:"💳 Ödeme"}].map(f=>(
                 <button key={f.key} onClick={()=>setFilter(f.key)} style={{ flexShrink:0, background:filter===f.key?"#111":"#fff", color:filter===f.key?"#fff":"#555", border:"none", borderRadius:20, padding:"7px 14px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>{f.label}</button>
               ))}
             </div>
@@ -803,6 +989,7 @@ export default function App() {
                 const warn = ac===5 && !s.frozen;
                 const nextL = s.schedule.find(l=>l.status==="upcoming");
                 const payDue = isOdemeBekleyen(s);
+                const ekCount = (s.ek_dersler||[]).length;
                 return (
                   <div key={s.id} style={{ background:s.frozen?"#f0f9ff":"#fff", borderRadius:16, padding:"14px 16px", boxShadow:"0 1px 4px rgba(0,0,0,.07)", border:warn?"1.5px solid #fcd34d":payDue?"1.5px solid #fb923c":s.frozen?"1.5px solid #bfdbfe":"1.5px solid transparent" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
@@ -812,6 +999,7 @@ export default function App() {
                           {s.frozen && <Pill label="❄️ Donuk" bg="#dbeafe" color="#1d4ed8" />}
                           {warn && <Pill label="⚠️ 5/6 Telafi" bg="#fef3c7" color="#92400e" />}
                           {payDue && <Pill label="💳 Ödeme" bg="#ffedd5" color="#c2410c" />}
+                          {ekCount>0 && <Pill label={`+${ekCount} ek`} bg="#ede9fe" color="#5b21b6" />}
                         </div>
                         <p style={{ fontSize:12, color:"#999", margin:"3px 0 6px", fontWeight:500 }}>{s.instrument} · {s.day} {s.time}</p>
                         {nextL && <p style={{ fontSize:12, color:"#0369a1", fontWeight:600, margin:"0 0 6px", background:"#f0f9ff", display:"inline-block", borderRadius:6, padding:"2px 8px" }}>📅 {fmtDate(nextL.date)}</p>}
@@ -840,7 +1028,7 @@ export default function App() {
       </div>
 
       {actionModal && <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} />}
-      {detailSt && <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onOdeme={(st)=>setOdemeSt(st)} onDelete={handleDelete} />}
+      {detailSt && <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onOdeme={(st)=>setOdemeSt(st)} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} />}
       {showAdd && <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} />}
       {mesajSt && <MesajSheet student={mesajSt} onClose={()=>setMesajSt(null)} />}
       {odemeSt && <OdemeSheet student={odemeSt} onClose={()=>setOdemeSt(null)} onOdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} />}
