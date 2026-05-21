@@ -645,10 +645,11 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
     const upcomingLessons = s.schedule.filter(l => l.status === "upcoming");
     if (upcomingLessons.length === 0) return false;
     const firstUpcoming = upcomingLessons[0];
-    // Paketin ilk dersi mi? (önceki ders tamamlanmış veya ilk kayıt)
     const completedCount = s.schedule.filter(l => l.status === "completed" || l.status === "noshow" || l.status === "lastminute").length;
     const isFirstOfPacket = completedCount % 4 === 0;
-    return isToday(firstUpcoming.date) && isFirstOfPacket;
+    // Bugün ödeme günü ve henüz bugün ödeme yapılmamış
+    const bugunOdendi = (s.odemeler||[]).some(o => o.tarih === new Date().toISOString().split("T")[0]);
+    return isToday(firstUpcoming.date) && isFirstOfPacket && !bugunOdendi;
   });
 
   // Gecikenler - bugünün ödeme listesinde olmayan ama ödemesi geçmiş olanlar
@@ -876,7 +877,7 @@ export default function App() {
     const odemeDate = new Date().toISOString().split("T")[0];
     const updated = students.map(s => {
       if (s.id!==sid) return s;
-      const odemeler = [...(s.odemeler||[]), { tarih: odemeDate, tutar: "4 ders" }];
+      const odemeler = [...(s.odemeler||[]), { tarih: odemeDate, tutar: "4 ders", odendi: true }];
       return {...s, odemeler};
     });
     setStudents(updated);
