@@ -469,12 +469,15 @@ function msgDersHatirlatma(student) {
 }
 
 function msgOdemeHatirlatma(student) {
-  const np = calcNextPayment(student.schedule);
-  return `Merhaba 👋\n\n${student.name}'nın mevcut ders paketi tamamlanmak üzere. Eğitimine kesintisiz devam edebilmesi için yeni paket ödemesini *${fmtMed(np)}* tarihine kadar yapmanızı rica ederiz.\n\nTeşekkürler 🙏`;
+  return `Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler 🙏`;
 }
 
 function msgOdemeHatirlatma2(student) {
-  return `Merhaba,\n\n${student.name}'nın ders paketi sona erdi ve henüz ödeme alınamamıştır. Program aksamaması için en kısa sürede ödeme yapmanızı önemle rica ederiz.\n\nÖdeme yapılmadığı takdirde programı askıya almak durumunda kalacağız. 🙏`;
+  return `Merhaba, ders ödemesi hâlâ beklenmektedir. Eğitime kesintisiz devam edebilmek için ödemenizi bu hafta içinde yapmanızı önemle rica ederiz 🙏`;
+}
+
+function msgOdemeHatirlatma3(student) {
+  return `Merhaba, ders ödemesi geciktiği için programınızı askıya almak durumunda kalabiliriz. Lütfen en kısa sürede ödemenizi yapınız.`;
 }
 
 function msgDondurmaUyarisi(student) {
@@ -486,7 +489,8 @@ function MesajSheet({ student, onClose }) {
     { key:"ders", icon:"📅", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
     { key:"odeme1", icon:"💳", label:"Ödeme Hatırlatma (1.)", text:msgOdemeHatirlatma(student) },
     { key:"odeme2", icon:"⚠️", label:"Ödeme Hatırlatma (2.)", text:msgOdemeHatirlatma2(student) },
-    { key:"dondur", icon:"🚨", label:"Dondurma Uyarısı", text:msgDondurmaUyarisi(student) },
+    { key:"odeme3", icon:"🚨", label:"Ödeme Hatırlatma (3.)", text:msgOdemeHatirlatma3(student) },
+    { key:"dondur", icon:"❄️", label:"Dondurma Uyarısı", text:msgDondurmaUyarisi(student) },
   ];
   const send = (text) => {
     const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
@@ -647,13 +651,18 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
     return isToday(firstUpcoming.date) && isFirstOfPacket;
   });
 
-  // Gecikenler (ödemesi geçmiş ama ödenmemiş)
+  // Gecikenler - bugünün ödeme listesinde olmayan ama ödemesi geçmiş olanlar
   const gecikenler = students.filter(s => {
     if (s.frozen) return false;
-    const np = calcNextPayment(s.schedule);
-    if (!np) return false;
-    const npMid = midday(new Date(np));
-    return npMid < todayMid && !isToday(np);
+    // Paketin ilk upcoming dersi geçmişte kalmış ama ödeme kaydı yok
+    const upcomingLessons = s.schedule.filter(l => l.status === "upcoming");
+    if (upcomingLessons.length === 0) return false;
+    const firstUpcoming = upcomingLessons[0];
+    const completedCount = s.schedule.filter(l => l.status === "completed" || l.status === "noshow" || l.status === "lastminute").length;
+    const isFirstOfPacket = completedCount % 4 === 0;
+    const lessonDate = midday(new Date(firstUpcoming.date));
+    // İlk ders günü geçmiş ve bugün değil
+    return isFirstOfPacket && lessonDate < todayMid && !isToday(firstUpcoming.date);
   });
 
   if (bugunOdeme.length === 0 && gecikenler.length === 0) return null;
@@ -672,7 +681,7 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
               </div>
               <div style={{ display:"flex", gap:6 }}>
                 <button onClick={() => onMesaj(s)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>💬</button>
-                <button onClick={() => onOdemeAl(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ Alındı</button>
+                <button onClick={() => onOdemeAl(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ Ödeme Yapıldı</button>
               </div>
             </div>
           ))}
@@ -690,9 +699,11 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
                   <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                   <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}>{fmtMed(np)} · <strong style={{ color:"#dc2626" }}>{geciken} gün gecikti</strong></p>
                 </div>
-                <div style={{ display:"flex", gap:6 }}>
-                  <button onClick={() => onMesaj(s)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>💬</button>
-                  <button onClick={() => onOdemeAl(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ Alındı</button>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler 🙏`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 1</button>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesi hâlâ beklenmektedir. Eğitime kesintisiz devam edebilmek için ödemenizi bu hafta içinde yapmanızı önemle rica ederiz 🙏`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 2</button>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesi geciktiği için programınızı askıya almak durumunda kalabiliriz. Lütfen en kısa sürede ödemenizi yapınız.`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 3</button>
+                  <button onClick={() => onOdemeAl(s.id)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>✅ Yapıldı</button>
                 </div>
               </div>
             );
@@ -861,6 +872,18 @@ export default function App() {
     pop("✅ Öğrenci eklendi");
   };
 
+  const handleOdemeKaydet = async (sid) => {
+    const odemeDate = new Date().toISOString().split("T")[0];
+    const updated = students.map(s => {
+      if (s.id!==sid) return s;
+      const odemeler = [...(s.odemeler||[]), { tarih: odemeDate, tutar: "4 ders" }];
+      return {...s, odemeler};
+    });
+    setStudents(updated);
+    await saveStudent(updated.find(s=>s.id===sid));
+    pop("✅ Ödeme kaydedildi");
+  };
+
   const handleEkDersEkle = async (sid, ders) => {
     const updated = students.map(s => s.id!==sid ? s : {
       ...s, ek_dersler: [...(s.ek_dersler||[]), ders]
@@ -941,7 +964,7 @@ export default function App() {
         {mainTab === "bugun" && (
           <div>
             <BugunDersleri students={students} onWA={handleWADers} />
-            <BugunOdemeleri students={students} onOdemeAl={(s)=>setOdemeSt(s)} onMesaj={(s)=>setMesajSt(s)} />
+            <BugunOdemeleri students={students} onOdemeAl={(s)=>handleOdemeKaydet(s.id)} onMesaj={(s)=>setMesajSt(s)} />
             {students.filter(s=>s.telafi_records.filter(r=>!r.done&&isToday(r.lessonDate||"")).length>0).length===0 &&
              students.filter(s=>{ const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 &&
              !students.some(s=>isOdemeBekleyen(s)) && (
