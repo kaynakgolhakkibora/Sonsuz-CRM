@@ -247,6 +247,37 @@ function ShiftSheet({ lesson, student, onClose, onShift }) {
   );
 }
 
+function DuzenleSheet({ student, onClose, onDuzenle }) {
+  const [f, setF] = useState({
+    name: student.name,
+    phone: student.phone || "",
+    instrument: student.instrument,
+    day: student.day,
+    time: student.time,
+  });
+  const s = (k,v) => setF(p=>({...p,[k]:v}));
+  return (
+    <Sheet title="Öğrenciyi Düzenle" subtitle={student.name} onClose={onClose}>
+      <label style={LBL}>Ad Soyad</label>
+      <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} />
+      <label style={LBL}>Telefon (WhatsApp)</label>
+      <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
+      <label style={LBL}>Enstrüman</label>
+      <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
+        {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
+      </select>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        <div><label style={LBL}>Gün</label><select style={INP} value={f.day} onChange={e=>s("day",e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select></div>
+        <div><label style={LBL}>Saat</label><select style={INP} value={f.time} onChange={e=>s("time",e.target.value)}>{TIMES.map(t=><option key={t}>{t}</option>)}</select></div>
+      </div>
+      <div style={{ marginTop:16 }}>
+        <Btn bg="#111" onClick={() => { if(f.name.trim()){ onDuzenle(student.id, f); onClose(); } }}>💾 Kaydet</Btn>
+        <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
+      </div>
+    </Sheet>
+  );
+}
+
 function EkDersSheet({ student, onClose, onEkDersEkle }) {
   const now = new Date();
   const [date, setDate] = useState(now.toISOString().split("T")[0]);
@@ -271,11 +302,12 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
   );
 }
 
-function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onOdeme, onDelete, onEkDersEkle }) {
+function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onOdeme, onDelete, onEkDersEkle, onDuzenle }) {
   const [tab, setTab] = useState("takvim");
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
   const [showEkDers, setShowEkDers] = useState(false);
+  const [showDuzenle, setShowDuzenle] = useState(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
   const active = student.telafi_records.filter(r=>!r.done);
@@ -419,6 +451,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
         )}
 
         <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:8 }}>
+          <Btn bg="#6366f1" onClick={() => setShowDuzenle(true)}>✏️ Öğrenciyi Düzenle</Btn>
           <Btn bg="#111" onClick={() => { onOdeme(student); onClose(); }}>+ Paket Yükle (4 Ders)</Btn>
           <Btn bg="#25D366" onClick={() => { onMesaj(student); onClose(); }}>💬 Mesaj Şablonları</Btn>
           <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name + " silinsin mi?")){ onDelete(student.id); onClose(); } }}>🗑 Öğrenciyi Sil</Btn>
@@ -427,6 +460,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
       {telafiSel && <TelafiSheet record={telafiSel} studentName={student.name} onClose={() => setTelafiSel(null)} onDone={(id, note) => { onTelafiDone(student.id, id, note); setTelafiSel(null); }} />}
       {shiftSel && <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} />}
       {showEkDers && <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} />}
+      {showDuzenle && <DuzenleSheet student={student} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} />}
     </>
   );
 }
@@ -885,6 +919,15 @@ export default function App() {
     pop("✅ Ödeme kaydedildi");
   };
 
+  const handleDuzenle = async (sid, f) => {
+    const updated = students.map(s => s.id!==sid ? s : {
+      ...s, name: f.name, phone: f.phone, instrument: f.instrument, day: f.day, time: f.time
+    });
+    setStudents(updated);
+    await saveStudent(updated.find(s=>s.id===sid));
+    pop("✅ Bilgiler güncellendi");
+  };
+
   const handleEkDersEkle = async (sid, ders) => {
     const updated = students.map(s => s.id!==sid ? s : {
       ...s, ek_dersler: [...(s.ek_dersler||[]), ders]
@@ -1052,7 +1095,7 @@ export default function App() {
       </div>
 
       {actionModal && <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} />}
-      {detailSt && <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onOdeme={(st)=>setOdemeSt(st)} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} />}
+      {detailSt && <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onOdeme={(st)=>setOdemeSt(st)} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onDuzenle={handleDuzenle} />}
       {showAdd && <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} />}
       {mesajSt && <MesajSheet student={mesajSt} onClose={()=>setMesajSt(null)} />}
       {odemeSt && <OdemeSheet student={odemeSt} onClose={()=>setOdemeSt(null)} onOdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} />}
