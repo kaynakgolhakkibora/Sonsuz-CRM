@@ -777,6 +777,8 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [mesajSt, setMesajSt] = useState(null);
   const [odemeSt, setOdemeSt] = useState(null);
+  const [odemeKaydetModal, setOdemeKaydetModal] = useState(null);
+  const [odemeKaydetDate, setOdemeKaydetDate] = useState(new Date().toISOString().split("T")[0]);
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
 
@@ -1093,6 +1095,7 @@ export default function App() {
                         {s.no_show>0 && <div><span style={{ fontSize:12, color:"#dc2626" }}>🚫 <strong>{s.no_show}</strong> no-show</span></div>}
                       </div>
                       <button onClick={()=>setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", marginLeft:10, flexShrink:0, fontFamily:"inherit" }}>İşlem</button>
+                      {payDue && <button onClick={()=>setOdemeKaydetModal(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:700, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💳</button>}
                       <button onClick={()=>setMesajSt(s)} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💬</button>
                     </div>
                   </div>
@@ -1114,6 +1117,17 @@ export default function App() {
       {showAdd && <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} />}
       {mesajSt && <MesajSheet student={mesajSt} onClose={()=>setMesajSt(null)} />}
       {odemeSt && <OdemeSheet student={odemeSt} onClose={()=>setOdemeSt(null)} onOdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} />}
+
+      {odemeKaydetModal && (
+        <Sheet title="Ödeme Alındı" subtitle={odemeKaydetModal.name} onClose={() => setOdemeKaydetModal(null)}>
+          <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ödeme tarihi:</p>
+          <input style={INP} type="date" value={odemeKaydetDate} onChange={e=>setOdemeKaydetDate(e.target.value)} />
+          <div style={{ marginTop:16 }}>
+            <Btn bg="#10b981" onClick={() => { handleOdemeKaydet(odemeKaydetModal.id, odemeKaydetDate); setOdemeKaydetModal(null); }}>✅ Kaydet</Btn>
+            <Btn bg="#111" outline onClick={() => setOdemeKaydetModal(null)}>İptal</Btn>
+          </div>
+        </Sheet>
+      )}
 
       {toast && (
         <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:toast.startsWith("🚨")?"#dc2626":toast.startsWith("⚠️")?"#d97706":"#111", color:"#fff", padding:"12px 20px", borderRadius:14, fontSize:14, fontWeight:600, zIndex:100, boxShadow:"0 4px 20px rgba(0,0,0,.3)", maxWidth:"90vw", textAlign:"center" }}>
