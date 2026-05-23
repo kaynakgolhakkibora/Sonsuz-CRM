@@ -964,10 +964,18 @@ export default function App() {
   const isOdemeBekleyen = (s) => {
     if (s.frozen) return false;
     const bal = calcBalance(s.schedule);
-    if (bal === 0) return true;
     const np = calcNextPayment(s.schedule);
-    if (!np) return false;
-    return midday(new Date(np)).getTime() <= midday().getTime();
+    if (!np) return bal === 0;
+    const npMid = midday(new Date(np));
+    if (npMid > midday()) return false;
+    // Son ödeme bu dönem için yapıldı mı kontrol et
+    const sonOdeme = (s.odemeler||[]).filter(o => o.odendi);
+    if (sonOdeme.length > 0) {
+      const sonOdemeTarih = midday(new Date(sonOdeme[sonOdeme.length-1].tarih));
+      // Son ödeme, sonraki ödeme tarihinden sonraysa ödendi demektir
+      if (sonOdemeTarih >= npMid) return false;
+    }
+    return true;
   };
 
   const todayPayments = students.filter(isOdemeBekleyen);
