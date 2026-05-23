@@ -705,6 +705,7 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
   if (bugunOdeme.length === 0 && gecikenler.length === 0) return null;
 
   return (
+    <>
     <div style={{ marginBottom:14 }}>
       {bugunOdeme.length > 0 && (
         <div style={{ background:"#fff7ed", border:"1.5px solid #fb923c", borderRadius:14, padding:"12px 16px", marginBottom:10 }}>
@@ -759,6 +760,7 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
         </div>
       </Sheet>
     )}
+    </>
   );
 }
 
