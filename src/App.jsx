@@ -678,28 +678,37 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
   // Bugün ödemesi olanlar (ilk upcoming dersi bugün olan ve yeni paket başlangıcı)
   const bugunOdeme = students.filter(s => {
     if (s.frozen) return false;
-    const upcomingLessons = s.schedule.filter(l => l.status === "upcoming");
-    if (upcomingLessons.length === 0) return false;
-    const firstUpcoming = upcomingLessons[0];
-    const completedCount = s.schedule.filter(l => l.status === "completed" || l.status === "noshow" || l.status === "lastminute").length;
-    const isFirstOfPacket = completedCount % 4 === 0;
-    // Bugün ödeme günü ve henüz bugün ödeme yapılmamış
+    // Bugün herhangi bir upcoming dersi var mı?
+    const bugunDers = s.schedule.find(l => l.status === "upcoming" && isToday(l.date));
+    if (!bugunDers) return false;
+    // Bu ders paketin ilk dersi mi?
+    const tamamlanan = s.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
+    const isFirstOfPacket = tamamlanan.length % 4 === 0;
+    if (!isFirstOfPacket) return false;
+    // Bugün ödeme zaten yapıldı mı?
     const bugunOdendi = (s.odemeler||[]).some(o => o.tarih === new Date().toISOString().split("T")[0]);
-    return isToday(firstUpcoming.date) && isFirstOfPacket && !bugunOdendi;
+    return !bugunOdendi;
   });
 
-  // Gecikenler - bugünün ödeme listesinde olmayan ama ödemesi geçmiş olanlar
+  // Gecikenler - paketin ilk dersi geçmiş ama ödeme yapılmamış
   const gecikenler = students.filter(s => {
     if (s.frozen) return false;
-    // Paketin ilk upcoming dersi geçmişte kalmış ama ödeme kaydı yok
-    const upcomingLessons = s.schedule.filter(l => l.status === "upcoming");
-    if (upcomingLessons.length === 0) return false;
-    const firstUpcoming = upcomingLessons[0];
-    const completedCount = s.schedule.filter(l => l.status === "completed" || l.status === "noshow" || l.status === "lastminute").length;
-    const isFirstOfPacket = completedCount % 4 === 0;
-    const lessonDate = midday(new Date(firstUpcoming.date));
-    // İlk ders günü geçmiş ve bugün değil
-    return isFirstOfPacket && lessonDate < todayMid && !isToday(firstUpcoming.date);
+    const tamamlanan = s.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
+    if (tamamlanan.length === 0) return false;
+    const isFirstOfPacket = tamamlanan.length % 4 === 0;
+    if (!isFirstOfPacket) return false;
+    // Paketin ilk dersini bul
+    const paketIlkIdx = tamamlanan.length - (tamamlanan.length % 4 === 0 ? 4 : tamamlanan.length % 4);
+    const paketIlkDers = tamamlanan[paketIlkIdx];
+    if (!paketIlkDers) return false;
+    const ilkDersTarih = midday(new Date(paketIlkDers.date));
+    if (ilkDersTarih >= todayMid) return false;
+    // Bu paket için ödeme yapıldı mı?
+    const bugunOdendi = (s.odemeler||[]).some(o => {
+      const oTarih = midday(new Date(o.tarih));
+      return oTarih >= ilkDersTarih;
+    });
+    return !bugunOdendi;
   });
 
   if (bugunOdeme.length === 0 && gecikenler.length === 0) return null;
@@ -719,7 +728,7 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
               </div>
               <div style={{ display:"flex", gap:6 }}>
                 <button onClick={() => onMesaj(s)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>💬</button>
-                <button onClick={() => onOdemeAl(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ Ödeme Yapıldı</button>
+                <button onClick={() => { setOdemeDate(new Date().toISOString().split("T")[0]); setOdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ Ödeme Yapıldı</button>
               </div>
             </div>
           ))}
@@ -730,12 +739,15 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
           <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#be123c" }}>🚨 Geciken Ödemeler ({gecikenler.length})</p>
           {gecikenler.map(s => {
             const np = calcNextPayment(s.schedule);
-            const geciken = paymentOverdueDays(np);
+            const tamamlananS = s.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
+            const paketIlkIdxS = tamamlananS.length - (tamamlananS.length % 4 === 0 ? 4 : tamamlananS.length % 4);
+            const paketIlkDersS = tamamlananS[paketIlkIdxS];
+            const geciken = paketIlkDersS ? paymentOverdueDays(paketIlkDersS.date) : 0;
             return (
               <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fecdd3" }}>
                 <div>
                   <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                  <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}>{fmtMed(np)} · <strong style={{ color:"#dc2626" }}>{geciken} gün gecikti</strong></p>
+                  <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}>Ödeme bekleniyor · <strong style={{ color:"#dc2626" }}>{geciken} gün gecikti</strong></p>
                 </div>
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler 🙏`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 1</button>
