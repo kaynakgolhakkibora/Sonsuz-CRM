@@ -452,7 +452,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
 
         <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:8 }}>
           <Btn bg="#6366f1" onClick={() => setShowDuzenle(true)}>✏️ Öğrenciyi Düzenle</Btn>
-          <Btn bg="#111" onClick={() => { onOdeme(student); onClose(); }}>+ Paket Yükle (4 Ders)</Btn>
+          <Btn bg="#111" onClick={() => { onRecharge(student.id, new Date().toISOString().split("T")[0]); onClose(); }}>+ Paket Yükle (4 Ders)</Btn>
           <Btn bg="#25D366" onClick={() => { onMesaj(student); onClose(); }}>💬 Mesaj Şablonları</Btn>
           <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name + " silinsin mi?")){ onDelete(student.id); onClose(); } }}>🗑 Öğrenciyi Sil</Btn>
         </div>
