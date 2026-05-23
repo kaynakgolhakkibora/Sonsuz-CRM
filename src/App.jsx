@@ -912,7 +912,7 @@ export default function App() {
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
-    pop("✅ Ödeme alındı, 4 ders yüklendi");
+    pop("✅ 4 ders yüklendi");
   };
 
   const handleAdd = async (f) => {
