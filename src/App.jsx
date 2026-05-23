@@ -672,6 +672,8 @@ function BugunDersleri({ students, onWA }) {
 // ─── Bugünün Ödemeleri ────────────────────────────────────────
 function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
   const todayMid = midday();
+  const [odemeModal, setOdemeModal] = useState(null);
+  const [odemeDate, setOdemeDate] = useState(new Date().toISOString().split("T")[0]);
 
   // Bugün ödemesi olanlar (ilk upcoming dersi bugün olan ve yeni paket başlangıcı)
   const bugunOdeme = students.filter(s => {
@@ -738,7 +740,7 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler 🙏`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 1</button>
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesi hâlâ beklenmektedir. Eğitime kesintisiz devam edebilmek için ödemenizi bu hafta içinde yapmanızı önemle rica ederiz 🙏`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 2</button>
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesi geciktiği için programınızı askıya almak durumunda kalabiliriz. Lütfen en kısa sürede ödemenizi yapınız.`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 3</button>
-                  <button onClick={() => onOdemeAl(s.id)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>✅ Yapıldı</button>
+                  <button onClick={() => { setOdemeDate(new Date().toISOString().split("T")[0]); setOdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>✅ Yapıldı</button>
                 </div>
               </div>
             );
@@ -746,6 +748,17 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
         </div>
       )}
     </div>
+
+    {odemeModal && (
+      <Sheet title="Ödeme Alındı" subtitle={odemeModal.name} onClose={() => setOdemeModal(null)}>
+        <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ödeme tarihi:</p>
+        <input style={INP} type="date" value={odemeDate} onChange={e=>setOdemeDate(e.target.value)} />
+        <div style={{ marginTop:16 }}>
+          <Btn bg="#10b981" onClick={() => { onOdemeAl(odemeModal.id, odemeDate); setOdemeModal(null); }}>✅ Kaydet</Btn>
+          <Btn bg="#111" outline onClick={() => setOdemeModal(null)}>İptal</Btn>
+        </div>
+      </Sheet>
+    )}
   );
 }
 
@@ -907,8 +920,8 @@ export default function App() {
     pop("✅ Öğrenci eklendi");
   };
 
-  const handleOdemeKaydet = async (sid) => {
-    const odemeDate = new Date().toISOString().split("T")[0];
+  const handleOdemeKaydet = async (sid, tarih) => {
+    const odemeDate = tarih || new Date().toISOString().split("T")[0];
     const updated = students.map(s => {
       if (s.id!==sid) return s;
       const odemeler = [...(s.odemeler||[]), { tarih: odemeDate, tutar: "4 ders", odendi: true }];
@@ -1008,7 +1021,7 @@ export default function App() {
         {mainTab === "bugun" && (
           <div>
             <BugunDersleri students={students} onWA={handleWADers} />
-            <BugunOdemeleri students={students} onOdemeAl={(s)=>handleOdemeKaydet(s.id)} onMesaj={(s)=>setMesajSt(s)} />
+            <BugunOdemeleri students={students} onOdemeAl={handleOdemeKaydet} onMesaj={(s)=>setMesajSt(s)} />
             {students.filter(s=>s.telafi_records.filter(r=>!r.done&&isToday(r.lessonDate||"")).length>0).length===0 &&
              students.filter(s=>{ const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 &&
              !students.some(s=>isOdemeBekleyen(s)) && (
