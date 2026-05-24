@@ -791,6 +791,7 @@ export default function App() {
   const [odemeSt, setOdemeSt] = useState(null);
   const [odemeKaydetModal, setOdemeKaydetModal] = useState(null);
   const [odemeKaydetDate, setOdemeKaydetDate] = useState(new Date().toISOString().split("T")[0]);
+  const [search, setSearch] = useState("");
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
 
@@ -1027,6 +1028,7 @@ export default function App() {
 
   const todayPayments = students.filter(isOdemeBekleyen);
   const filtered = students.filter(s => {
+    if (search.trim() && !s.name.toLowerCase().includes(search.toLowerCase().trim())) return false;
     if (filter==="active") return !s.frozen;
     if (filter==="frozen") return s.frozen;
     if (filter==="telafi") return s.telafi_records.some(r=>!r.done);
@@ -1114,6 +1116,9 @@ export default function App() {
                   <p style={{ fontSize:10, color:"#999", margin:"2px 0 0", fontWeight:600 }}>{s.label}</p>
                 </div>
               ))}
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Öğrenci ara..." style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:12, padding:"11px 14px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#111" }} />
             </div>
             <div style={{ display:"flex", gap:6, marginBottom:14, overflowX:"auto", paddingBottom:2 }}>
               {[{key:"all",label:"Tümü"},{key:"active",label:"Aktif"},{key:"frozen",label:"Dondurulmuş"},{key:"telafi",label:"Telafililer"},{key:"odeme",label:"💳 Ödeme"}].map(f=>(
