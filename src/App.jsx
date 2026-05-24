@@ -348,8 +348,8 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
               <div style={{ marginTop:10, borderTop:"1px solid #f0f0f0", paddingTop:8 }}>
                 <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Geçmişi</p>
                 {[...student.odemeler].reverse().map((o,i) => (
-                  <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#444", marginBottom:3 }}>
-                    <span>✅ {fmtMed(o.tarih)}</span>
+                  <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#444", marginBottom:5 }}>
+                    <span>✅ {fmtMed(o.tarih)}{o.donem ? <span style={{ color:"#999", fontSize:11 }}> · {o.donem}</span> : ""}</span>
                     <span style={{ color:"#888" }}>{o.tutar}</span>
                   </div>
                 ))}
@@ -940,7 +940,20 @@ export default function App() {
     const odemeDate = tarih || new Date().toISOString().split("T")[0];
     const updated = students.map(s => {
       if (s.id!==sid) return s;
-      const odemeler = [...(s.odemeler||[]), { tarih: odemeDate, tutar: "4 ders", odendi: true }];
+      // Mevcut paketin ders aralığını bul (upcoming dersler = bu paket)
+      const upcoming = s.schedule.filter(l => l.status === "upcoming");
+      let donem = "";
+      if (upcoming.length > 0) {
+        const ilk = upcoming[0].date;
+        const son = upcoming[upcoming.length-1].date;
+        donem = fmtShort(ilk) + " – " + fmtShort(son);
+      } else {
+        // Upcoming yoksa son 4 dersi al
+        const gecmis = s.schedule.filter(l => l.status !== "upcoming");
+        const son4 = gecmis.slice(-4);
+        if (son4.length > 0) donem = fmtShort(son4[0].date) + " – " + fmtShort(son4[son4.length-1].date);
+      }
+      const odemeler = [...(s.odemeler||[]), { tarih: odemeDate, tutar: "4 ders", donem, odendi: true }];
       return {...s, odemeler};
     });
     setStudents(updated);
