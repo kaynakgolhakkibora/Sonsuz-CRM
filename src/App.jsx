@@ -523,9 +523,52 @@ function msgDondurmaUyarisi(student) {
   return `Merhaba,\n\n${student.name}'nın ödeme durumu hakkında bugüne kadar bilgi vermiş olmamıza rağmen henüz ödeme alınamamıştır.\n\n*Bu nedenle programı donduruyoruz.* Ayrılan gün ve saat başka bir öğrenciye aktarılacaktır.\n\nProgramına devam etmek istediğinde uygunluk durumuna göre yeni bir slot belirleyebiliriz. İyi günler dileriz.`;
 }
 
+function msgPaketOzeti(student) {
+  const tamamlanan = student.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
+  const sonPaket = tamamlanan.slice(-4);
+  let dersler = "";
+  let donem = "";
+  if (sonPaket.length > 0) {
+    donem = fmtShort(sonPaket[0].date) + " – " + fmtShort(sonPaket[sonPaket.length-1].date);
+    sonPaket.forEach(l => {
+      const katildi = l.status === "completed";
+      const icon = katildi ? "✅" : "❌";
+      const durum = katildi ? "Katıldı" : "Katılmadı";
+      dersler += `${icon} ${fmtShort(l.date)} — ${durum}\n`;
+    });
+  }
+  const aktifTelafi = (student.telafi_records||[]).filter(r => !r.done);
+  const yapilanTelafi = (student.telafi_records||[]).filter(r => r.done);
+  
+  let msg = `🎵 *Sonsuz Sanat — Ders Özeti*\n\n`;
+  msg += `Öğrenci: ${student.name}\n`;
+  msg += `Dönem: ${donem}\n\n`;
+  msg += `📋 *Dersler:*\n${dersler}`;
+  
+  if (aktifTelafi.length > 0) {
+    msg += `\n🔄 *Telafi Hakları (${aktifTelafi.length}):*\n`;
+    aktifTelafi.forEach(r => { msg += `• ${fmtShort(r.lessonDate)} dersi\n`; });
+  }
+  
+  if (yapilanTelafi.length > 0) {
+    msg += `\n✅ *Yapılan Telafiler:*\n`;
+    yapilanTelafi.forEach(r => { msg += `• ${fmtShort(r.lessonDate)} dersi → ${r.doneAt || "yapıldı"}\n`; });
+  }
+  
+  const np = calcNextPayment(student.schedule);
+  const upcoming = student.schedule.filter(l => l.status === "upcoming");
+  if (upcoming.length > 0) {
+    msg += `\n📅 Yeni dönem: ${fmtMed(upcoming[0].date)}\n`;
+    msg += `💳 Ödeme: ${fmtMed(upcoming[0].date)}`;
+  }
+  
+  return msg;
+}
+
 function MesajSheet({ student, onClose }) {
   const msgs = [
     { key:"ders", icon:"📅", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
+    { key:"ozet", icon:"📊", label:"Paket Sonu Özeti", text:msgPaketOzeti(student) },
     { key:"odeme1", icon:"💳", label:"Ödeme Hatırlatma (1.)", text:msgOdemeHatirlatma(student) },
     { key:"odeme2", icon:"⚠️", label:"Ödeme Hatırlatma (2.)", text:msgOdemeHatirlatma2(student) },
     { key:"odeme3", icon:"🚨", label:"Ödeme Hatırlatma (3.)", text:msgOdemeHatirlatma3(student) },
@@ -1177,6 +1220,23 @@ export default function App() {
         {mainTab === "bugun" && (
           <div>
             <BugunDersleri students={students} onWA={handleWADers} />
+            {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 && (
+              <div style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+                <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#7e22ce" }}>📊 Paketi Biten Öğrenciler</p>
+                {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => (
+                  <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
+                    <div>
+                      <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
+                      <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Paket tamamlandı · özet gönder</p>
+                    </div>
+                    <div style={{ display:"flex", gap:6 }}>
+                      <button onClick={() => setMesajSt(s)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>📊 Özet</button>
+                      <button onClick={() => setDetailSt(s)} style={{ background:"#f3e8ff", color:"#7e22ce", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Paket</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <BugunOdemeleri students={students} onOdemeAl={handleOdemeKaydet} onMesaj={(s)=>setMesajSt(s)} />
             {students.filter(s=>s.telafi_records.filter(r=>!r.done&&isToday(r.lessonDate||"")).length>0).length===0 &&
              students.filter(s=>{ const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 &&
