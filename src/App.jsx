@@ -251,6 +251,7 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
   const [f, setF] = useState({
     name: student.name,
     phone: student.phone || "",
+    ucret: student.ucret || "",
     instrument: student.instrument,
     day: student.day,
     time: student.time,
@@ -262,6 +263,8 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
+      <label style={LBL}>4 Ders Ücreti (TL)</label>
+      <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="Örn: 5600" type="number" />
       <label style={LBL}>Enstrüman</label>
       <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
         {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
@@ -349,8 +352,8 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
                 <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Geçmişi</p>
                 {[...student.odemeler].reverse().map((o,i) => (
                   <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#444", marginBottom:5 }}>
-                    <span>✅ {fmtMed(o.tarih)}{o.donem ? <span style={{ color:"#999", fontSize:11 }}> · {o.donem}</span> : ""}</span>
-                    <span style={{ color:"#888" }}>{o.tutar}</span>
+                    <span>✅ {fmtMed(o.tarih)}{o.donem ? <span style={{ color:"#999", fontSize:11 }}> · {o.donem}</span> : ""}{o.ekDersSayisi > 0 ? <span style={{ color:"#5b21b6", fontSize:11 }}> · +{o.ekDersSayisi} ek</span> : ""}</span>
+                    <span style={{ color:"#111", fontWeight:700 }}>{typeof o.tutar === "number" ? o.tutar.toLocaleString("tr-TR")+" TL" : o.tutar}</span>
                   </div>
                 ))}
               </div>
@@ -467,7 +470,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
 
 function AddSheet({ onClose, onAdd }) {
   const todayISO = new Date().toISOString().split("T")[0];
-  const [f, setF] = useState({ name:"", phone:"", instrument:"Davul", day:"Pazartesi", time:"15:00", count:4, firstDate:todayISO });
+  const [f, setF] = useState({ name:"", phone:"", instrument:"Davul", day:"Pazartesi", time:"15:00", count:4, firstDate:todayISO, ucret:"" });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const previewDates = () => {
     if (!f.name) return "";
@@ -480,6 +483,8 @@ function AddSheet({ onClose, onAdd }) {
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Öğrenci adı" />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
+      <label style={LBL}>4 Ders Ücreti (TL)</label>
+      <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="Örn: 5600" type="number" />
       <label style={LBL}>Enstrüman</label>
       <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
         {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
@@ -776,6 +781,82 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
   );
 }
 
+// ─── Gelir Raporu ─────────────────────────────────────────────
+function GelirRaporu({ students }) {
+  const [ayOffset, setAyOffset] = useState(0);
+  const simdi = new Date();
+  const hedefAy = new Date(simdi.getFullYear(), simdi.getMonth() + ayOffset, 1);
+  const ayAdi = hedefAy.toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
+
+  // Bu ayki ödemeleri topla
+  const ayOdemeleri = [];
+  students.forEach(s => {
+    (s.odemeler || []).forEach(o => {
+      const oTarih = new Date(o.tarih);
+      if (oTarih.getFullYear() === hedefAy.getFullYear() && oTarih.getMonth() === hedefAy.getMonth()) {
+        ayOdemeleri.push({ ...o, ogrenci: s.name });
+      }
+    });
+  });
+
+  const toplamGelir = ayOdemeleri.reduce((sum, o) => sum + (typeof o.tutar === "number" ? o.tutar : 0), 0);
+  const paketGeliri = ayOdemeleri.reduce((sum, o) => sum + (o.paketUcret || 0), 0);
+  const ekGeliri = ayOdemeleri.reduce((sum, o) => sum + (o.ekTutar || 0), 0);
+  const odemeSayisi = ayOdemeleri.length;
+
+  // Beklenen gelir (ödeme bekleyenlerin ücretleri)
+  const beklenen = students.filter(s => {
+    const bal = calcBalance(s.schedule);
+    return bal <= 1 && !s.frozen;
+  }).reduce((sum, s) => sum + (s.ucret || 0), 0);
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+        <button onClick={()=>setAyOffset(o=>o-1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>‹</button>
+        <div style={{ textAlign:"center" }}>
+          <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111", textTransform:"capitalize" }}>{ayAdi}</p>
+          {ayOffset!==0 && <button onClick={()=>setAyOffset(0)} style={{ background:"none", border:"none", fontSize:11, color:"#3b82f6", fontWeight:600, cursor:"pointer", padding:0, marginTop:2 }}>Bu aya dön</button>}
+        </div>
+        <button onClick={()=>setAyOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
+      </div>
+
+      <div style={{ background:"linear-gradient(135deg, #059669, #10b981)", borderRadius:18, padding:"20px", marginBottom:14, color:"#fff" }}>
+        <p style={{ margin:0, fontSize:12, opacity:0.85, fontWeight:600, letterSpacing:1, textTransform:"uppercase" }}>Toplam Tahsilat</p>
+        <p style={{ margin:"6px 0 0", fontSize:34, fontWeight:800 }}>{toplamGelir.toLocaleString("tr-TR")} TL</p>
+        <p style={{ margin:"4px 0 0", fontSize:13, opacity:0.85 }}>{odemeSayisi} ödeme alındı</p>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
+        <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
+          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Paket Geliri</p>
+          <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#111" }}>{paketGeliri.toLocaleString("tr-TR")} TL</p>
+        </div>
+        <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
+          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Ek Ders Geliri</p>
+          <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#5b21b6" }}>{ekGeliri.toLocaleString("tr-TR")} TL</p>
+        </div>
+      </div>
+
+      <div style={{ background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
+        <p style={{ margin:"0 0 12px", fontSize:13, fontWeight:700, color:"#111" }}>Bu Ayki Ödemeler</p>
+        {ayOdemeleri.length === 0
+          ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay ödeme yok</p>
+          : [...ayOdemeleri].reverse().map((o, i) => (
+              <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom: i < ayOdemeleri.length-1 ? "1px solid #f0f0f0" : "none" }}>
+                <div>
+                  <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111" }}>{o.ogrenci}</p>
+                  <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{fmtMed(o.tarih)}{o.ekDersSayisi > 0 ? <span style={{ color:"#5b21b6" }}> · +{o.ekDersSayisi} ek ders</span> : ""}</p>
+                </div>
+                <p style={{ margin:0, fontSize:15, fontWeight:800, color:"#059669" }}>{typeof o.tutar === "number" ? o.tutar.toLocaleString("tr-TR")+" TL" : o.tutar}</p>
+              </div>
+            ))
+        }
+      </div>
+    </div>
+  );
+}
+
 // ─── App ──────────────────────────────────────────────────────
 export default function App() {
   const [students, setStudents] = useState([]);
@@ -808,6 +889,7 @@ export default function App() {
       id: student.id,
       name: student.name,
       phone: student.phone || "",
+      ucret: student.ucret || 0,
       instrument: student.instrument,
       day: student.day,
       time: student.time,
@@ -922,6 +1004,7 @@ export default function App() {
       id: uid(),
       name: f.name,
       phone: f.phone || "",
+      ucret: parseInt(f.ucret) || 0,
       instrument: f.instrument,
       day: f.day,
       time: f.time,
@@ -941,21 +1024,33 @@ export default function App() {
     const odemeDate = tarih || new Date().toISOString().split("T")[0];
     const updated = students.map(s => {
       if (s.id!==sid) return s;
-      // Mevcut paketin ders aralığını bul (upcoming dersler = bu paket)
       const upcoming = s.schedule.filter(l => l.status === "upcoming");
       let donem = "";
       if (upcoming.length > 0) {
-        const ilk = upcoming[0].date;
-        const son = upcoming[upcoming.length-1].date;
-        donem = fmtShort(ilk) + " – " + fmtShort(son);
+        donem = fmtShort(upcoming[0].date) + " – " + fmtShort(upcoming[upcoming.length-1].date);
       } else {
-        // Upcoming yoksa son 4 dersi al
         const gecmis = s.schedule.filter(l => l.status !== "upcoming");
         const son4 = gecmis.slice(-4);
         if (son4.length > 0) donem = fmtShort(son4[0].date) + " – " + fmtShort(son4[son4.length-1].date);
       }
-      const odemeler = [...(s.odemeler||[]), { tarih: odemeDate, tutar: "4 ders", donem, odendi: true }];
-      return {...s, odemeler};
+      // Ücret hesabı: 4 ders ücreti + ödenmemiş ek dersler
+      const ucret = s.ucret || 0;
+      const ekDersUcret = ucret / 4;
+      const odenmemisEk = (s.ek_dersler||[]).filter(e => !e.odendi);
+      const ekTutar = odenmemisEk.length * ekDersUcret;
+      const toplamTutar = ucret + ekTutar;
+      // Ek dersleri ödendi işaretle
+      const ekDersler = (s.ek_dersler||[]).map(e => e.odendi ? e : {...e, odendi: true});
+      const odemeler = [...(s.odemeler||[]), {
+        tarih: odemeDate,
+        tutar: toplamTutar,
+        paketUcret: ucret,
+        ekDersSayisi: odenmemisEk.length,
+        ekTutar,
+        donem,
+        odendi: true
+      }];
+      return {...s, odemeler, ek_dersler: ekDersler};
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
@@ -964,7 +1059,7 @@ export default function App() {
 
   const handleDuzenle = async (sid, f) => {
     const updated = students.map(s => s.id!==sid ? s : {
-      ...s, name: f.name, phone: f.phone, instrument: f.instrument, day: f.day, time: f.time
+      ...s, name: f.name, phone: f.phone, ucret: parseInt(f.ucret) || 0, instrument: f.instrument, day: f.day, time: f.time
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
@@ -1069,7 +1164,7 @@ export default function App() {
           <button onClick={()=>setShowAdd(true)} style={{ background:"#fff", color:"#111", border:"none", borderRadius:12, padding:"9px 18px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>+ Ekle</button>
         </div>
         <div style={{ maxWidth:600, margin:"0 auto", display:"flex", gap:4 }}>
-          {[{key:"bugun",label:"☀️ Bugün"},{key:"liste",label:"📋 Liste"},{key:"takvim",label:"📅 Takvim"}].map(t=>(
+          {[{key:"bugun",label:"☀️ Bugün"},{key:"liste",label:"📋 Liste"},{key:"takvim",label:"📅 Takvim"},{key:"gelir",label:"💰 Gelir"}].map(t=>(
             <button key={t.key} onClick={()=>setMainTab(t.key)} style={{ flex:1, background:mainTab===t.key?"#fff":"transparent", color:mainTab===t.key?"#111":"#888", border:"none", borderRadius:"10px 10px 0 0", padding:"10px 0", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
               {t.label}
             </button>
@@ -1095,6 +1190,8 @@ export default function App() {
         )}
 
         {mainTab === "takvim" && <WeekCal students={students} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} />}
+
+        {mainTab === "gelir" && <GelirRaporu students={students} />}
 
         {mainTab === "liste" && (
           <div>
