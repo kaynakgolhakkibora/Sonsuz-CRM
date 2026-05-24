@@ -311,6 +311,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
   const [shiftSel, setShiftSel] = useState(null);
   const [showEkDers, setShowEkDers] = useState(false);
   const [showDuzenle, setShowDuzenle] = useState(false);
+  const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
   const active = student.telafi_records.filter(r=>!r.done);
@@ -372,28 +373,53 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
           ))}
         </div>
 
-        {tab === "takvim" && (
-          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-            {student.schedule.map(l => {
-              const clickable = l.status === "upcoming";
-              return (
-                <div key={l.id} style={{ background:clickable?"#f9fafb":"#fff", border:clickable?"1.5px solid #d1d5db":"1px solid #f3f4f6", borderRadius:10, padding:"10px 12px" }}>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                    <div style={{ cursor:clickable?"pointer":"default", flex:1 }} onClick={() => clickable && onLessonClick(student, l.id)}>
-                      <p style={{ margin:0, fontWeight:600, fontSize:14, color:"#111" }}>{fmtDate(l.date)}</p>
-                      <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{student.time}{clickable && <span style={{ marginLeft:6, fontSize:11, color:"#93c5fd", fontWeight:600 }}>· işlem yap →</span>}</p>
-                    </div>
-                    <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                      <StatusPill status={l.status} />
-                      {clickable && <button onClick={() => setShiftSel(l)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"4px 8px", cursor:"pointer", fontSize:14, color:"#6366f1" }}>↦</button>}
-                    </div>
+        {tab === "takvim" && (() => {
+          const LessonCard = ({ l }) => {
+            const clickable = l.status === "upcoming";
+            return (
+              <div key={l.id} style={{ background:clickable?"#f9fafb":"#fff", border:clickable?"1.5px solid #d1d5db":"1px solid #f3f4f6", borderRadius:10, padding:"10px 12px" }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div style={{ cursor:clickable?"pointer":"default", flex:1 }} onClick={() => clickable && onLessonClick(student, l.id)}>
+                    <p style={{ margin:0, fontWeight:600, fontSize:14, color:"#111" }}>{fmtDate(l.date)}</p>
+                    <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{student.time}{clickable && <span style={{ marginLeft:6, fontSize:11, color:"#93c5fd", fontWeight:600 }}>· işlem yap →</span>}</p>
                   </div>
-                  {l.note && <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 10px", marginTop:6 }}><p style={{ margin:0, fontSize:12, color:"#475569", fontStyle:"italic" }}>📝 {l.note}</p></div>}
+                  <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                    <StatusPill status={l.status} />
+                    {clickable && <button onClick={() => setShiftSel(l)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"4px 8px", cursor:"pointer", fontSize:14, color:"#6366f1" }}>↦</button>}
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
+                {l.note && <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 10px", marginTop:6 }}><p style={{ margin:0, fontSize:12, color:"#475569", fontStyle:"italic" }}>📝 {l.note}</p></div>}
+              </div>
+            );
+          };
+          // Güncel paket: upcoming dersler + bunlardan önceki en fazla 4 geçmiş ders
+          const upcomingDersler = student.schedule.filter(l => l.status === "upcoming");
+          const gecmisDersler = student.schedule.filter(l => l.status !== "upcoming");
+          // Güncel paketin geçmiş kısmı (son 4'ten kalan tamamlanmamış paket)
+          const guncelGecmisSayisi = gecmisDersler.length % 4;
+          const guncelGecmis = guncelGecmisSayisi > 0 ? gecmisDersler.slice(-guncelGecmisSayisi) : [];
+          const eskiPaketler = guncelGecmisSayisi > 0 ? gecmisDersler.slice(0, -guncelGecmisSayisi) : gecmisDersler;
+          const guncel = [...guncelGecmis, ...upcomingDersler];
+          
+          return (
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {eskiPaketler.length > 0 && (
+                <div style={{ marginBottom:4 }}>
+                  <button onClick={() => setGecmisAcik(!gecmisAcik)} style={{ width:"100%", background:"#f3f4f6", border:"none", borderRadius:10, padding:"10px 12px", fontSize:13, fontWeight:700, color:"#555", cursor:"pointer", fontFamily:"inherit", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <span>📁 Geçmiş Dersler ({eskiPaketler.length})</span>
+                    <span>{gecmisAcik ? "▲" : "▼"}</span>
+                  </button>
+                  {gecmisAcik && (
+                    <div style={{ display:"flex", flexDirection:"column", gap:6, marginTop:6 }}>
+                      {eskiPaketler.map(l => <LessonCard key={l.id} l={l} />)}
+                    </div>
+                  )}
+                </div>
+              )}
+              {guncel.map(l => <LessonCard key={l.id} l={l} />)}
+            </div>
+          );
+        })()}
 
         {tab === "telafi" && (
           <div>
