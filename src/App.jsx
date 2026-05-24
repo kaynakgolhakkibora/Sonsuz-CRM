@@ -504,7 +504,7 @@ function AddSheet({ onClose, onAdd }) {
 }
 
 function msgDersHatirlatma(student) {
-  return `Günaydın 🎵 ${student.name}'nın bugün saat ${student.time}'de Sonsuz Sanat'ta dersi bulunmaktadır. Lütfen 5 dakika önce hazır olunuz. Görüşürüz!`;
+  return `Günaydın 🎵 Bugün saat ${student.time}'de Sonsuz Sanat'ta dersiniz bulunmaktadır. Lütfen 5 dakika önce hazır olunuz. Görüşürüz!`;
 }
 
 function msgIlkDersOdeme(student) {
@@ -524,7 +524,7 @@ function msgOdemeHatirlatma3(student) {
 }
 
 function msgDondurmaUyarisi(student) {
-  return `Merhaba,\n\n${student.name}'nın ödeme durumu hakkında bugüne kadar bilgi vermiş olmamıza rağmen henüz ödeme alınamamıştır.\n\n*Bu nedenle programı donduruyoruz.* Ayrılan gün ve saat başka bir öğrenciye aktarılacaktır.\n\nProgramına devam etmek istediğinde uygunluk durumuna göre yeni bir slot belirleyebiliriz. İyi günler dileriz.`;
+  return `Merhaba,\n\nÖdeme durumu hakkında bugüne kadar bilgi vermiş olmamıza rağmen henüz ödeme alınamamıştır.\n\n*Bu nedenle programı donduruyoruz.* Ayrılan gün ve saat başka bir öğrenciye aktarılacaktır.\n\nPrograma devam etmek istediğinizde uygunluk durumuna göre yeni bir slot belirleyebiliriz. İyi günler dileriz.`;
 }
 
 function msgPaketOzeti(student) {
