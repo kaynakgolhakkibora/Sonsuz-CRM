@@ -524,7 +524,7 @@ function msgDondurmaUyarisi(student) {
 }
 
 function msgPaketOzeti(student) {
-  const tamamlanan = student.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
+  const tamamlanan = student.schedule.filter(l => l.status !== "upcoming");
   const sonPaket = tamamlanan.slice(-4);
   let dersler = "";
   let donem = "";
