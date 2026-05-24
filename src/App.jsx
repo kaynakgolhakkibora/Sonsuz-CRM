@@ -507,6 +507,10 @@ function msgDersHatirlatma(student) {
   return `Günaydın 🎵 ${student.name}'nın bugün saat ${student.time}'de Sonsuz Sanat'ta dersi bulunmaktadır. Lütfen 5 dakika önce hazır olunuz. Görüşürüz!`;
 }
 
+function msgIlkDersOdeme(student) {
+  return `Sayın velimiz, yeni ders paketi bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür. İlginiz için teşekkür ederiz.`;
+}
+
 function msgOdemeHatirlatma(student) {
   return `Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler 🙏`;
 }
@@ -568,6 +572,7 @@ function msgPaketOzeti(student) {
 function MesajSheet({ student, onClose }) {
   const msgs = [
     { key:"ders", icon:"📅", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
+    { key:"ilkders", icon:"💵", label:"İlk Ders — Ödeme Günü", text:msgIlkDersOdeme(student) },
     { key:"ozet", icon:"📊", label:"Paket Sonu Özeti", text:msgPaketOzeti(student) },
     { key:"odeme1", icon:"💳", label:"Ödeme Hatırlatma (1.)", text:msgOdemeHatirlatma(student) },
     { key:"odeme2", icon:"⚠️", label:"Ödeme Hatırlatma (2.)", text:msgOdemeHatirlatma2(student) },
