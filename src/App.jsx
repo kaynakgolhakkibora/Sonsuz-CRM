@@ -504,7 +504,7 @@ function AddSheet({ onClose, onAdd }) {
 }
 
 function msgDersHatirlatma(student) {
-  return `Günaydın 🎵 Bugün saat ${student.time}'de Sonsuz Sanat'ta dersiniz bulunmaktadır. Lütfen 5 dakika önce hazır olunuz. Görüşürüz!`;
+  return `Günaydın. Bugünkü ders saatimiz ${student.time}. Lütfen 5 dakika önce hazır olun. Görüşürüz!`;
 }
 
 function msgIlkDersOdeme(student) {
@@ -512,11 +512,11 @@ function msgIlkDersOdeme(student) {
 }
 
 function msgOdemeHatirlatma(student) {
-  return `Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler 🙏`;
+  return `Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler.`;
 }
 
 function msgOdemeHatirlatma2(student) {
-  return `Merhaba, ders ödemesi hâlâ beklenmektedir. Eğitime kesintisiz devam edebilmek için ödemenizi bu hafta içinde yapmanızı önemle rica ederiz 🙏`;
+  return `Merhaba, ders ödemesi hâlâ beklenmektedir. Eğitime kesintisiz devam edebilmek için ödemenizi bu hafta içinde yapmanızı önemle rica ederiz.`;
 }
 
 function msgOdemeHatirlatma3(student) {
@@ -803,8 +803,8 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
                   <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}>Ödeme bekleniyor · <strong style={{ color:"#dc2626" }}>{geciken} gün gecikti</strong></p>
                 </div>
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
-                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler 🙏`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 1</button>
-                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesi hâlâ beklenmektedir. Eğitime kesintisiz devam edebilmek için ödemenizi bu hafta içinde yapmanızı önemle rica ederiz 🙏`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 2</button>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler.`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 1</button>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesi hâlâ beklenmektedir. Eğitime kesintisiz devam edebilmek için ödemenizi bu hafta içinde yapmanızı önemle rica ederiz.`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 2</button>
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; const t=encodeURIComponent(`Merhaba, ders ödemesi geciktiği için programınızı askıya almak durumunda kalabiliriz. Lütfen en kısa sürede ödemenizi yapınız.`); if(p) window.open(`https://wa.me/${p}?text=${t}`,"_blank"); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>💬 3</button>
                   <button onClick={() => { setOdemeDate(new Date().toISOString().split("T")[0]); setOdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>✅ Yapıldı</button>
                 </div>
