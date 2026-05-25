@@ -1260,10 +1260,7 @@ export default function App() {
                       <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                       <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Paket tamamlandı · özet gönder</p>
                     </div>
-                    <div style={{ display:"flex", gap:6 }}>
-                      <button onClick={() => setMesajSt(s)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>📊 Özet</button>
-                      <button onClick={() => setDetailSt(s)} style={{ background:"#f3e8ff", color:"#7e22ce", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Paket</button>
-                    </div>
+                    <button onClick={() => setMesajSt(s)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>📊 Özet</button>
                   </div>
                 ))}
               </div>
