@@ -400,7 +400,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
           // Güncel paket: upcoming dersler + bunlardan önceki en fazla 4 geçmiş ders
           const upcomingDersler = student.schedule.filter(l => l.status === "upcoming");
           const gecmisDersler = student.schedule.filter(l => l.status !== "upcoming");
-          // Güncel paketin geçmiş kısmı (son 4'ten kalan tamamlanmamış paket)
+          // Guncel paketin gecmis kismi (son 4ten kalan tamamlanmamis paket)
           const guncelGecmisSayisi = gecmisDersler.length % 4;
           const guncelGecmis = guncelGecmisSayisi > 0 ? gecmisDersler.slice(-guncelGecmisSayisi) : [];
           const eskiPaketler = guncelGecmisSayisi > 0 ? gecmisDersler.slice(0, -guncelGecmisSayisi) : gecmisDersler;
