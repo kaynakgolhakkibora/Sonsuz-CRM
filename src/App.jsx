@@ -1163,40 +1163,30 @@ export default function App() {
   const isOdemeBekleyen = (s) => {
     if (s.frozen) return false;
     const odemeler = s.odemeler || [];
-    const bal = calcBalance(s.schedule);
-    const np = calcNextPayment(s.schedule);
     
-    // Ödeme tarihi henüz gelmemişse bekleyen değil
-    if (np && midday(new Date(np)) > midday()) return false;
+    // Tamamlanan dersleri bul (telafi hariç)
+    const tamamlanan = s.schedule.filter(l => l.status === "completed" || l.status === "noshow" || l.status === "lastminute");
+    if (tamamlanan.length === 0) return false; // Hiç ders yapılmamış
     
-    // Son ödeme var mı?
+    // Mevcut paketin kaçıncı dersinden başladığını bul
+    const paketBasIdx = Math.floor((tamamlanan.length - 1) / 4) * 4;
+    const paketIlkDers = tamamlanan[paketBasIdx];
+    if (!paketIlkDers) return false;
+    
+    const paketBasTarih = midday(new Date(paketIlkDers.date));
+    
+    // Paketin ilk dersi henüz bugünden ilerideyse bekleyen değil
+    if (paketBasTarih > midday()) return false;
+    
+    // Bu paket için ödeme alındı mı?
     if (odemeler.length > 0) {
       const sonOdeme = odemeler[odemeler.length - 1];
       const sonOdemeTarih = midday(new Date(sonOdeme.tarih));
-      // Paketin başlangıç tarihini bul (tamamlanan derslerden)
-      const tamamlanan = s.schedule.filter(l => l.status === "completed" || l.status === "noshow" || l.status === "lastminute");
-      if (tamamlanan.length > 0) {
-        // Mevcut paketin ilk dersi
-        const paketBaslangic = Math.floor(tamamlanan.length / 4) * 4;
-        const paketIlkDers = s.schedule.filter(l => l.status !== "upcoming")[paketBaslangic];
-        if (paketIlkDers) {
-          const paketBasTarih = midday(new Date(paketIlkDers.date));
-          // Son ödeme bu paketin başından sonraysa ödendi
-          if (sonOdemeTarih >= paketBasTarih) return false;
-        } else {
-          // Paket başı bulunamadı, son ödeme varsa ödendi say
-          return false;
-        }
-      } else {
-        // Hiç tamamlanan ders yok, ilk paket - son ödeme varsa ödendi
-        return false;
-      }
+      if (sonOdemeTarih >= paketBasTarih) return false;
     }
     
-    // Hiç ödeme yok ve ödeme günü geldiyse bekliyor
-    if (bal === 0) return true;
-    if (!np) return false;
-    return midday(new Date(np)) <= midday();
+    // Ödeme alınmamış ve paket başladı — bekliyor
+    return true;
   };
 
   const todayPayments = students.filter(isOdemeBekleyen);
