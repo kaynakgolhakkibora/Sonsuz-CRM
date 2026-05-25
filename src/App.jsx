@@ -149,7 +149,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
 
   const TelafiWarn = () => (
     <>
-      {willWarn && <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#92400e", fontWeight:600 }}>⚠️ Bu telafi ile <strong>5/6'ya</strong> ulaşacak. Bir sonrakinde program dondurulur.</div>}
+      {willWarn && <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#92400e", fontWeight:600 }}>⚠️ Bu telafi ile <strong>5/6&apos;ya</strong> ulaşacak. Bir sonrakinde program dondurulur.</div>}
       {willFreeze && <div style={{ background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#991b1b", fontWeight:600 }}>🚨 Bu telafi ile <strong>6. limite</strong> ulaşacak — program otomatik dondurulacak.</div>}
     </>
   );
