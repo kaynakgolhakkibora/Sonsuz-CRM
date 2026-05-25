@@ -149,7 +149,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
 
   const TelafiWarn = () => (
     <>
-      {willWarn && <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#92400e", fontWeight:600 }}>⚠️ Bu telafi ile <strong>5/6&apos;ya</strong> ulaşacak. Bir sonrakinde program dondurulur.</div>}
+      {willWarn && <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#92400e", fontWeight:600 }}>⚠️ Bu telafi ile <strong>5 veya 6</strong> ulaşacak. Bir sonrakinde program dondurulur.</div>}
       {willFreeze && <div style={{ background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#991b1b", fontWeight:600 }}>🚨 Bu telafi ile <strong>6. limite</strong> ulaşacak — program otomatik dondurulacak.</div>}
     </>
   );
@@ -333,7 +333,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
         <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 }}>
           {[
             { label:"Kalan Ders", val:bal, bg:"#f9fafb", color:"#111" },
-            { label:"Aktif Telafi", val:active.length, bg: active.length>=5?"#fee2e2":active.length===4?"#fffbeb":"#eff6ff", color: active.length>=5?"#dc2626":active.length===4?"#d97706":"#2563eb" },
+            { label:"Aktif Telafi", val:active.length, bg: active.length>4?"#fee2e2":active.length===4?"#fffbeb":"#eff6ff", color: active.length>4?"#dc2626":active.length===4?"#d97706":"#2563eb" },
             { label:"No-Show", val:student.no_show, bg:"#fff1f2", color:"#e11d48" },
           ].map(s => (
             <div key={s.label} style={{ background:s.bg, borderRadius:12, padding:"12px 8px", textAlign:"center" }}>
@@ -1338,7 +1338,7 @@ export default function App() {
                           <span style={{ fontSize:12, color:"#444" }}>📚 <strong>{bal}</strong> ders kaldı</span>
                            {np && <span style={{ fontSize:12, color:"#6b7280" }}>💳 <strong>{fmtShort(np)}</strong> ödeme</span>}
                         </div>
-                        {ac>0 && <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>=5?"#d97706":"#2563eb" }}>🔄 <strong>{ac}/6</strong> aktif telafi</span></div>}
+                        {ac>0 && <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>4?"#d97706":"#2563eb" }}>🔄 <strong>{ac}/6</strong> aktif telafi</span></div>}
                         {s.no_show>0 && <div><span style={{ fontSize:12, color:"#dc2626" }}>🚫 <strong>{s.no_show}</strong> no-show</span></div>}
                       </div>
                       <button onClick={()=>setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", marginLeft:10, flexShrink:0, fontFamily:"inherit" }}>İşlem</button>
