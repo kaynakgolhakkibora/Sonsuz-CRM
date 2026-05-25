@@ -354,7 +354,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
                 {[...student.odemeler].reverse().map((o,i) => (
                   <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#444", marginBottom:5 }}>
                     <span>✅ {fmtMed(o.tarih)}{o.donem ? <span style={{ color:"#999", fontSize:11 }}> · {o.donem}</span> : ""}{o.ekDersSayisi > 0 ? <span style={{ color:"#5b21b6", fontSize:11 }}> · +{o.ekDersSayisi} ek</span> : ""}</span>
-                    <span style={{ color:"#111", fontWeight:700 }}>{typeof o.tutar === "number" ? o.tutar.toLocaleString("tr-TR")+" TL" : o.tutar}</span>
+                    <span style={{ color:"#111", fontWeight:700 }}>{typeof o.tutar === "number" ? o.tutar.toLocaleString("tr-TR")+" TL" : (student.ucret ? student.ucret.toLocaleString("tr-TR")+" TL" : o.tutar)}</span>
                   </div>
                 ))}
               </div>
@@ -868,12 +868,16 @@ function GelirRaporu({ students }) {
     (s.odemeler || []).forEach(o => {
       const oTarih = new Date(o.tarih);
       if (oTarih.getFullYear() === hedefAy.getFullYear() && oTarih.getMonth() === hedefAy.getMonth()) {
-        ayOdemeleri.push({ ...o, ogrenci: s.name });
+        // Eski kayıtlarda tutar "4 ders" string olabilir, öğrenci ücretiyle hesapla
+        const gercekTutar = typeof o.tutar === "number" ? o.tutar : (s.ucret || 0);
+        const gercekPaket = o.paketUcret || (typeof o.tutar !== "number" ? (s.ucret || 0) : 0);
+        const gercekEk = o.ekTutar || 0;
+        ayOdemeleri.push({ ...o, tutar: gercekTutar, paketUcret: gercekPaket, ekTutar: gercekEk, ogrenci: s.name });
       }
     });
   });
 
-  const toplamGelir = ayOdemeleri.reduce((sum, o) => sum + (typeof o.tutar === "number" ? o.tutar : 0), 0);
+  const toplamGelir = ayOdemeleri.reduce((sum, o) => sum + o.tutar, 0);
   const paketGeliri = ayOdemeleri.reduce((sum, o) => sum + (o.paketUcret || 0), 0);
   const ekGeliri = ayOdemeleri.reduce((sum, o) => sum + (o.ekTutar || 0), 0);
   const odemeSayisi = ayOdemeleri.length;
