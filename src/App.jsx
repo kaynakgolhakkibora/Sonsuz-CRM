@@ -1336,7 +1336,7 @@ export default function App() {
                         {nextL && <p style={{ fontSize:12, color:"#0369a1", fontWeight:600, margin:"0 0 6px", background:"#f0f9ff", display:"inline-block", borderRadius:6, padding:"2px 8px" }}>📅 {fmtDate(nextL.date)}</p>}
                         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
                           <span style={{ fontSize:12, color:"#444" }}>📚 <strong>{bal}</strong> ders kaldı</span>
-                          {np && <span style={{ fontSize:12, color:"#6b7280" }}>💳 <strong>{fmtShort(np)}</strong>'de ödeme</span>}
+                           {np && <span style={{ fontSize:12, color:"#6b7280" }}>💳 <strong>{fmtShort(np)}</strong> ödeme</span>}
                         </div>
                         {ac>0 && <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>=5?"#d97706":"#2563eb" }}>🔄 <strong>{ac}/6</strong> aktif telafi</span></div>}
                         {s.no_show>0 && <div><span style={{ fontSize:12, color:"#dc2626" }}>🚫 <strong>{s.no_show}</strong> no-show</span></div>}
