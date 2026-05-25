@@ -251,6 +251,7 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
   const [f, setF] = useState({
     name: student.name,
     phone: student.phone || "",
+    veli_adi: student.veli_adi || "",
     ucret: student.ucret || "",
     instrument: student.instrument,
     day: student.day,
@@ -263,6 +264,8 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
+      <label style={LBL}>Veli Adı</label>
+      <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
       <label style={LBL}>4 Ders Ücreti (TL)</label>
       <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="Örn: 5600" type="number" />
       <label style={LBL}>Enstrüman</label>
@@ -348,8 +351,11 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
               </div>
               <span style={{ fontSize:22 }}>💳</span>
             </div>
-            {student.odemeler && student.odemeler.length > 0 && (
-              <div style={{ marginTop:10, borderTop:"1px solid #f0f0f0", paddingTop:8 }}>
+          </div>
+        )}
+        {student.odemeler && student.odemeler.length > 0 && (
+          <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
+            <div style={{ padding:"0" }}>
                 <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Geçmişi</p>
                 {[...student.odemeler].reverse().map((o,i) => (
                   <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#444", marginBottom:5 }}>
@@ -357,8 +363,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
                     <span style={{ color:"#111", fontWeight:700 }}>{typeof o.tutar === "number" ? o.tutar.toLocaleString("tr-TR")+" TL" : (student.ucret ? student.ucret.toLocaleString("tr-TR")+" TL" : o.tutar)}</span>
                   </div>
                 ))}
-              </div>
-            )}
+            </div>
           </div>
         )}
         <div style={{ display:"flex", gap:6, marginBottom:14, overflowX:"auto" }}>
@@ -458,8 +463,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
                     {r.doneAt && <p style={{ margin:"3px 0 0", fontSize:12, color:"#4ade80" }}>{r.doneAt}</p>}
                   </div>
                 ))}
-              </div>
-            )}
+            </div>
           </div>
         )}
 
@@ -496,7 +500,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
 
 function AddSheet({ onClose, onAdd }) {
   const todayISO = new Date().toISOString().split("T")[0];
-  const [f, setF] = useState({ name:"", phone:"", instrument:"Davul", day:"Pazartesi", time:"15:00", count:4, firstDate:todayISO, ucret:"" });
+  const [f, setF] = useState({ name:"", phone:"", veli_adi:"", instrument:"Davul", day:"Pazartesi", time:"15:00", count:4, firstDate:todayISO, ucret:"" });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const previewDates = () => {
     if (!f.name) return "";
@@ -509,6 +513,8 @@ function AddSheet({ onClose, onAdd }) {
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Öğrenci adı" />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
+      <label style={LBL}>Veli Adı</label>
+      <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
       <label style={LBL}>4 Ders Ücreti (TL)</label>
       <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="Örn: 5600" type="number" />
       <label style={LBL}>Enstrüman</label>
@@ -967,6 +973,7 @@ export default function App() {
       id: student.id,
       name: student.name,
       phone: student.phone || "",
+      veli_adi: student.veli_adi || "",
       ucret: student.ucret || 0,
       instrument: student.instrument,
       day: student.day,
@@ -1082,6 +1089,7 @@ export default function App() {
       id: uid(),
       name: f.name,
       phone: f.phone || "",
+      veli_adi: f.veli_adi || "",
       ucret: parseInt(f.ucret) || 0,
       instrument: f.instrument,
       day: f.day,
@@ -1137,7 +1145,7 @@ export default function App() {
 
   const handleDuzenle = async (sid, f) => {
     const updated = students.map(s => s.id!==sid ? s : {
-      ...s, name: f.name, phone: f.phone, ucret: parseInt(f.ucret) || 0, instrument: f.instrument, day: f.day, time: f.time
+      ...s, name: f.name, phone: f.phone, veli_adi: f.veli_adi || "", ucret: parseInt(f.ucret) || 0, instrument: f.instrument, day: f.day, time: f.time
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
