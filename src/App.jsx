@@ -223,8 +223,6 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adi soyadi" />
       <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
       <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
-      <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
-      <input style={INP} type="date" value={f.dogum_tarihi} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
       <label style={LBL}>4 Ders Ucreti (TL)</label>
@@ -472,8 +470,6 @@ function AddSheet({ onClose, onAdd }) {
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adi soyadi" />
       <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
       <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
-      <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
-      <input style={INP} type="date" value={f.dogum_tarihi} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
       <label style={LBL}>4 Ders Ucreti (TL)</label>
