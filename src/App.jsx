@@ -1205,7 +1205,7 @@ export default function App() {
                         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
                           <span style={{ fontSize:12, color:"#444" }}><strong>{bal}</strong> ders kaldi</span>
                           {np ? <span style={{ fontSize:12, color:"#6b7280" }}><strong>{fmtShort(np)}</strong> odeme</span> : null}
-                          {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{pct}%</strong> devam</span>; })()}
+                          {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming" && l.status!=="telafi").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{done}/{total}</strong> <strong>{pct}%</strong> devam</span>; })()}
                         </div>
                         {ac>0 ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>4?"#d97706":"#2563eb" }}><strong>{ac}/6</strong> aktif telafi</span></div> : null}
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
