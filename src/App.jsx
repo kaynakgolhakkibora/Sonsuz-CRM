@@ -208,6 +208,7 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
     name: student.name,
     phone: student.phone || "",
     veli_adi: student.veli_adi || "",
+    dogum_tarihi: student.dogum_tarihi || "",
     ucret: student.ucret || "",
     instrument: student.instrument,
     day: student.day,
@@ -220,6 +221,10 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} />
       <label style={LBL}>Veli Adi</label>
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adi soyadi" />
+      <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
+      <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
+      <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
+      <input style={INP} type="date" value={f.dogum_tarihi} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
       <label style={LBL}>4 Ders Ucreti (TL)</label>
@@ -452,7 +457,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
 
 function AddSheet({ onClose, onAdd }) {
   const todayISO = new Date().toISOString().split("T")[0];
-  const [f, setF] = useState({ name:"", phone:"", veli_adi:"", instrument:"Davul", day:"Pazartesi", time:"15:00", count:4, firstDate:todayISO, ucret:"" });
+  const [f, setF] = useState({ name:"", phone:"", veli_adi:"", dogum_tarihi:"", instrument:"Davul", day:"Pazartesi", time:"15:00", count:4, firstDate:todayISO, ucret:"" });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const previewDates = () => {
     if (!f.name) return "";
@@ -465,6 +470,10 @@ function AddSheet({ onClose, onAdd }) {
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Ogrenci adi" />
       <label style={LBL}>Veli Adi</label>
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adi soyadi" />
+      <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
+      <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
+      <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
+      <input style={INP} type="date" value={f.dogum_tarihi} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
       <label style={LBL}>4 Ders Ucreti (TL)</label>
@@ -865,6 +874,7 @@ export default function App() {
       name: student.name,
       phone: student.phone || "",
       veli_adi: student.veli_adi || "",
+      dogum_tarihi: student.dogum_tarihi || "",
       ucret: student.ucret || 0,
       instrument: student.instrument,
       day: student.day,
@@ -968,7 +978,7 @@ export default function App() {
   const handleAdd = async (f) => {
     const from = new Date((f.firstDate||new Date().toISOString().split("T")[0])+"T12:00:00");
     const newStudent = {
-      id: uid(), name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"",
+      id: uid(), name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"",
       ucret: parseInt(f.ucret)||0, instrument: f.instrument, day: f.day, time: f.time,
       no_show: 0, frozen: false, odemeler: [], telafi_records: [],
       schedule: buildSchedule(f.day, f.count, from), ek_dersler: [],
@@ -1001,7 +1011,7 @@ export default function App() {
 
   const handleDuzenle = async (sid, f) => {
     const updated = students.map(s => s.id!==sid ? s : {
-      ...s, name: f.name, phone: f.phone, veli_adi: f.veli_adi||"", ucret: parseInt(f.ucret)||0, instrument: f.instrument, day: f.day, time: f.time
+      ...s, name: f.name, phone: f.phone, veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"", ucret: parseInt(f.ucret)||0, instrument: f.instrument, day: f.day, time: f.time
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
@@ -1085,6 +1095,30 @@ export default function App() {
       <div style={{ maxWidth:600, margin:"0 auto", padding:"14px 14px 80px" }}>
         {mainTab === "bugun" ? (
           <div>
+            {(() => {
+              const bugun = new Date();
+              const bugunMD = (bugun.getMonth()+1)+"-"+bugun.getDate();
+              const dogumGunleri = students.filter(s => {
+                if (!s.dogum_tarihi) return false;
+                const d = new Date(s.dogum_tarihi);
+                return (d.getMonth()+1)+"-"+d.getDate() === bugunMD;
+              });
+              if (dogumGunleri.length === 0) return null;
+              return (
+                <div style={{ background:"#fdf4ff", border:"1.5px solid #e879f9", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+                  <p style={{ margin:"0 0 8px", fontWeight:700, fontSize:13, color:"#86198f" }}>Bugun Dogum Gunu</p>
+                  {dogumGunleri.map(s => {
+                    const yas = new Date().getFullYear() - new Date(s.dogum_tarihi).getFullYear();
+                    return (
+                      <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0" }}>
+                        <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
+                        <span style={{ fontSize:13, color:"#86198f", fontWeight:600 }}>{yas} yas</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
             <BugunDersleri students={students} onWA={handleWADers} />
             {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <div style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
@@ -1171,6 +1205,7 @@ export default function App() {
                         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
                           <span style={{ fontSize:12, color:"#444" }}><strong>{bal}</strong> ders kaldi</span>
                           {np ? <span style={{ fontSize:12, color:"#6b7280" }}><strong>{fmtShort(np)}</strong> odeme</span> : null}
+                          {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{pct}%</strong> devam</span>; })()}
                         </div>
                         {ac>0 ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>4?"#d97706":"#2563eb" }}><strong>{ac}/6</strong> aktif telafi</span></div> : null}
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
