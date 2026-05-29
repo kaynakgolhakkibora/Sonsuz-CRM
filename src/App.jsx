@@ -493,7 +493,7 @@ function AddSheet({ onClose, onAdd }) {
 }
 
 function msgDersHatirlatma(student) {
-  return "Günaydın. Bugünkü ders saatimiz "+student.time+". Lütfen 5 dakika önce hazır olun. Görüşürüz!";
+return "Günaydın :) Bugünkü ders saatimiz "+student.time+". Lütfen 5 dakika önce hazır olun.";
 }
 function msgIlkDersÖdeme() {
   return "Sayın velimiz, yeni ders paketi bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür. İlginiz için teşekkür ederiz.";
