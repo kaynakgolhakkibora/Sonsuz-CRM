@@ -50,7 +50,7 @@ function Pill({ label, bg, color }) {
 }
 
 function StatusPill({ status }) {
-  const M = { upcoming:{label:"Planlandi",bg:"#f3f4f6",color:"#6b7280"}, completed:{label:"Katildi",bg:"#d1fae5",color:"#065f46"}, noshow:{label:"No-Show",bg:"#fee2e2",color:"#991b1b"}, lastminute:{label:"Son Dakika",bg:"#ffedd5",color:"#9a3412"}, telafi:{label:"Telafi",bg:"#dbeafe",color:"#1e40af"} };
+  const M = { upcoming:{label:"Planlandı",bg:"#f3f4f6",color:"#6b7280"}, completed:{label:"Katıldı",bg:"#d1fae5",color:"#065f46"}, noshow:{label:"No-Show",bg:"#fee2e2",color:"#991b1b"}, lastminute:{label:"Son Dakika",bg:"#ffedd5",color:"#9a3412"}, telafi:{label:"Telafi",bg:"#dbeafe",color:"#1e40af"} };
   const s = M[status] || M.upcoming;
   return <Pill label={s.label} bg={s.bg} color={s.color} />;
 }
@@ -63,10 +63,10 @@ function Btn({ children, onClick, bg="#111", color="#fff", outline=false, mb=8 }
   );
 }
 
-function NoteArea({ value, onChange, placeholder="Aciklama ekle..." }) {
+function NoteArea({ value, onChange, placeholder="Açıklama ekle..." }) {
   return (
     <div style={{ marginBottom:12 }}>
-      <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Aciklama (opsiyonel)</label>
+      <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Açıklama (opsiyonel)</label>
       <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={3}
         style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa", color:"#111" }} />
     </div>
@@ -113,21 +113,21 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
   return (
     <Sheet title={student.name} subtitle={lesson ? fmtDate(lesson.date)+" - "+student.time : ""} onClose={onClose}>
       {step === "main" && <>
-        <Btn bg="#10b981" onClick={() => act("attended")}>Katildi</Btn>
-        <Btn bg="#1f2937" onClick={() => reset("yapildi")}>Yapildi Say</Btn>
-        <Btn bg="#3b82f6" onClick={() => reset("telafi")}>Telafi Hakki Olustur</Btn>
-        <Btn bg="#f59e0b" onClick={() => act("freeze")}>Programi Dondur</Btn>
+        <Btn bg="#10b981" onClick={() => act("attended")}>Katıldı</Btn>
+        <Btn bg="#1f2937" onClick={() => reset("yapildi")}>Yapıldı Say</Btn>
+        <Btn bg="#3b82f6" onClick={() => reset("telafi")}>Telafi Hakkı Oluştur</Btn>
+        <Btn bg="#f59e0b" onClick={() => act("freeze")}>Programı Dondur</Btn>
       </>}
       {step === "telafi" && <>
-        <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>24 saat onceden iptal</p>
+        <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>24 saat önceden iptal</p>
         <TelafiWarn />
         <NoteArea value={note} onChange={setNote} placeholder="Neden iptal edildi?" />
-        <Btn bg="#3b82f6" onClick={() => act("telafi")}>Telafi Hakki Olustur</Btn>
+        <Btn bg="#3b82f6" onClick={() => act("telafi")}>Telafi Hakkı Oluştur</Btn>
         <Btn bg="#111" outline onClick={() => reset("main")}>Geri</Btn>
       </>}
       {step === "yapildi" && <>
-        <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Neden yapildi sayiliyor?</p>
-        <Btn bg="#f97316" onClick={() => reset("sondakika")}>Son Dakika Iptali</Btn>
+        <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Neden yapıldı sayılıyor?</p>
+        <Btn bg="#f97316" onClick={() => reset("sondakika")}>Son Dakika İptali</Btn>
         <Btn bg="#ef4444" onClick={() => reset("noshow")}>Habersiz Gelmedi</Btn>
         <Btn bg="#111" outline onClick={() => reset("main")}>Geri</Btn>
       </>}
@@ -159,28 +159,28 @@ function TelafiSheet({ record, studentName, onClose, onDone }) {
   return (
     <Sheet title="Telafi Dersi" subtitle={studentName} onClose={onClose}>
       <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
-        <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", textTransform:"uppercase", letterSpacing:1 }}>Iptal Edilen Ders</p>
+        <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", textTransform:"uppercase", letterSpacing:1 }}>İptal Edilen Ders</p>
         <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color:"#111" }}>{fmtDate(record.lessonDate)}</p>
         {record.note && <p style={{ margin:"4px 0 0", fontSize:13, color:"#475569", fontStyle:"italic" }}>{record.note}</p>}
       </div>
       <div style={{ background: expired?"#fee2e2":urgent?"#fffbeb":"#f0fdf4", border:`1px solid ${expired?"#fca5a5":urgent?"#fcd34d":"#bbf7d0"}`, borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div>
-            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Son Gecerlilik</p>
+            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Son Geçerlilik</p>
             <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color: expired?"#dc2626":urgent?"#d97706":"#166534" }}>{fmtMed(record.expiry)}</p>
           </div>
           <div style={{ background: expired?"#dc2626":urgent?"#d97706":"#16a34a", color:"#fff", borderRadius:20, padding:"6px 14px", fontWeight:800, fontSize:14 }}>
-            {expired ? "Suresi Doldu" : `${days} gun`}
+            {expired ? "Süresi Doldu" : `${days} gün`}
           </div>
         </div>
       </div>
       {record.done
         ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px" }}>
-            <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>Telafi Yapildi</p>
+            <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>Telafi Yapıldı</p>
             {record.doneAt && <p style={{ margin:"4px 0 0", fontSize:13, color:"#4ade80" }}>{record.doneAt}</p>}
           </div>
         : step === "main"
-          ? <Btn bg="#10b981" onClick={() => setStep("done")}>Telafi Yapildi Isaretke</Btn>
+          ? <Btn bg="#10b981" onClick={() => setStep("done")}>Telafi Yapıldı Isaretke</Btn>
           : <>
               <p style={{ fontSize:13, color:"#666", marginBottom:8 }}>Tarih ve saati yaz:</p>
               <NoteArea value={note} onChange={setNote} placeholder="Örn: 22 Mayis yapildi" />
@@ -216,28 +216,28 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
   });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   return (
-    <Sheet title="Ogrenciyi Duzenle" subtitle={student.name} onClose={onClose}>
+    <Sheet title="Öğrenciyi Düzenle" subtitle={student.name} onClose={onClose}>
       <label style={LBL}>Ad Soyad</label>
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} />
-      <label style={LBL}>Veli Adi</label>
-      <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adi soyadi" />
-      <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
+      <label style={LBL}>Veli Adı</label>
+      <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
+      <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
       <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
-      <label style={LBL}>4 Ders Ucreti (TL)</label>
+      <label style={LBL}>4 Ders Ücreti (TL)</label>
       <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="5600" type="number" />
-      <label style={LBL}>Enstruman</label>
+      <label style={LBL}>Enstrüman</label>
       <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
         {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
       </select>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-        <div><label style={LBL}>Gun</label><select style={INP} value={f.day} onChange={e=>s("day",e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select></div>
+        <div><label style={LBL}>Gün</label><select style={INP} value={f.day} onChange={e=>s("day",e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select></div>
         <div><label style={LBL}>Saat</label><select style={INP} value={f.time} onChange={e=>s("time",e.target.value)}>{TIMES.map(t=><option key={t}>{t}</option>)}</select></div>
       </div>
       <div style={{ marginTop:16 }}>
         <Btn bg="#111" onClick={() => { if(f.name.trim()){ onDuzenle(student.id, f); onClose(); } }}>Kaydet</Btn>
-        <Btn bg="#111" outline onClick={onClose}>Iptal</Btn>
+        <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
       </div>
     </Sheet>
   );
@@ -261,13 +261,13 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
       <input style={INP} value={note} onChange={e=>setNote(e.target.value)} placeholder="Konu vb." />
       <div style={{ marginTop:16 }}>
         <Btn bg="#6366f1" onClick={() => { onEkDersEkle(student.id, { id:uid(), date: date+"T"+time+":00", note, createdAt: new Date().toISOString() }); onClose(); }}>Ek Ders Kaydet</Btn>
-        <Btn bg="#111" outline onClick={onClose}>Iptal</Btn>
+        <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
       </div>
     </Sheet>
   );
 }
 
-function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onOdeme, onDelete, onEkDersEkle, onDuzenle }) {
+function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onÖdeme, onDelete, onEkDersEkle, onDuzenle }) {
   const [tab, setTab] = useState("takvim");
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -306,7 +306,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div>
-                <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Tahmini Sonraki Odeme</p>
+                <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Tahmini Sonraki Ödeme</p>
                 <p style={{ margin:"3px 0 0", fontSize:14, fontWeight:700, color:"#111" }}>{fmtMed(np)}</p>
               </div>
               <span style={{ fontSize:22 }}>💳</span>
@@ -315,7 +315,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
         ) : null}
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Odeme Gecmisi</p>
+            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Geçmişi</p>
             {[...student.odemeler].reverse().map((o,i) => (
               <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#444", marginBottom:5 }}>
                 <span>{fmtMed(o.tarih)}{o.donem ? " - "+o.donem : ""}{o.ekDersSayisi > 0 ? " +"+o.ekDersSayisi+" ek" : ""}</span>
@@ -344,7 +344,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ cursor:clickable?"pointer":"default", flex:1 }} onClick={() => clickable && onLessonClick(student, l.id)}>
                     <p style={{ margin:0, fontWeight:600, fontSize:14, color:"#111" }}>{fmtDate(l.date)}</p>
-                    <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{student.time}{clickable ? " · islem yap" : ""}</p>
+                    <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{student.time}{clickable ? " · işlem yap" : ""}</p>
                   </div>
                   <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                     <StatusPill status={l.status} />
@@ -357,16 +357,16 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
           };
           const upcomingDersler = student.schedule.filter(l => l.status === "upcoming");
           const gecmisDersler = student.schedule.filter(l => l.status !== "upcoming");
-          const guncelGecmisSayisi = gecmisDersler.length % 4;
-          const guncelGecmis = guncelGecmisSayisi > 0 ? gecmisDersler.slice(-guncelGecmisSayisi) : [];
-          const eskiPaketler = guncelGecmisSayisi > 0 ? gecmisDersler.slice(0, -guncelGecmisSayisi) : gecmisDersler;
-          const guncel = [...guncelGecmis, ...upcomingDersler];
+          const güncelGecmisSayisi = gecmisDersler.length % 4;
+          const güncelGecmis = güncelGecmisSayisi > 0 ? gecmisDersler.slice(-güncelGecmisSayisi) : [];
+          const eskiPaketler = güncelGecmisSayisi > 0 ? gecmisDersler.slice(0, -güncelGecmisSayisi) : gecmisDersler;
+          const güncel = [...güncelGecmis, ...upcomingDersler];
           return (
             <div>
               {eskiPaketler.length > 0 ? (
                 <div style={{ marginBottom:8 }}>
                   <button onClick={() => setGecmisAcik(!gecmisAcik)} style={{ width:"100%", background:"#f3f4f6", border:"none", borderRadius:10, padding:"10px 12px", fontSize:13, fontWeight:700, color:"#555", cursor:"pointer", fontFamily:"inherit", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <span>Gecmis Dersler ({eskiPaketler.length})</span>
+                    <span>Geçmiş Dersler ({eskiPaketler.length})</span>
                     <span>{gecmisAcik ? "▲" : "▼"}</span>
                   </button>
                   {gecmisAcik ? (
@@ -376,14 +376,14 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
                   ) : null}
                 </div>
               ) : null}
-              {guncel.map(l => <LessonCard key={l.id} l={l} />)}
+              {güncel.map(l => <LessonCard key={l.id} l={l} />)}
             </div>
           );
         })()}
 
         {tab === "telafi" ? (
           <div>
-            {student.telafi_records.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Aktif telafi hakki yok</p> : null}
+            {student.telafi_records.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Aktif telafi hakkı yok</p> : null}
             {active.length > 0 ? (
               <div style={{ marginBottom:16 }}>
                 <p style={{ fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Bekleyen</p>
@@ -397,7 +397,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
                         <div>
                           <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#111" }}>{fmtDate(r.lessonDate)} dersi</p>
                           {r.note ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontStyle:"italic" }}>{r.note}</p> : null}
-                          <p style={{ margin:"4px 0 0", fontSize:12, color:"#888" }}>Son gecerlilik: <strong style={{ color: exp?"#dc2626":urg?"#d97706":"#0369a1" }}>{fmtMed(r.expiry)}</strong></p>
+                          <p style={{ margin:"4px 0 0", fontSize:12, color:"#888" }}>Son geçerlilik: <strong style={{ color: exp?"#dc2626":urg?"#d97706":"#0369a1" }}>{fmtMed(r.expiry)}</strong></p>
                         </div>
                         <div style={{ background:exp?"#dc2626":urg?"#d97706":"#0ea5e9", color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:800, flexShrink:0, marginLeft:8 }}>
                           {exp?"Doldu":d+"g"}
@@ -426,7 +426,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
           <div>
             <Btn bg="#6366f1" mb={12} onClick={() => setShowEkDers(true)}>Ek Ders Ekle</Btn>
             {ekDersler.length === 0
-              ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Henuz ek ders yok</p>
+              ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Henüz ek ders yok</p>
               : [...ekDersler].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e => (
                   <div key={e.id} style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
                     <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#5b21b6" }}>{fmtDate(e.date)}</p>
@@ -439,10 +439,10 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
         ) : null}
 
         <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:8 }}>
-          <Btn bg="#6366f1" onClick={() => setShowDuzenle(true)}>Ogrenciyi Duzenle</Btn>
-          <Btn bg="#111" onClick={() => { onRecharge(student.id, new Date().toISOString().split("T")[0]); onClose(); }}>Paket Yukle (4 Ders)</Btn>
-          <Btn bg="#25D366" onClick={() => { onMesaj(student); onClose(); }}>Mesaj Sablonlari</Btn>
-          <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name+" silinsin mi?")){ onDelete(student.id); onClose(); } }}>Ogrenciyi Sil</Btn>
+          <Btn bg="#6366f1" onClick={() => setShowDuzenle(true)}>Öğrenciyi Düzenle</Btn>
+          <Btn bg="#111" onClick={() => { onRecharge(student.id, new Date().toISOString().split("T")[0]); onClose(); }}>Paket Yükle (4 Ders)</Btn>
+          <Btn bg="#25D366" onClick={() => { onMesaj(student); onClose(); }}>Mesaj Şablonları</Btn>
+          <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name+" silinsin mi?")){ onDelete(student.id); onClose(); } }}>Öğrenciyi Sil</Btn>
         </div>
       </Sheet>
       {telafiSel ? <TelafiSheet record={telafiSel} studentName={student.name} onClose={() => setTelafiSel(null)} onDone={(id, note) => { onTelafiDone(student.id, id, note); setTelafiSel(null); }} /> : null}
@@ -463,28 +463,28 @@ function AddSheet({ onClose, onAdd }) {
     return buildSchedule(f.day, f.count, from).map(l=>fmtShort(l.date)).join(" - ");
   };
   return (
-    <Sheet title="Yeni Ogrenci" onClose={onClose}>
+    <Sheet title="Yeni Öğrenci" onClose={onClose}>
       <label style={LBL}>Ad Soyad</label>
-      <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Ogrenci adi" />
-      <label style={LBL}>Veli Adi</label>
-      <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adi soyadi" />
-      <label style={LBL}>Dogum Tarihi (opsiyonel)</label>
+      <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Öğrenci adı" />
+      <label style={LBL}>Veli Adı</label>
+      <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
+      <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
       <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
-      <label style={LBL}>4 Ders Ucreti (TL)</label>
+      <label style={LBL}>4 Ders Ücreti (TL)</label>
       <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="5600" type="number" />
-      <label style={LBL}>Enstruman</label>
+      <label style={LBL}>Enstrüman</label>
       <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
         {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
       </select>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-        <div><label style={LBL}>Gun</label><select style={INP} value={f.day} onChange={e=>s("day",e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select></div>
+        <div><label style={LBL}>Gün</label><select style={INP} value={f.day} onChange={e=>s("day",e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select></div>
         <div><label style={LBL}>Saat</label><select style={INP} value={f.time} onChange={e=>s("time",e.target.value)}>{TIMES.map(t=><option key={t}>{t}</option>)}</select></div>
       </div>
-      <label style={LBL}>Paket (ders sayisi)</label>
+      <label style={LBL}>Paket (ders sayısı)</label>
       <input style={INP} type="number" value={f.count} onChange={e=>s("count",Math.max(1,parseInt(e.target.value)||1))} min={1} max={12} />
-      <label style={LBL}>Ilk Ders Tarihi</label>
+      <label style={LBL}>İlk Ders Tarihi</label>
       <input style={INP} type="date" value={f.firstDate} onChange={e=>s("firstDate",e.target.value)} />
       {f.name ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginTop:12, fontSize:12, color:"#166534" }}><strong>Planlanacak dersler:</strong><br />{previewDates()}</div> : null}
       <div style={{ marginTop:16 }}><Btn bg="#111" onClick={() => { if(f.name.trim()){ onAdd(f); onClose(); } }}>Kaydet</Btn></div>
@@ -493,22 +493,22 @@ function AddSheet({ onClose, onAdd }) {
 }
 
 function msgDersHatirlatma(student) {
-  return "Gunaydın. Bugünkü ders saatimiz "+student.time+". Lütfen 5 dakika önce hazır olun. Görüşürüz!";
+  return "Günaydın. Bugünkü ders saatimiz "+student.time+". Lütfen 5 dakika önce hazır olun. Görüşürüz!";
 }
-function msgIlkDersOdeme() {
+function msgIlkDersÖdeme() {
   return "Sayın velimiz, yeni ders paketi bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür. İlginiz için teşekkür ederiz.";
 }
-function msgOdemeHatirlatma() {
+function msgÖdemeHatirlatma() {
   return "Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler.";
 }
-function msgOdemeHatirlatma2() {
+function msgÖdemeHatirlatma2() {
   return "Merhaba, ders ödemesi hâlâ beklenmektedir. Eğitime kesintisiz devam edebilmek için ödemenizi bu hafta içinde yapmanızı önemle rica ederiz.";
 }
-function msgOdemeHatirlatma3() {
+function msgÖdemeHatirlatma3() {
   return "Merhaba, ders ödemesi geciktiği için programınızı askıya almak durumunda kalabiliriz. Lütfen en kısa sürede ödemenizi yapınız.";
 }
 function msgDondurmaUyarisi() {
-  return "Merhaba,\n\nÖdeme durumu hakkında bugüne kadar bilgi vermiş olmamıza rağmen henüz ödeme alınamamıştır.\n\n*Bu nedenle programı donduruyoruz.* Ayrılan gün ve saat başka bir öğrenciye aktarılacaktır.\n\nPrograma devam etmek istediğinizde uygunluk durumuna göre yeni bir slot belirleyebiliriz. İyi günler dileriz.";
+  return "Merhaba,\n\nÖdeme durumu hakkında bugüne kadar bilgi vermiş olmamıza rağmen henüz ödeme alınamamıştır.\n\n*Bu nedenle programı donduruyoruz.* Ayrılan gün ve saat başka bir öğrenciye aktarılacaktır.\n\nPrograma devam etmek istediğinizde uygünluk durumuna göre yeni bir slot belirleyebiliriz. İyi günler dileriz.";
 }
 function msgPaketOzeti(student) {
   const tamamlanan = student.schedule.filter(l => l.status !== "upcoming");
@@ -519,13 +519,13 @@ function msgPaketOzeti(student) {
     donem = fmtShort(sonPaket[0].date) + " - " + fmtShort(sonPaket[sonPaket.length-1].date);
     sonPaket.forEach(l => {
       const katildi = l.status === "completed";
-      dersler += (katildi ? "Katildi" : "Katilmadi") + " - " + fmtShort(l.date) + "\n";
+      dersler += (katildi ? "Katıldı" : "Katilmadi") + " - " + fmtShort(l.date) + "\n";
     });
   }
   const aktifTelafi = (student.telafi_records||[]).filter(r => !r.done);
   const yapilanTelafi = (student.telafi_records||[]).filter(r => r.done);
   let msg = "Sonsuz Sanat - Ders Ozeti\n\n";
-  msg += "Ogrenci: "+student.name+"\n";
+  msg += "Öğrenci: "+student.name+"\n";
   msg += "Donem: "+donem+"\n\n";
   msg += "Dersler:\n"+dersler;
   if (aktifTelafi.length > 0) {
@@ -533,26 +533,26 @@ function msgPaketOzeti(student) {
     aktifTelafi.forEach(r => { msg += "- "+fmtShort(r.lessonDate)+" dersi\n"; });
   }
   if (yapilanTelafi.length > 0) {
-    msg += "\nYapilan Telafiler:\n";
+    msg += "\nYapılan Telafiler:\n";
     yapilanTelafi.forEach(r => { msg += "- "+fmtShort(r.lessonDate)+" dersi - "+(r.doneAt||"yapildi")+"\n"; });
   }
   const upcoming = student.schedule.filter(l => l.status === "upcoming");
   if (upcoming.length > 0) {
     msg += "\nYeni donem: "+fmtMed(upcoming[0].date)+"\n";
-    msg += "Odeme: "+fmtMed(upcoming[0].date);
+    msg += "Ödeme: "+fmtMed(upcoming[0].date);
   }
   return msg;
 }
 
 function MesajSheet({ student, onClose }) {
   const msgs = [
-    { key:"ders", label:"Ders Hatirlatma", text:msgDersHatirlatma(student) },
-    { key:"ilkders", label:"Ilk Ders - Odeme Gunu", text:msgIlkDersOdeme() },
-    { key:"ozet", label:"Paket Sonu Ozeti", text:msgPaketOzeti(student) },
-    { key:"odeme1", label:"Odeme Hatirlatma (1.)", text:msgOdemeHatirlatma() },
-    { key:"odeme2", label:"Odeme Hatirlatma (2.)", text:msgOdemeHatirlatma2() },
-    { key:"odeme3", label:"Odeme Hatirlatma (3.)", text:msgOdemeHatirlatma3() },
-    { key:"dondur", label:"Dondurma Uyarisi", text:msgDondurmaUyarisi() },
+    { key:"ders", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
+    { key:"ilkders", label:"İlk Ders - Ödeme Günu", text:msgIlkDersÖdeme() },
+    { key:"ozet", label:"Paket Sonu Özeti", text:msgPaketOzeti(student) },
+    { key:"odeme1", label:"Ödeme Hatırlatma (1.)", text:msgÖdemeHatirlatma() },
+    { key:"odeme2", label:"Ödeme Hatırlatma (2.)", text:msgÖdemeHatirlatma2() },
+    { key:"odeme3", label:"Ödeme Hatırlatma (3.)", text:msgÖdemeHatirlatma3() },
+    { key:"dondur", label:"Dondurma Uyarısı", text:msgDondurmaUyarisi() },
   ];
   const send = (text) => {
     const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
@@ -561,7 +561,7 @@ function MesajSheet({ student, onClose }) {
     else navigator.clipboard.writeText(text);
   };
   return (
-    <Sheet title="Mesaj Sablonlari" subtitle={student.name} onClose={onClose}>
+    <Sheet title="Mesaj Şablonları" subtitle={student.name} onClose={onClose}>
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {msgs.map(m => (
           <div key={m.key} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, overflow:"hidden" }}>
@@ -579,20 +579,20 @@ function MesajSheet({ student, onClose }) {
   );
 }
 
-function OdemeSheet({ student, onClose, onOdemeAl, onMesajGonder }) {
-  const [odemeDate, setOdemeDate] = useState(new Date().toISOString().split("T")[0]);
+function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
+  const [odemeDate, setÖdemeDate] = useState(new Date().toISOString().split("T")[0]);
   const ekDersler = student.ek_dersler || [];
   return (
-    <Sheet title="Paket Yukle" subtitle={student.name} onClose={onClose}>
+    <Sheet title="Paket Yükle" subtitle={student.name} onClose={onClose}>
       <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
         <p style={{ margin:0, fontSize:13, color:"#166534" }}>4 yeni ders eklenecek.</p>
         {ekDersler.length > 0 ? <p style={{ margin:"6px 0 0", fontSize:13, color:"#5b21b6", fontWeight:700 }}>{ekDersler.length} ek ders var.</p> : null}
       </div>
-      <label style={LBL}>Odeme Tarihi</label>
-      <input style={{ ...INP, marginBottom:12 }} type="date" value={odemeDate} onChange={e=>setOdemeDate(e.target.value)} />
-      <Btn bg="#10b981" onClick={() => { onOdemeAl(student.id, odemeDate); onClose(); }}>Odeme Alindi - Paketi Yukle</Btn>
-      <Btn bg="#f97316" onClick={() => { onMesajGonder(student); onClose(); }}>Odeme Hatirlatmasi Gonder</Btn>
-      <Btn bg="#6b7280" onClick={onClose} outline>Iptal</Btn>
+      <label style={LBL}>Ödeme Tarihi</label>
+      <input style={{ ...INP, marginBottom:12 }} type="date" value={odemeDate} onChange={e=>setÖdemeDate(e.target.value)} />
+      <Btn bg="#10b981" onClick={() => { onÖdemeAl(student.id, odemeDate); onClose(); }}>Ödeme Alındı - Paketi Yukle</Btn>
+      <Btn bg="#f97316" onClick={() => { onMesajGonder(student); onClose(); }}>Ödeme Hatırlatmasi Gonder</Btn>
+      <Btn bg="#6b7280" onClick={onClose} outline>İptal</Btn>
     </Sheet>
   );
 }
@@ -621,7 +621,7 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
         <button onClick={()=>setOffset(o=>o-1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>‹</button>
         <div style={{ textAlign:"center" }}>
           <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#111" }}>{label}</p>
-          {offset!==0 ? <button onClick={()=>setOffset(0)} style={{ background:"none", border:"none", fontSize:11, color:"#3b82f6", fontWeight:600, cursor:"pointer", padding:0, marginTop:2 }}>Bugune don</button> : null}
+          {offset!==0 ? <button onClick={()=>setOffset(0)} style={{ background:"none", border:"none", fontSize:11, color:"#3b82f6", fontWeight:600, cursor:"pointer", padding:0, marginTop:2 }}>Bugüne dön</button> : null}
         </div>
         <button onClick={()=>setOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
       </div>
@@ -659,7 +659,7 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
   );
 }
 
-function BugunDersleri({ students, onWA }) {
+function BugünDersleri({ students, onWA }) {
   const todayLessons = [];
   students.forEach(s => {
     s.schedule.forEach(l => {
@@ -686,15 +686,15 @@ function BugunDersleri({ students, onWA }) {
   );
 }
 
-function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
+function BugünÖdemeleri({ students, onÖdemeAl, onMesaj }) {
   const todayMid = midday();
-  const [odemeModal, setOdemeModal] = useState(null);
-  const [odemeDate, setOdemeDate] = useState(new Date().toISOString().split("T")[0]);
+  const [odemeModal, setÖdemeModal] = useState(null);
+  const [odemeDate, setÖdemeDate] = useState(new Date().toISOString().split("T")[0]);
 
-  const bugunOdeme = students.filter(s => {
+  const bugünÖdeme = students.filter(s => {
     if (s.frozen) return false;
-    const bugunDers = s.schedule.find(l => l.status === "upcoming" && isToday(l.date));
-    if (!bugunDers) return false;
+    const bugünDers = s.schedule.find(l => l.status === "upcoming" && isToday(l.date));
+    if (!bugünDers) return false;
     const tamamlanan = s.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
     if (tamamlanan.length % 4 !== 0) return false;
     return !(s.odemeler||[]).some(o => o.tarih === new Date().toISOString().split("T")[0]);
@@ -713,15 +713,15 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
     return !(s.odemeler||[]).some(o => midday(new Date(o.tarih)) >= ilkDersTarih);
   });
 
-  if (bugunOdeme.length === 0 && gecikenler.length === 0) return null;
+  if (bugünÖdeme.length === 0 && gecikenler.length === 0) return null;
 
   return (
     <>
     <div style={{ marginBottom:14 }}>
-      {bugunOdeme.length > 0 ? (
+      {bugünÖdeme.length > 0 ? (
         <div style={{ background:"#fff7ed", border:"1.5px solid #fb923c", borderRadius:14, padding:"12px 16px", marginBottom:10 }}>
-          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#c2410c" }}>Bugün Ödemesi Gelenler ({bugunOdeme.length})</p>
-          {bugunOdeme.map(s => (
+          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#c2410c" }}>Bugün Ödemesi Gelenler ({bugünÖdeme.length})</p>
+          {bugünÖdeme.map(s => (
             <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fed7aa" }}>
               <div>
                 <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
@@ -729,7 +729,7 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
               </div>
               <div style={{ display:"flex", gap:6 }}>
                 <button onClick={() => onMesaj(s)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>WA</button>
-                <button onClick={() => { setOdemeDate(new Date().toISOString().split("T")[0]); setOdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Yapildi</button>
+                <button onClick={() => { setÖdemeDate(new Date().toISOString().split("T")[0]); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
               </div>
             </div>
           ))}
@@ -737,7 +737,7 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
       ) : null}
       {gecikenler.length > 0 ? (
         <div style={{ background:"#fff1f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 16px" }}>
-          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#be123c" }}>Geciken Odemeler ({gecikenler.length})</p>
+          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#be123c" }}>Geciken Ödemeler ({gecikenler.length})</p>
           {gecikenler.map(s => {
             const tamamlananS = s.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
             const paketIlkDersS = tamamlananS[tamamlananS.length - 4];
@@ -749,10 +749,10 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
                   <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}><strong>{geciken} gün</strong> gecikti</p>
                 </div>
                 <div style={{ display:"flex", gap:4, flexWrap:"wrap", justifyContent:"flex-end" }}>
-                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgOdemeHatirlatma()),"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA1</button>
-                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgOdemeHatirlatma2()),"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA2</button>
-                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgOdemeHatirlatma3()),"_blank"); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA3</button>
-                  <button onClick={() => { setOdemeDate(new Date().toISOString().split("T")[0]); setOdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Yapildi</button>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma()),"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 1</button>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma2()),"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 2</button>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma3()),"_blank"); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 3</button>
+                  <button onClick={() => { setÖdemeDate(new Date().toISOString().split("T")[0]); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
                 </div>
               </div>
             );
@@ -761,12 +761,12 @@ function BugunOdemeleri({ students, onOdemeAl, onMesaj }) {
       ) : null}
     </div>
     {odemeModal ? (
-      <Sheet title="Odeme Alindi" subtitle={odemeModal.name} onClose={() => setOdemeModal(null)}>
-        <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Odeme tarihi:</p>
-        <input style={INP} type="date" value={odemeDate} onChange={e=>setOdemeDate(e.target.value)} />
+      <Sheet title="Ödeme Alındı" subtitle={odemeModal.name} onClose={() => setÖdemeModal(null)}>
+        <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ödeme tarihi:</p>
+        <input style={INP} type="date" value={odemeDate} onChange={e=>setÖdemeDate(e.target.value)} />
         <div style={{ marginTop:16 }}>
-          <Btn bg="#10b981" onClick={() => { onOdemeAl(odemeModal.id, odemeDate); setOdemeModal(null); }}>Kaydet</Btn>
-          <Btn bg="#111" outline onClick={() => setOdemeModal(null)}>Iptal</Btn>
+          <Btn bg="#10b981" onClick={() => { onÖdemeAl(odemeModal.id, odemeDate); setÖdemeModal(null); }}>Kaydet</Btn>
+          <Btn bg="#111" outline onClick={() => setÖdemeModal(null)}>İptal</Btn>
         </div>
       </Sheet>
     ) : null}
@@ -779,7 +779,7 @@ function GelirRaporu({ students }) {
   const simdi = new Date();
   const hedefAy = new Date(simdi.getFullYear(), simdi.getMonth() + ayOffset, 1);
   const ayAdi = hedefAy.toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
-  const ayOdemeleri = [];
+  const ayÖdemeleri = [];
   students.forEach(s => {
     (s.odemeler || []).forEach(o => {
       const oTarih = new Date(o.tarih);
@@ -787,27 +787,27 @@ function GelirRaporu({ students }) {
         const gercekTutar = typeof o.tutar === "number" ? o.tutar : (s.ucret || 0);
         const gercekPaket = o.paketUcret || (typeof o.tutar !== "number" ? (s.ucret || 0) : 0);
         const gercekEk = o.ekTutar || 0;
-        ayOdemeleri.push({ ...o, tutar: gercekTutar, paketUcret: gercekPaket, ekTutar: gercekEk, ogrenci: s.name });
+        ayÖdemeleri.push({ ...o, tutar: gercekTutar, paketUcret: gercekPaket, ekTutar: gercekEk, ogrenci: s.name });
       }
     });
   });
-  const toplamGelir = ayOdemeleri.reduce((sum, o) => sum + o.tutar, 0);
-  const paketGeliri = ayOdemeleri.reduce((sum, o) => sum + (o.paketUcret || 0), 0);
-  const ekGeliri = ayOdemeleri.reduce((sum, o) => sum + (o.ekTutar || 0), 0);
+  const toplamGelir = ayÖdemeleri.reduce((sum, o) => sum + o.tutar, 0);
+  const paketGeliri = ayÖdemeleri.reduce((sum, o) => sum + (o.paketUcret || 0), 0);
+  const ekGeliri = ayÖdemeleri.reduce((sum, o) => sum + (o.ekTutar || 0), 0);
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
         <button onClick={()=>setAyOffset(o=>o-1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>‹</button>
         <div style={{ textAlign:"center" }}>
           <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111", textTransform:"capitalize" }}>{ayAdi}</p>
-          {ayOffset!==0 ? <button onClick={()=>setAyOffset(0)} style={{ background:"none", border:"none", fontSize:11, color:"#3b82f6", fontWeight:600, cursor:"pointer", padding:0, marginTop:2 }}>Bu aya don</button> : null}
+          {ayOffset!==0 ? <button onClick={()=>setAyOffset(0)} style={{ background:"none", border:"none", fontSize:11, color:"#3b82f6", fontWeight:600, cursor:"pointer", padding:0, marginTop:2 }}>Bu aya dön</button> : null}
         </div>
         <button onClick={()=>setAyOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
       </div>
       <div style={{ background:"linear-gradient(135deg, #059669, #10b981)", borderRadius:18, padding:"20px", marginBottom:14, color:"#fff" }}>
         <p style={{ margin:0, fontSize:12, opacity:0.85, fontWeight:600, letterSpacing:1, textTransform:"uppercase" }}>Toplam Tahsilat</p>
         <p style={{ margin:"6px 0 0", fontSize:34, fontWeight:800 }}>{toplamGelir.toLocaleString("tr-TR")} TL</p>
-        <p style={{ margin:"4px 0 0", fontSize:13, opacity:0.85 }}>{ayOdemeleri.length} odeme alindi</p>
+        <p style={{ margin:"4px 0 0", fontSize:13, opacity:0.85 }}>{ayÖdemeleri.length} ödeme alındı</p>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
         <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
@@ -820,11 +820,11 @@ function GelirRaporu({ students }) {
         </div>
       </div>
       <div style={{ background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
-        <p style={{ margin:"0 0 12px", fontSize:13, fontWeight:700, color:"#111" }}>Bu Ayki Odemeler</p>
-        {ayOdemeleri.length === 0
-          ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay odeme yok</p>
-          : [...ayOdemeleri].reverse().map((o, i) => (
-              <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom: i < ayOdemeleri.length-1 ? "1px solid #f0f0f0" : "none" }}>
+        <p style={{ margin:"0 0 12px", fontSize:13, fontWeight:700, color:"#111" }}>Bu Ayki Ödemeler</p>
+        {ayÖdemeleri.length === 0
+          ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay ödeme yok</p>
+          : [...ayÖdemeleri].reverse().map((o, i) => (
+              <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom: i < ayÖdemeleri.length-1 ? "1px solid #f0f0f0" : "none" }}>
                 <div>
                   <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111" }}>{o.ogrenci}</p>
                   <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{fmtMed(o.tarih)}{o.ekDersSayisi > 0 ? " +" + o.ekDersSayisi + " ek ders" : ""}</p>
@@ -845,13 +845,13 @@ export default function App() {
   const [detailSt, setDetailSt] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState("all");
-  const [mainTab, setMainTab] = useState("bugun");
+  const [mainTab, setMainTab] = useState("bugün");
   const [weekOffset, setWeekOffset] = useState(0);
   const [toast, setToast] = useState(null);
   const [mesajSt, setMesajSt] = useState(null);
-  const [odemeSt, setOdemeSt] = useState(null);
-  const [odemeKaydetModal, setOdemeKaydetModal] = useState(null);
-  const [odemeKaydetDate, setOdemeKaydetDate] = useState(new Date().toISOString().split("T")[0]);
+  const [odemeSt, setÖdemeSt] = useState(null);
+  const [odemeKaydetModal, setÖdemeKaydetModal] = useState(null);
+  const [odemeKaydetDate, setÖdemeKaydetDate] = useState(new Date().toISOString().split("T")[0]);
   const [search, setSearch] = useState("");
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
@@ -882,7 +882,7 @@ export default function App() {
       schedule: student.schedule || [],
       ek_dersler: student.ek_dersler || [],
     });
-    if (error) console.error("Kayit hatasi:", error);
+    if (error) console.error("Kayıt hatası:", error);
   };
 
   const updLesson = (schedule, lid, status, note="") => {
@@ -902,13 +902,13 @@ export default function App() {
     const updated = students.map(s => {
       if (s.id !== sid) return s;
       switch(action) {
-        case "attended": msg = "Katilim kaydedildi"; return {...s, schedule: updLesson(s.schedule, lid, "completed")};
+        case "attended": msg = "Katılım kaydedildi"; return {...s, schedule: updLesson(s.schedule, lid, "completed")};
         case "telafi": {
           const rec = mkTelafi(s, lid, note||"24 saat oncesi iptal");
           const recs = [...s.telafi_records, rec];
           const ac = recs.filter(r=>!r.done).length;
           const frozen = ac>=6 ? true : s.frozen;
-          msg = ac>=6 ? "6. telafi - program donduruldu" : ac===5 ? "5. telafi uyarisi" : "Telafi olusturuldu";
+          msg = ac>=6 ? "6. telafi - program donduruldu" : ac===5 ? "5. telafi uyarisi" : "Telafi oluşturuldu";
           return {...s, frozen, telafi_records:recs, schedule: updLesson(s.schedule, lid, "telafi", note)};
         }
         case "lm-telafi": {
@@ -921,7 +921,7 @@ export default function App() {
         }
         case "lm-notelafi": msg = "Son dakika iptali"; return {...s, schedule: updLesson(s.schedule, lid, "lastminute", note||"Son dakika iptali")};
         case "noshow": msg = "No-show kaydedildi"; return {...s, no_show:s.no_show+1, schedule: updLesson(s.schedule, lid, "noshow", note||"Habersiz gelmedi")};
-        case "freeze": msg = s.frozen ? "Program aktif" : "Program donduruldu"; return {...s, frozen:!s.frozen};
+        case "freeze": msg = s.frozen ? "Program aktif edildi" : "Program donduruldu"; return {...s, frozen:!s.frozen};
         default: return s;
       }
     });
@@ -937,7 +937,7 @@ export default function App() {
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
-    pop("Telafi yapildi");
+    pop("Telafi yapıldı");
   };
 
   const handleShift = async (sid, fromLid, days) => {
@@ -949,13 +949,13 @@ export default function App() {
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
-    pop((days/7)+" hafta ileri alindi");
+    pop((days/7)+" hafta ileri alındı");
   };
 
   const handleDelete = async (sid) => {
     await supabase.from("students").delete().eq("id", sid);
     setStudents(p => p.filter(s => s.id !== sid));
-    pop("Ogrenci silindi");
+    pop("Öğrenci silindi");
   };
 
   const handleRecharge = async (sid, odemeDate) => {
@@ -968,7 +968,7 @@ export default function App() {
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
-    pop("4 ders yuklendi");
+    pop("4 ders yüklendi");
   };
 
   const handleAdd = async (f) => {
@@ -981,10 +981,10 @@ export default function App() {
     };
     setStudents(p=>[...p, newStudent]);
     await saveStudent(newStudent);
-    pop("Ogrenci eklendi");
+    pop("Öğrenci eklendi");
   };
 
-  const handleOdemeKaydet = async (sid, tarih) => {
+  const handleÖdemeKaydet = async (sid, tarih) => {
     const odemeDate = tarih||new Date().toISOString().split("T")[0];
     const updated = students.map(s => {
       if (s.id!==sid) return s;
@@ -1002,7 +1002,7 @@ export default function App() {
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
-    pop("Odeme kaydedildi");
+    pop("Ödeme kaydedildi");
   };
 
   const handleDuzenle = async (sid, f) => {
@@ -1011,7 +1011,7 @@ export default function App() {
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
-    pop("Bilgiler guncellendi");
+    pop("Bilgiler güncellendi");
   };
 
   const handleEkDersEkle = async (sid, ders) => {
@@ -1025,10 +1025,10 @@ export default function App() {
     const text = msgDersHatirlatma(student);
     const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
-    else { navigator.clipboard.writeText(text); pop("Mesaj kopyalandi"); }
+    else { navigator.clipboard.writeText(text); pop("Mesaj kopyalandı"); }
   };
 
-  const isOdemeBekleyen = (s) => {
+  const isÖdemeBekleyen = (s) => {
     if (s.frozen) return false;
     const tamamlanan = s.schedule.filter(l => l.status === "completed" || l.status === "noshow" || l.status === "lastminute");
     if (tamamlanan.length === 0) return false;
@@ -1039,19 +1039,19 @@ export default function App() {
     if (paketBasTarih > midday()) return false;
     const odemeler = s.odemeler || [];
     if (odemeler.length > 0) {
-      const sonOdemeTarih = midday(new Date(odemeler[odemeler.length-1].tarih));
-      if (sonOdemeTarih >= paketBasTarih) return false;
+      const sonÖdemeTarih = midday(new Date(odemeler[odemeler.length-1].tarih));
+      if (sonÖdemeTarih >= paketBasTarih) return false;
     }
     return true;
   };
 
-  const todayPayments = students.filter(isOdemeBekleyen);
+  const todayPayments = students.filter(isÖdemeBekleyen);
   const filtered = students.filter(s => {
     if (search.trim() && !s.name.toLowerCase().includes(search.toLowerCase().trim())) return false;
     if (filter==="active") return !s.frozen;
     if (filter==="frozen") return s.frozen;
     if (filter==="telafi") return s.telafi_records.some(r=>!r.done);
-    if (filter==="odeme") return isOdemeBekleyen(s);
+    if (filter==="odeme") return isÖdemeBekleyen(s);
     return true;
   });
 
@@ -1063,7 +1063,7 @@ export default function App() {
       <div style={{ fontFamily:"sans-serif", background:"#f4f4f0", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
         <div style={{ textAlign:"center" }}>
           <p style={{ fontSize:32 }}>🎵</p>
-          <p style={{ fontWeight:700, color:"#666" }}>Yukleniyor...</p>
+          <p style={{ fontWeight:700, color:"#666" }}>Yükleniyor...</p>
         </div>
       </div>
     );
@@ -1075,12 +1075,12 @@ export default function App() {
         <div style={{ maxWidth:600, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", paddingBottom:12 }}>
           <div>
             <p style={{ fontSize:10, letterSpacing:3, color:"#666", textTransform:"uppercase", margin:0 }}>Sonsuz Sanat</p>
-            <h1 style={{ fontSize:20, fontWeight:800, margin:"2px 0 0", letterSpacing:-0.5 }}>Ogrenci Yonetimi</h1>
+            <h1 style={{ fontSize:20, fontWeight:800, margin:"2px 0 0", letterSpacing:-0.5 }}>Öğrenci Yönetimi</h1>
           </div>
           <button onClick={()=>setShowAdd(true)} style={{ background:"#fff", color:"#111", border:"none", borderRadius:12, padding:"9px 18px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>+ Ekle</button>
         </div>
         <div style={{ maxWidth:600, margin:"0 auto", display:"flex", gap:4 }}>
-          {[{key:"bugun",label:"Bugün"},{key:"liste",label:"Liste"},{key:"takvim",label:"Takvim"},{key:"gelir",label:"Gelir"}].map(t=>(
+          {[{key:"bugün",label:"Bugün"},{key:"liste",label:"Liste"},{key:"takvim",label:"Takvim"},{key:"gelir",label:"Gelir"}].map(t=>(
             <button key={t.key} onClick={()=>setMainTab(t.key)} style={{ flex:1, background:mainTab===t.key?"#fff":"transparent", color:mainTab===t.key?"#111":"#888", border:"none", borderRadius:"10px 10px 0 0", padding:"10px 0", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
               {t.label}
             </button>
@@ -1089,49 +1089,49 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth:600, margin:"0 auto", padding:"14px 14px 80px" }}>
-        {mainTab === "bugun" ? (
+        {mainTab === "bugün" ? (
           <div>
             {(() => {
-              const bugun = new Date();
-              const bugunMD = (bugun.getMonth()+1)+"-"+bugun.getDate();
-              const dogumGunleri = students.filter(s => {
+              const bugün = new Date();
+              const bugünMD = (bugün.getMonth()+1)+"-"+bugün.getDate();
+              const dogumGünleri = students.filter(s => {
                 if (!s.dogum_tarihi) return false;
                 const d = new Date(s.dogum_tarihi);
-                return (d.getMonth()+1)+"-"+d.getDate() === bugunMD;
+                return (d.getMonth()+1)+"-"+d.getDate() === bugünMD;
               });
-              if (dogumGunleri.length === 0) return null;
+              if (dogumGünleri.length === 0) return null;
               return (
                 <div style={{ background:"#fdf4ff", border:"1.5px solid #e879f9", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-                  <p style={{ margin:"0 0 8px", fontWeight:700, fontSize:13, color:"#86198f" }}>Bugun Dogum Gunu</p>
-                  {dogumGunleri.map(s => {
-                    const yas = new Date().getFullYear() - new Date(s.dogum_tarihi).getFullYear();
+                  <p style={{ margin:"0 0 8px", fontWeight:700, fontSize:13, color:"#86198f" }}>Bugün Doğum Günü</p>
+                  {dogumGünleri.map(s => {
+                    const yaş = new Date().getFullYear() - new Date(s.dogum_tarihi).getFullYear();
                     return (
                       <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0" }}>
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                        <span style={{ fontSize:13, color:"#86198f", fontWeight:600 }}>{yas} yas</span>
+                        <span style={{ fontSize:13, color:"#86198f", fontWeight:600 }}>{yaş} yaş</span>
                       </div>
                     );
                   })}
                 </div>
               );
             })()}
-            <BugunDersleri students={students} onWA={handleWADers} />
+            <BugünDersleri students={students} onWA={handleWADers} />
             {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <div style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-                <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#7e22ce" }}>Paketi Biten Ogrenciler</p>
+                <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#7e22ce" }}>Paketi Biten Öğrenciler</p>
                 {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => (
                   <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
                     <div>
                       <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                      <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Paket tamamlandi</p>
+                      <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Paket tamamlandı</p>
                     </div>
                     <button onClick={() => setMesajSt(s)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Özet</button>
                   </div>
                 ))}
               </div>
             ) : null}
-            <BugunOdemeleri students={students} onOdemeAl={handleOdemeKaydet} onMesaj={(s)=>setMesajSt(s)} />
-            {students.filter(s=>{ const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isOdemeBekleyen(s)) ? (
+            <BugünÖdemeleri students={students} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} />
+            {students.filter(s=>{ const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isÖdemeBekleyen(s)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -1156,16 +1156,16 @@ export default function App() {
                 { label:"Toplam", val:stats.total, bg:"#fff", color:"#111" },
                 { label:"Aktif", val:stats.active, bg:"#ecfdf5", color:"#059669" },
                 { label:"Donuk", val:stats.frozen, bg:"#eff6ff", color:"#3b82f6" },
-                { label:"Odeme", val:stats.odeme, bg:stats.odeme>0?"#fff7ed":"#f9fafb", color:stats.odeme>0?"#ea580c":"#999" },
+                { label:"Ödeme", val:stats.odeme, bg:stats.odeme>0?"#fff7ed":"#f9fafb", color:stats.odeme>0?"#ea580c":"#999" },
               ].map(s=>(
-                <div key={s.label} onClick={()=>s.label==="Odeme"&&setFilter("odeme")} style={{ background:s.bg, borderRadius:12, padding:"12px 6px", textAlign:"center", boxShadow:"0 1px 3px rgba(0,0,0,.05)", cursor:s.label==="Odeme"?"pointer":"default" }}>
+                <div key={s.label} onClick={()=>s.label==="Ödeme"&&setFilter("odeme")} style={{ background:s.bg, borderRadius:12, padding:"12px 6px", textAlign:"center", boxShadow:"0 1px 3px rgba(0,0,0,.05)", cursor:s.label==="Ödeme"?"pointer":"default" }}>
                   <p style={{ fontSize:22, fontWeight:800, color:s.color, margin:0 }}>{s.val}</p>
                   <p style={{ fontSize:10, color:"#999", margin:"2px 0 0", fontWeight:600 }}>{s.label}</p>
                 </div>
               ))}
             </div>
             <div style={{ marginBottom:12 }}>
-              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Ogrenci ara..." style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:12, padding:"11px 14px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#111" }} />
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Öğrenci ara..." style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:12, padding:"11px 14px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#111" }} />
             </div>
             <div style={{ display:"flex", gap:6, marginBottom:14, overflowX:"auto", paddingBottom:2 }}>
               {[{key:"all",label:"Tümü"},{key:"active",label:"Aktif"},{key:"frozen",label:"Dondurulmuş"},{key:"telafi",label:"Telafi"},{key:"odeme",label:"Ödeme"}].map(f=>(
@@ -1179,7 +1179,7 @@ export default function App() {
                 const ac = s.telafi_records.filter(r=>!r.done).length;
                 const warn = ac===5 && !s.frozen;
                 const nextL = s.schedule.find(l=>l.status==="upcoming");
-                const payDue = isOdemeBekleyen(s);
+                const payDue = isÖdemeBekleyen(s);
                 const ekCount = (s.ek_dersler||[]).length;
                 return (
                   <div key={s.id} style={{ background:s.frozen?"#f0f9ff":"#fff", borderRadius:16, padding:"14px 16px", boxShadow:"0 1px 4px rgba(0,0,0,.07)", border:warn?"1.5px solid #fcd34d":payDue?"1.5px solid #fb923c":s.frozen?"1.5px solid #bfdbfe":"1.5px solid transparent" }}>
@@ -1189,7 +1189,7 @@ export default function App() {
                           <p style={{ fontWeight:700, fontSize:15, margin:0, color:"#111" }}>{s.name}</p>
                           {s.frozen ? <Pill label="Donuk" bg="#dbeafe" color="#1d4ed8" /> : null}
                           {warn ? <Pill label="5/6 Telafi" bg="#fef3c7" color="#92400e" /> : null}
-                          {payDue ? <Pill label="Odeme" bg="#ffedd5" color="#c2410c" /> : null}
+                          {payDue ? <Pill label="Ödeme" bg="#ffedd5" color="#c2410c" /> : null}
                           {ekCount>0 ? <Pill label={"+"+ekCount+" ek"} bg="#ede9fe" color="#5b21b6" /> : null}
                         </div>
                         <p style={{ fontSize:12, color:"#999", margin:"3px 0 2px", fontWeight:500 }}>
@@ -1201,13 +1201,13 @@ export default function App() {
                         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
                           <span style={{ fontSize:12, color:"#444" }}><strong>{bal}</strong> ders kaldi</span>
                           {np ? <span style={{ fontSize:12, color:"#6b7280" }}><strong>{fmtShort(np)}</strong> odeme</span> : null}
-                          {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming" && l.status!=="telafi").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{done}/{total}</strong> <strong>{pct}%</strong> devam</span>; })()}
+                          {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{done}/{total}</strong> <strong>{pct}%</strong> devam</span>; })()}
                         </div>
                         {ac>0 ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>4?"#d97706":"#2563eb" }}><strong>{ac}/6</strong> aktif telafi</span></div> : null}
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
                       <button onClick={()=>setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", marginLeft:10, flexShrink:0, fontFamily:"inherit" }}>İşlem</button>
-                      {payDue ? <button onClick={()=>setOdemeKaydetModal(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:700, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💳</button> : null}
+                      {payDue ? <button onClick={()=>setÖdemeKaydetModal(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:700, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💳</button> : null}
                       <button onClick={()=>setMesajSt(s)} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💬</button>
                     </div>
                   </div>
@@ -1216,7 +1216,7 @@ export default function App() {
               {filtered.length===0 ? (
                 <div style={{ textAlign:"center", padding:"48px 20px", color:"#bbb" }}>
                   <p style={{ fontSize:36 }}>🎵</p>
-                  <p style={{ fontWeight:600, color:"#aaa" }}>{students.length===0 ? "Henuz ogrenci yok" : "Bu filtrede ogrenci yok"}</p>
+                  <p style={{ fontWeight:600, color:"#aaa" }}>{students.length===0 ? "Henüz öğrenci yok" : "Bu filtrede öğrenci yok"}</p>
                 </div>
               ) : null}
             </div>
@@ -1225,18 +1225,18 @@ export default function App() {
       </div>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onOdeme={(st)=>setOdemeSt(st)} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onDuzenle={handleDuzenle} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdeme={(st)=>setÖdemeSt(st)} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onDuzenle={handleDuzenle} /> : null}
       {showAdd ? <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} onClose={()=>setMesajSt(null)} /> : null}
-      {odemeSt ? <OdemeSheet student={odemeSt} onClose={()=>setOdemeSt(null)} onOdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
+      {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
 
       {odemeKaydetModal ? (
-        <Sheet title="Odeme Alindi" subtitle={odemeKaydetModal.name} onClose={() => setOdemeKaydetModal(null)}>
-          <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Odeme tarihi:</p>
-          <input style={INP} type="date" value={odemeKaydetDate} onChange={e=>setOdemeKaydetDate(e.target.value)} />
+        <Sheet title="Ödeme Alındı" subtitle={odemeKaydetModal.name} onClose={() => setÖdemeKaydetModal(null)}>
+          <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ödeme tarihi:</p>
+          <input style={INP} type="date" value={odemeKaydetDate} onChange={e=>setÖdemeKaydetDate(e.target.value)} />
           <div style={{ marginTop:16 }}>
-            <Btn bg="#10b981" onClick={() => { handleOdemeKaydet(odemeKaydetModal.id, odemeKaydetDate); setOdemeKaydetModal(null); }}>Kaydet</Btn>
-            <Btn bg="#111" outline onClick={() => setOdemeKaydetModal(null)}>Iptal</Btn>
+            <Btn bg="#10b981" onClick={() => { handleÖdemeKaydet(odemeKaydetModal.id, odemeKaydetDate); setÖdemeKaydetModal(null); }}>Kaydet</Btn>
+            <Btn bg="#111" outline onClick={() => setÖdemeKaydetModal(null)}>İptal</Btn>
           </div>
         </Sheet>
       ) : null}
