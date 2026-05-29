@@ -508,7 +508,7 @@ function msgÖdemeHatirlatma3() {
   return "Merhaba, ders ödemesi geciktiği için programınızı askıya almak durumunda kalabiliriz. Lütfen en kısa sürede ödemenizi yapınız.";
 }
 function msgDondurmaUyarisi() {
-  return "Merhaba,\n\nÖdeme durumu hakkında bugüne kadar bilgi vermiş olmamıza rağmen henüz ödeme alınamamıştır.\n\n*Bu nedenle programı donduruyoruz.* Ayrılan gün ve saat başka bir öğrenciye aktarılacaktır.\n\nPrograma devam etmek istediğinizde uygünluk durumuna göre yeni bir slot belirleyebiliriz. İyi günler dileriz.";
+  return "Merhaba,\n\nÖdeme konusunda daha önce tarafınıza bilgilendirme yapılmış olmasına rağmen ödemeniz henüz tarafımıza ulaşmamıştır.\n\nEğitim programlarımız sabit gün ve saat planlamasıyla yürütüldüğü için, düzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır.\n\nBu nedenle programınızı bugün itibarıyla donduruyoruz. Ayrılan gün ve saat, bekleme listesindeki diğer öğrencilerin kullanımına açılacaktır.\n\nİlerleyen dönemde programa devam etmek istemeniz halinde, o tarihteki uygun kontenjan durumuna göre yeni bir gün ve saat planlaması yapılabilir.\n\nAnlayışınız için teşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
 }
 function msgPaketOzeti(student) {
   const tamamlanan = student.schedule.filter(l => l.status !== "upcoming");
