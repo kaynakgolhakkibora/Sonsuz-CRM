@@ -862,7 +862,7 @@ export default function App() {
     setLoading(false);
   };
 
-  useEffect(() => { loadStudents(); }, []);
+  useEffect(() => { loadStudents(); document.title = "Sonsuz Sanat CRM"; }, []);
 
   const saveStudent = async (student) => {
     const { error } = await supabase.from("students").upsert({
