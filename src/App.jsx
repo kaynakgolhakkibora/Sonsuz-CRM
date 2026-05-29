@@ -499,13 +499,13 @@ function msgIlkDersÖdeme() {
   return "Sayın velimiz, yeni ders paketi bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür. İlginiz için teşekkür ederiz.";
 }
 function msgÖdemeHatirlatma() {
-  return "Merhaba, ders ödemesini henüz alamadık. Ödemenizi en kısa sürede yapmanızı rica ederiz. Teşekkürler.";
+  return "Merhaba,\nDers ödemesini henüz tarafımıza ulaşmış olarak göremiyoruz.\nÖdemenizi uygun olduğunuzda gerçekleştirmenizi rica ederiz. Herhangi bir sorunuz olması durumunda bizimle iletişime geçebilirsiniz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
 }
 function msgÖdemeHatirlatma2() {
-  return "Merhaba, ders ödemesi hâlâ beklenmektedir. Eğitime kesintisiz devam edebilmek için ödemenizi bu hafta içinde yapmanızı önemle rica ederiz.";
+  return "Merhaba,\nDers ödemesi hâlâ tarafımıza ulaşmamıştır.\nEğitim programının kesintisiz şekilde devam edebilmesi ve öğrencimizin gün/saat planlamasının korunabilmesi için ödemenizin bu hafta içerisinde tamamlanmasını rica ederiz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
 }
 function msgÖdemeHatirlatma3() {
-  return "Merhaba, ders ödemesi geciktiği için programınızı askıya almak durumunda kalabiliriz. Lütfen en kısa sürede ödemenizi yapınız.";
+  return "Merhaba,\n\nDers ödemesi hâlâ tarafımıza ulaşmamıştır.\n\nDüzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır. Bu nedenle ödemenin belirtilen süre içerisinde tamamlanmaması durumunda programınız dondurulacak, ayrılan gün ve saat bekleme listesindeki öğrenciler için kullanıma açılacaktır.\n\nLütfen ödemenizi en kısa sürede gerçekleştiriniz.\n\nTeşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
 }
 function msgDondurmaUyarisi() {
   return "Merhaba,\n\nÖdeme konusunda daha önce tarafınıza bilgilendirme yapılmış olmasına rağmen ödemeniz henüz tarafımıza ulaşmamıştır.\n\nEğitim programlarımız sabit gün ve saat planlamasıyla yürütüldüğü için, düzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır.\n\nBu nedenle programınızı bugün itibarıyla donduruyoruz. Ayrılan gün ve saat, bekleme listesindeki diğer öğrencilerin kullanımına açılacaktır.\n\nİlerleyen dönemde programa devam etmek istemeniz halinde, o tarihteki uygun kontenjan durumuna göre yeni bir gün ve saat planlaması yapılabilir.\n\nAnlayışınız için teşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
