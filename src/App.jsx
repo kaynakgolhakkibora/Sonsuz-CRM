@@ -839,6 +839,10 @@ function GelirRaporu({ students }) {
 }
 
 export default function App() {
+  const [giris, setGiris] = useState(() => sessionStorage.getItem("crm_auth") === "ok");
+  const [sifre, setSifre] = useState("");
+  const [sifreHata, setSifreHata] = useState(false);
+  const SIFRE = "sonsuz2024";
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionModal, setActionModal] = useState(null);
@@ -1057,6 +1061,41 @@ export default function App() {
 
   const stats = { total:students.length, active:students.filter(s=>!s.frozen).length, frozen:students.filter(s=>s.frozen).length, odeme:todayPayments.length };
   const telafiWarnList = students.filter(s => s.telafi_records.filter(r=>!r.done).length===5 && !s.frozen);
+
+  if (!giris) {
+    return (
+      <div style={{ fontFamily:"sans-serif", background:"#111", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ background:"#fff", borderRadius:20, padding:"40px 32px", width:"100%", maxWidth:360, boxShadow:"0 8px 40px rgba(0,0,0,.3)" }}>
+          <p style={{ fontSize:11, letterSpacing:3, color:"#999", textTransform:"uppercase", margin:"0 0 6px" }}>Sonsuz Sanat</p>
+          <h1 style={{ fontSize:22, fontWeight:800, margin:"0 0 28px", color:"#111" }}>Öğrenci Yönetimi</h1>
+          <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Şifre</label>
+          <input
+            type="password"
+            value={sifre}
+            onChange={e => { setSifre(e.target.value); setSifreHata(false); }}
+            onKeyDown={e => {
+              if (e.key === "Enter") {
+                if (sifre === SIFRE) { sessionStorage.setItem("crm_auth","ok"); setGiris(true); }
+                else setSifreHata(true);
+              }
+            }}
+            placeholder="Şifrenizi girin"
+            style={{ width:"100%", border:sifreHata?"1.5px solid #ef4444":"1.5px solid #e5e7eb", borderRadius:10, padding:"12px 14px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", marginBottom:sifreHata?6:16 }}
+          />
+          {sifreHata && <p style={{ color:"#ef4444", fontSize:12, fontWeight:600, marginBottom:12 }}>Şifre hatalı</p>}
+          <button
+            onClick={() => {
+              if (sifre === SIFRE) { sessionStorage.setItem("crm_auth","ok"); setGiris(true); }
+              else setSifreHata(true);
+            }}
+            style={{ width:"100%", background:"#111", color:"#fff", border:"none", borderRadius:12, padding:"13px", fontWeight:700, fontSize:15, cursor:"pointer", fontFamily:"inherit" }}
+          >
+            Giriş
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
