@@ -27,26 +27,20 @@ function buildSchedule(day, count, from) {
   return dates;
 }
 
-// Haftada 2 gün için: her hafta 2 ders ekler, count kadar ders üretir
 function buildSchedule2(day1, day2, count, from) {
   const dates = [];
-  // Her iki günün de ilk tarihini bul
   const d1 = nextWeekday(day1, from);
   const d2 = nextWeekday(day2, from);
-  // İki günü sıraya koy
   const slots = [new Date(d1), new Date(d2)].sort((a, b) => a - b);
   let slotIdx = 0;
   for (let i = 0; i < count; i++) {
     dates.push({ id: uid(), date: new Date(slots[slotIdx]).toISOString(), status: "upcoming", note: "" });
-    const prev = new Date(slots[slotIdx]);
-    slotIdx = 1 - slotIdx; // 0↔1 arasında geç
-    // Eğer slotIdx sıfırlandıysa (yani 1→0 geçtiyse) bir hafta ileri al her iki slotu da
+    slotIdx = 1 - slotIdx;
     if (slotIdx === 0) {
       slots[0].setDate(slots[0].getDate() + 7);
       slots[1].setDate(slots[1].getDate() + 7);
     }
   }
-  // Tarihe göre sırala
   dates.sort((a, b) => new Date(a.date) - new Date(b.date));
   return dates;
 }
@@ -65,11 +59,9 @@ function midday(d = new Date()) { const x = new Date(d); x.setHours(0,0,0,0); re
 function isToday(iso) { return midday(new Date(iso)).getTime() === midday().getTime(); }
 function paymentOverdueDays(iso) { if (!iso) return 0; const diff = Math.floor((midday() - midday(new Date(iso))) / 86400000); return diff > 0 ? diff : 0; }
 
-// Öğrencinin paket dönemlerini listeler (ödeme seçimi için)
 function getPaketDonemler(student) {
   const schedule = student.schedule || [];
   const donemler = [];
-  // Tüm dersleri 4'erli gruplara böl
   const chunks = [];
   for (let i = 0; i < schedule.length; i += 4) {
     chunks.push(schedule.slice(i, i + 4));
@@ -344,7 +336,6 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
   const done = student.telafi_records.filter(r=>r.done);
   const ekDersler = student.ek_dersler || [];
 
-  // Son paketi geri alma: sadece son 4 ders hepsi "upcoming" ise mümkün
   const upcomingDersler = student.schedule.filter(l => l.status === "upcoming");
   const canUnrecharge = upcomingDersler.length >= 4 && upcomingDersler.slice(-4).every(l => l.status === "upcoming");
 
@@ -675,7 +666,6 @@ function MesajSheet({ student, onClose }) {
   );
 }
 
-// Ödeme sheet: periyot seçimi eklendi
 function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
   const [odemeDate, setÖdemeDate] = useState(new Date().toISOString().split("T")[0]);
   const ekDersler = student.ek_dersler || [];
@@ -684,12 +674,9 @@ function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
   const ekToplam = odenmemisEk.length * ekDersBirimUcret;
   const paketUcret = student.ucret || 0;
   const toplam = paketUcret + ekToplam;
-
-  // Paket dönemlerini listele
   const donemler = getPaketDonemler(student);
   const upcomingDonem = donemler.filter(d => d.chunk.some(l => l.status === "upcoming"));
   const [secilenDonem, setSecilenDonem] = useState(upcomingDonem.length > 0 ? upcomingDonem[0].label : "");
-
   return (
     <Sheet title="Paket Yükle" subtitle={student.name} onClose={onClose}>
       <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
@@ -826,27 +813,20 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj }) {
 
   const gecikenler = students.filter(s => {
     if (s.frozen) return false;
-    const schedule = s.schedule || [];
-    // Tüm dersleri 4'erli paketlere böl
-    const tamamlanan = schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
+    const tamamlanan = s.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
     if (tamamlanan.length === 0) return false;
-    // Her tamamlanan 4'lü paket için ödeme var mı kontrol et
     const paketSayisi = Math.floor(tamamlanan.length / 4);
     if (paketSayisi === 0) return false;
-    // Son tamamlanan paketin ilk dersi
     const sonPaketIdx = (paketSayisi - 1) * 4;
     const sonPaketIlkDers = tamamlanan[sonPaketIdx];
     if (!sonPaketIlkDers) return false;
     const ilkDersTarih = midday(new Date(sonPaketIlkDers.date));
     if (ilkDersTarih >= todayMid) return false;
-    // Bu pakete ait ödeme var mı? (ödeme tarihi paketin ilk dersiyle eşleşiyor mu ya da donem etiketiyle)
     const sonPaketDersler = tamamlanan.slice(sonPaketIdx, sonPaketIdx + 4);
     const paketDonem = fmtShort(sonPaketDersler[0].date) + " - " + fmtShort(sonPaketDersler[sonPaketDersler.length-1].date);
     const odemeler = s.odemeler || [];
-    // Donem etiketiyle eşleşen ödeme var mı?
     const donemOdeme = odemeler.some(o => o.donem === paketDonem);
     if (donemOdeme) return false;
-    // Yoksa eski mantıkla: paketin ilk ders tarihinden sonra ödeme var mı?
     const tarihOdeme = odemeler.some(o => midday(new Date(o.tarih)) >= ilkDersTarih);
     return !tarihOdeme;
   });
@@ -892,7 +872,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj }) {
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma()),"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 1</button>
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma2()),"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 2</button>
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma3()),"_blank"); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 3</button>
-                  <button onClick={() => { setÖdemeDate(new Date().toISOString().split("T")[0]); const d=getPaketDonemler(s); const tS=s.schedule.filter(l=>l.status!=="upcoming"&&l.status!=="telafi"); const pS=Math.floor(tS.length/4); const son=tS.slice((pS-1)*4,(pS-1)*4+4); setSecilenDonem(son.length>0?fmtShort(son[0].date)+" - "+fmtShort(son[son.length-1].date):""); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
+                  <button onClick={() => { setÖdemeDate(new Date().toISOString().split("T")[0]); const tS=s.schedule.filter(l=>l.status!=="upcoming"&&l.status!=="telafi"); const pS=Math.floor(tS.length/4); const son=tS.slice((pS-1)*4,(pS-1)*4+4); setSecilenDonem(son.length>0?fmtShort(son[0].date)+" - "+fmtShort(son[son.length-1].date):""); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
                 </div>
               </div>
             );
@@ -1087,12 +1067,10 @@ export default function App() {
     setActionModal(null);
   };
 
-  // Ders durumunu geri al (upcoming'e döndür)
   const handleUndoLesson = async (sid, lid, prevStatus) => {
     const updated = students.map(s => {
       if (s.id !== sid) return s;
       const newSchedule = s.schedule.map(l => l.id === lid ? {...l, status:"upcoming", note:""} : l);
-      // no_show ise sayacı azalt
       const noShowDelta = prevStatus === "noshow" ? -1 : 0;
       return {...s, schedule: newSchedule, no_show: Math.max(0, s.no_show + noShowDelta)};
     });
@@ -1101,7 +1079,6 @@ export default function App() {
     pop("Ders 'Planlandı' durumuna alındı");
   };
 
-  // Son paketi geri al: son 4 upcoming dersi sil, son ödemeyi geri al
   const handleUnrecharge = async (sid) => {
     const updated = students.map(s => {
       if (s.id !== sid) return s;
@@ -1109,7 +1086,6 @@ export default function App() {
       if (upcomingIdxs.length < 4) return s;
       const toRemove = new Set(upcomingIdxs.slice(-4));
       const newSchedule = s.schedule.filter((_, i) => !toRemove.has(i));
-      // Son ödemeyi geri al
       const newOdemeler = (s.odemeler || []).slice(0, -1);
       return {...s, schedule: newSchedule, odemeler: newOdemeler};
     });
@@ -1184,7 +1160,6 @@ export default function App() {
     pop("Öğrenci eklendi");
   };
 
-  // Ödeme kaydet: periyot (donem) parametresi eklendi
   const handleÖdemeKaydet = async (sid, tarih, donem) => {
     const odemeDate = tarih||new Date().toISOString().split("T")[0];
     const updated = students.map(s => {
@@ -1195,7 +1170,6 @@ export default function App() {
       const ekTutar = odenmemisEk.length * ekDersBirimUcret;
       const toplamTutar = ucret + ekTutar;
       const ekDersler = (s.ek_dersler||[]).map(e => e.odendi ? e : {...e, odendi:true});
-      // Donem: parametre olarak gelen kullan, yoksa upcoming'den hesapla
       let finalDonem = donem || "";
       if (!finalDonem) {
         const upcoming = s.schedule.filter(l => l.status === "upcoming");
@@ -1235,34 +1209,45 @@ export default function App() {
     else { navigator.clipboard.writeText(text); pop("Mesaj kopyalandı"); }
   };
 
-  // Ödeme bekliyor mu? Periyot bazlı kontrol
+  // Ödeme bekliyor mu?
+  // Kural 1: Tamamlanmış 4'lü paketler için dönem bazlı kontrol
+  // Kural 2: Bugün ilk upcoming dersi olan yeni paket → ödeme günü
   const isÖdemeBekleyen = (s) => {
     if (s.frozen) return false;
     const schedule = s.schedule || [];
+    const odemeler = s.odemeler || [];
     const tamamlanan = schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
-    if (tamamlanan.length === 0) return false;
     const paketSayisi = Math.floor(tamamlanan.length / 4);
-    if (paketSayisi === 0) return false;
-    // Her paketi kontrol et, ödeme var mı?
+
+    // Kural 1: tamamlanmış paketler
     for (let p = 0; p < paketSayisi; p++) {
       const paketDersler = tamamlanan.slice(p * 4, p * 4 + 4);
       if (paketDersler.length < 4) continue;
       const paketDonem = fmtShort(paketDersler[0].date) + " - " + fmtShort(paketDersler[paketDersler.length-1].date);
       const ilkDersTarih = midday(new Date(paketDersler[0].date));
-      if (ilkDersTarih > midday()) continue; // Henüz başlamamış
-      const odemeler = s.odemeler || [];
-      // Donem etiketiyle eşleşen ödeme var mı?
+      if (ilkDersTarih > midday()) continue;
       const donemOdeme = odemeler.some(o => o.donem === paketDonem);
       if (donemOdeme) continue;
-      // Eski kayıtlar için: bu paketin ilk ders tarihinden sonra yapılmış ödeme var mı?
-      // (donem alanı olmayan eski ödemeler)
       const eskiOdemeler = odemeler.filter(o => !o.donem);
-      // Kaçıncı paket bu?
-      const buPaketSirasi = p; // 0-indexed
-      // Bu paketten önceki ödemeler sayısına bak
-      if (eskiOdemeler.length > buPaketSirasi) continue;
+      if (eskiOdemeler.length > p) continue;
       return true;
     }
+
+    // Kural 2: bugün ilk upcoming günüyse ve ödeme yapılmamışsa
+    const upcoming = schedule.filter(l => l.status === "upcoming");
+    if (upcoming.length > 0 && isToday(upcoming[0].date)) {
+      // Bu upcoming paket için ödeme var mı?
+      const paketSon = upcoming[Math.min(3, upcoming.length - 1)];
+      const paketDonem = fmtShort(upcoming[0].date) + " - " + fmtShort(paketSon.date);
+      const donemOdeme = odemeler.some(o => o.donem === paketDonem);
+      if (donemOdeme) return false;
+      // Eski mantıkla: bugünkü ders günü ödeme zaten yapılmış mı?
+      const bugunOdeme = odemeler.some(o => o.tarih === new Date().toISOString().split("T")[0]);
+      if (bugunOdeme) return false;
+      // Tamamlanan ders sayısı 4'e bölünebiliyorsa (yeni paket başlıyor)
+      if (tamamlanan.length % 4 === 0) return true;
+    }
+
     return false;
   };
 
@@ -1464,7 +1449,7 @@ export default function App() {
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
                       <button onClick={()=>setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", marginLeft:10, flexShrink:0, fontFamily:"inherit" }}>İşlem</button>
-                      {payDue ? <button onClick={()=>{ const d=getPaketDonemler(s); const tS=s.schedule.filter(l=>l.status!=="upcoming"&&l.status!=="telafi"); const pS=Math.floor(tS.length/4); const son=tS.slice((pS-1)*4,(pS-1)*4+4); setÖdemeKaydetDonem(son.length>0?fmtShort(son[0].date)+" - "+fmtShort(son[son.length-1].date):""); setÖdemeKaydetDate(new Date().toISOString().split("T")[0]); setÖdemeKaydetModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:700, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💳</button> : null}
+                      {payDue ? <button onClick={()=>{ const tS=s.schedule.filter(l=>l.status!=="upcoming"&&l.status!=="telafi"); const pS=Math.floor(tS.length/4); const son=tS.slice((pS-1)*4,(pS-1)*4+4); setÖdemeKaydetDonem(son.length>0?fmtShort(son[0].date)+" - "+fmtShort(son[son.length-1].date):""); setÖdemeKaydetDate(new Date().toISOString().split("T")[0]); setÖdemeKaydetModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:700, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💳</button> : null}
                       <button onClick={()=>setMesajSt(s)} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💬</button>
                     </div>
                   </div>
