@@ -1139,8 +1139,10 @@ export default function App() {
   };
 
   // Ödeme bekliyor mu?
-  // Kural 1: Tamamlanmış 4'lü paket var ve ödeme yapılmamış
-  // Kural 2: Aktif paketin ilk dersi tamamlanmış (tarihten bağımsız) ve ödeme yok
+  // Mantık: her tamamlanmış 4'lü paket için o paketin ilk ders tarihinden sonra
+  // yapılmış bir ödeme var mı? Yoksa ödeme bekliyor.
+  // Aktif paket (henüz 4 dolmamış): ilk dersi tamamlandıysa ve o dersten sonra
+  // hiç ödeme yapılmamışsa ödeme bekliyor.
   const isÖdemeBekleyen = (s) => {
     if (s.frozen) return false;
     const schedule = s.schedule || [];
@@ -1148,31 +1150,31 @@ export default function App() {
     const tamamlanan = schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
     const paketSayisi = Math.floor(tamamlanan.length / 4);
 
-    // Kural 1: tamamlanmış paketler için dönem bazlı kontrol
+    // Tamamlanmış 4'lü paketler: her biri için ödeme var mı?
     for (let p = 0; p < paketSayisi; p++) {
       const paketDersler = tamamlanan.slice(p * 4, p * 4 + 4);
       if (paketDersler.length < 4) continue;
-      const paketDonem = fmtShort(paketDersler[0].date) + " - " + fmtShort(paketDersler[paketDersler.length-1].date);
       const ilkDersTarih = midday(new Date(paketDersler[0].date));
       if (ilkDersTarih > midday()) continue;
+      // Bu paket için ödeme var mı? (tarih bazlı: ilk dersten sonra yapılmış p+1. ödeme)
+      const paketDonem = fmtShort(paketDersler[0].date) + " - " + fmtShort(paketDersler[paketDersler.length-1].date);
+      // Donem etiketiyle eşleşen ödeme
       if (odemeler.some(o => o.donem === paketDonem)) continue;
+      // Eski kayıtlar: donem etiketi olmayan ödemeler sırayla eşleşir
       const eskiOdemeler = odemeler.filter(o => !o.donem);
       if (eskiOdemeler.length > p) continue;
       return true;
     }
 
-    // Kural 2: aktif paketin ilk dersi tamamlandıysa (henüz 4 dolmamış) ve ödeme yok
-    const aktifPakettekiTamamlanan = tamamlanan.slice(paketSayisi * 4);
-    if (aktifPakettekiTamamlanan.length >= 1) {
-      const ilkDers = aktifPakettekiTamamlanan[0];
+    // Aktif paket (henüz 4 dolmamış): ilk dersi tamamlandıysa ödeme zamanı
+    const aktifTamamlanan = tamamlanan.slice(paketSayisi * 4);
+    if (aktifTamamlanan.length >= 1) {
+      const ilkDers = aktifTamamlanan[0];
       const ilkDersTarih = midday(new Date(ilkDers.date));
       if (ilkDersTarih <= midday()) {
-        const ilkDersFmtShort = fmtShort(ilkDers.date);
-        // Bu aktif paket için ödeme var mı?
-        const donemOdeme = odemeler.some(o => o.donem && o.donem.startsWith(ilkDersFmtShort));
-        // Eski mantık: ilk ders tarihinden sonra ödeme var mı?
-        const tarihOdeme = odemeler.some(o => !o.donem && midday(new Date(o.tarih)) >= ilkDersTarih);
-        if (!donemOdeme && !tarihOdeme) return true;
+        // İlk dersin tarihinden sonra (veya aynı gün) yapılmış herhangi bir ödeme var mı?
+        const odemeVar = odemeler.some(o => midday(new Date(o.tarih)) >= ilkDersTarih);
+        if (!odemeVar) return true;
       }
     }
 
