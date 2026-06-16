@@ -57,6 +57,7 @@ function buildScheduleSlots(slots, count, from) {
   const cursor = new Date(from);
   const dates = [];
   const lessonCount = Math.max(1, parseInt(count)||1);
+  const packageId = uid();
   const nextOccurrences = cleanSlots.map((slot, slotIndex) => ({
     slot,
     slotIndex,
@@ -68,6 +69,8 @@ function buildScheduleSlots(slots, count, from) {
     const next = nextOccurrences[0];
     dates.push({
       id: uid(),
+      packageId,
+      packageLessonCount: lessonCount,
       date: new Date(next.date).toISOString(),
       day: next.slot.day,
       time: next.slot.time,
@@ -100,20 +103,50 @@ function dateKey(iso) { if (!iso) return ""; return new Date(iso).toISOString().
 const PAYMENT_PACK_SIZE = 4;
 const PAID_LESSON_STATUSES = ["completed", "noshow", "lastminute"];
 
+function getPackageLessonCount(student) {
+  const firstWithCount = (student.schedule||[]).find(l=>l.packageLessonCount);
+  const n = parseInt(student.packageLessonCount || student.package_lesson_count || firstWithCount?.packageLessonCount || PAYMENT_PACK_SIZE);
+  return Number.isFinite(n) && n > 0 ? n : PAYMENT_PACK_SIZE;
+}
+
 function paymentPackageInfo(student) {
+  const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const completed = (student.schedule||[])
     .filter(l => PAID_LESSON_STATUSES.includes(l.status))
     .sort((a,b)=>new Date(a.date)-new Date(b.date));
   if (completed.length === 0) return null;
-  const packageIndex = Math.floor((completed.length - 1) / PAYMENT_PACK_SIZE);
-  const packageStartLesson = completed[packageIndex * PAYMENT_PACK_SIZE];
+  const currentLesson = completed[completed.length-1];
+  if (currentLesson.packageId) {
+    const packageLessons = sortedSchedule.filter(l=>l.packageId===currentLesson.packageId);
+    const packageStartLesson = packageLessons[0] || currentLesson;
+    const packageEndLesson = packageLessons[packageLessons.length-1] || currentLesson;
+    const packageIds = [];
+    sortedSchedule.forEach(l => {
+      if (l.packageId && !packageIds.includes(l.packageId)) packageIds.push(l.packageId);
+    });
+    return {
+      packageIndex: Math.max(0, packageIds.indexOf(currentLesson.packageId)),
+      packageId: currentLesson.packageId,
+      packageSize: parseInt(currentLesson.packageLessonCount || packageLessons.length || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE,
+      lessonIds: packageLessons.map(l=>l.id).filter(Boolean),
+      start: packageStartLesson.date,
+      end: packageEndLesson.date,
+      startKey: dateKey(packageStartLesson.date),
+      endKey: dateKey(packageEndLesson.date),
+      donem: fmtShort(packageStartLesson.date)+" - "+fmtShort(packageEndLesson.date),
+    };
+  }
+  const packageSize = getPackageLessonCount(student);
+  const packageIndex = Math.floor((completed.length - 1) / packageSize);
+  const packageStartLesson = completed[packageIndex * packageSize];
   if (!packageStartLesson) return null;
-  const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const startIndex = sortedSchedule.findIndex(l=>l.id===packageStartLesson.id);
-  const packageLessons = startIndex >= 0 ? sortedSchedule.slice(startIndex, startIndex + PAYMENT_PACK_SIZE) : [packageStartLesson];
+  const packageLessons = startIndex >= 0 ? sortedSchedule.slice(startIndex, startIndex + packageSize) : [packageStartLesson];
   const packageEndLesson = packageLessons[packageLessons.length-1] || packageStartLesson;
   return {
     packageIndex,
+    packageSize,
+    lessonIds: packageLessons.map(l=>l.id).filter(Boolean),
     start: packageStartLesson.date,
     end: packageEndLesson.date,
     startKey: dateKey(packageStartLesson.date),
@@ -122,10 +155,38 @@ function paymentPackageInfo(student) {
   };
 }
 
+function paymentDisplayInfo(student, payment, index) {
+  const schedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const ids = Array.isArray(payment.packageLessonIds) ? payment.packageLessonIds : [];
+  let lessons = ids.map(id => schedule.find(l=>l.id===id)).filter(Boolean);
+  if (!lessons.length && payment.packageId) lessons = schedule.filter(l=>l.packageId===payment.packageId);
+  if (!lessons.length && payment.packageStart) {
+    const startIdx = schedule.findIndex(l=>dateKey(l.date)===payment.packageStart);
+    const count = parseInt(payment.packageLessonCount || student.packageLessonCount || student.package_lesson_count || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE;
+    if (startIdx >= 0) lessons = schedule.slice(startIdx, startIdx + count);
+  }
+  const first = lessons[0];
+  const last = lessons[lessons.length-1];
+  const periodShort = first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : (payment.donem || "");
+  const periodLong = first && last ? fmtDate(first.date)+" - "+fmtDate(last.date) : (payment.donem || "");
+  const lessonCount = parseInt(payment.packageLessonCount || lessons.length || student.packageLessonCount || student.package_lesson_count || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE;
+  const program = studentScheduleLabel(student);
+  return {
+    periodShort,
+    periodLong,
+    lessonCount,
+    program,
+    amount: typeof payment.tutar === "number" ? payment.tutar.toLocaleString("tr-TR")+" TL" : (student.ucret ? student.ucret.toLocaleString("tr-TR")+" TL" : payment.tutar),
+    paidAt: fmtMed(payment.tarih),
+    extra: payment.ekDersSayisi > 0 ? "+"+payment.ekDersSayisi+" ek ders" : "",
+  };
+}
+
 function hasPaymentForPackage(student, info) {
   if (!info) return false;
   const payments = student.odemeler || [];
   return payments.some((o, i) =>
+    (info.packageId && o.packageId === info.packageId) ||
     o.packageStart === info.startKey ||
     o.package_index === info.packageIndex ||
     o.packageIndex === info.packageIndex ||
@@ -380,6 +441,37 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
   );
 }
 
+function PaymentHistoryItem({ student, payment, index }) {
+  const [open, setOpen] = useState(false);
+  const info = paymentDisplayInfo(student, payment, index);
+  return (
+    <div style={{ borderBottom:"1px solid #f0f0f0", padding:"8px 0" }}>
+      <button onClick={() => setOpen(v=>!v)} style={{ width:"100%", background:"transparent", border:"none", padding:0, cursor:"pointer", fontFamily:"inherit", textAlign:"left" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
+          <div style={{ minWidth:0 }}>
+            <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#111" }}>{info.paidAt}</p>
+            <p style={{ margin:"2px 0 0", fontSize:12, color:"#6b7280", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{info.periodShort}</p>
+          </div>
+          <div style={{ textAlign:"right", flexShrink:0 }}>
+            <p style={{ margin:0, fontSize:13, fontWeight:800, color:"#111" }}>{info.amount}</p>
+            <p style={{ margin:"2px 0 0", fontSize:12, color:"#9ca3af" }}>{open ? "▲" : "▼"}</p>
+          </div>
+        </div>
+      </button>
+      {open ? (
+        <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 12px", marginTop:8 }}>
+          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Ödenen dönem</p>
+          <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:700, color:"#111" }}>{info.periodLong || "Dönem bilgisi yok"}</p>
+          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Kapsam</p>
+          <p style={{ margin:"0 0 8px", fontSize:13, color:"#374151" }}>{info.lessonCount} ders{info.extra ? " · "+info.extra : ""}</p>
+          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Program</p>
+          <p style={{ margin:0, fontSize:13, color:"#374151" }}>{info.program}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onÖdeme, onDelete, onEkDersEkle, onDuzenle }) {
   const [tab, setTab] = useState("takvim");
   const [telafiSel, setTelafiSel] = useState(null);
@@ -429,11 +521,8 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Geçmişi</p>
-            {[...student.odemeler].reverse().map((o,i) => (
-              <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#444", marginBottom:5 }}>
-                <span>{fmtMed(o.tarih)}{o.donem ? " - "+o.donem : ""}{o.ekDersSayisi > 0 ? " +"+o.ekDersSayisi+" ek" : ""}</span>
-                <span style={{ color:"#111", fontWeight:700 }}>{typeof o.tutar === "number" ? o.tutar.toLocaleString("tr-TR")+" TL" : (student.ucret ? student.ucret.toLocaleString("tr-TR")+" TL" : o.tutar)}</span>
-              </div>
+            {[...student.odemeler].map((o,i)=>({o,i})).reverse().map(({o,i}) => (
+              <PaymentHistoryItem key={i} student={student} payment={o} index={i} />
             ))}
           </div>
         ) : null}
@@ -1090,8 +1179,19 @@ export default function App() {
       if (s.id!==sid) return s;
       const last = [...s.schedule].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
       const from = last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
-      const odemeler = [...(s.odemeler||[]), { tarih: odemeDate||new Date().toISOString().split("T")[0], tutar:"4 ders", odendi:true }];
-      return {...s, schedule:[...s.schedule, ...buildScheduleSlots(getStudentSlots(s), 4, from)], odemeler};
+      const newLessons = buildScheduleSlots(getStudentSlots(s), 4, from);
+      const odemeler = [...(s.odemeler||[]), {
+        tarih: odemeDate||new Date().toISOString().split("T")[0],
+        tutar:"4 ders",
+        donem: fmtShort(newLessons[0].date)+" - "+fmtShort(newLessons[newLessons.length-1].date),
+        packageId: newLessons[0].packageId,
+        packageLessonCount: newLessons.length,
+        packageLessonIds: newLessons.map(l=>l.id),
+        packageStart: dateKey(newLessons[0].date),
+        packageEnd: dateKey(newLessons[newLessons.length-1].date),
+        odendi:true
+      }];
+      return {...s, schedule:[...s.schedule, ...newLessons], odemeler};
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
@@ -1134,7 +1234,10 @@ export default function App() {
         ekDersSayisi:odenmemisEk.length,
         ekTutar,
         donem,
+        packageId: packageInfo?.packageId,
         packageIndex: packageInfo?.packageIndex,
+        packageLessonCount: packageInfo?.packageSize,
+        packageLessonIds: packageInfo?.lessonIds || [],
         packageStart: packageInfo?.startKey,
         packageEnd: packageInfo?.endKey,
         odendi:true
