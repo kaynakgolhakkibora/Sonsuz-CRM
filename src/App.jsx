@@ -96,6 +96,50 @@ function calcNextPayment(schedule) { const up = schedule.filter(l => l.status ==
 function midday(d = new Date()) { const x = new Date(d); x.setHours(0,0,0,0); return x; }
 function isToday(iso) { return midday(new Date(iso)).getTime() === midday().getTime(); }
 function paymentOverdueDays(iso) { if (!iso) return 0; const diff = Math.floor((midday() - midday(new Date(iso))) / 86400000); return diff > 0 ? diff : 0; }
+function dateKey(iso) { if (!iso) return ""; return new Date(iso).toISOString().split("T")[0]; }
+const PAYMENT_PACK_SIZE = 4;
+const PAID_LESSON_STATUSES = ["completed", "noshow", "lastminute"];
+
+function paymentPackageInfo(student) {
+  const completed = (student.schedule||[])
+    .filter(l => PAID_LESSON_STATUSES.includes(l.status))
+    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if (completed.length === 0) return null;
+  const packageIndex = Math.floor((completed.length - 1) / PAYMENT_PACK_SIZE);
+  const packageStartLesson = completed[packageIndex * PAYMENT_PACK_SIZE];
+  if (!packageStartLesson) return null;
+  const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const startIndex = sortedSchedule.findIndex(l=>l.id===packageStartLesson.id);
+  const packageLessons = startIndex >= 0 ? sortedSchedule.slice(startIndex, startIndex + PAYMENT_PACK_SIZE) : [packageStartLesson];
+  const packageEndLesson = packageLessons[packageLessons.length-1] || packageStartLesson;
+  return {
+    packageIndex,
+    start: packageStartLesson.date,
+    end: packageEndLesson.date,
+    startKey: dateKey(packageStartLesson.date),
+    endKey: dateKey(packageEndLesson.date),
+    donem: fmtShort(packageStartLesson.date)+" - "+fmtShort(packageEndLesson.date),
+  };
+}
+
+function hasPaymentForPackage(student, info) {
+  if (!info) return false;
+  const payments = student.odemeler || [];
+  return payments.some((o, i) =>
+    o.packageStart === info.startKey ||
+    o.package_index === info.packageIndex ||
+    o.packageIndex === info.packageIndex ||
+    i >= info.packageIndex
+  );
+}
+
+function isPaymentDue(student) {
+  if (student.frozen) return false;
+  const info = paymentPackageInfo(student);
+  if (!info) return false;
+  if (midday(new Date(info.start)) > midday()) return false;
+  return !hasPaymentForPackage(student, info);
+}
 
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
@@ -776,25 +820,19 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj }) {
   const [odemeDate, setÖdemeDate] = useState(new Date().toISOString().split("T")[0]);
 
   const bugünÖdeme = students.filter(s => {
-    if (s.frozen) return false;
+    if (!isPaymentDue(s)) return false;
     const bugünDers = s.schedule.find(l => l.status === "upcoming" && isToday(l.date));
-    if (!bugünDers) return false;
-    const tamamlanan = s.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
-    if (tamamlanan.length % 4 !== 0) return false;
-    return !(s.odemeler||[]).some(o => o.tarih === new Date().toISOString().split("T")[0]);
+    const info = paymentPackageInfo(s);
+    return bugünDers || (info && isToday(info.start));
   });
 
   const gecikenler = students.filter(s => {
-    if (s.frozen) return false;
-    const tamamlanan = s.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
-    if (tamamlanan.length === 0) return false;
-    if (tamamlanan.length % 4 !== 0) return false;
-    const paketIlkIdx = tamamlanan.length - 4;
-    const paketIlkDers = tamamlanan[paketIlkIdx];
-    if (!paketIlkDers) return false;
-    const ilkDersTarih = midday(new Date(paketIlkDers.date));
-    if (ilkDersTarih >= todayMid) return false;
-    return !(s.odemeler||[]).some(o => midday(new Date(o.tarih)) >= ilkDersTarih);
+    if (!isPaymentDue(s)) return false;
+    if (bugünÖdeme.some(x=>x.id===s.id)) return false;
+    const info = paymentPackageInfo(s);
+    if (!info) return false;
+    const ilkDersTarih = midday(new Date(info.start));
+    return ilkDersTarih < todayMid;
   });
 
   if (bugünÖdeme.length === 0 && gecikenler.length === 0) return null;
@@ -823,9 +861,8 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj }) {
         <div style={{ background:"#fff1f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 16px" }}>
           <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#be123c" }}>Geciken Ödemeler ({gecikenler.length})</p>
           {gecikenler.map(s => {
-            const tamamlananS = s.schedule.filter(l => l.status !== "upcoming" && l.status !== "telafi");
-            const paketIlkDersS = tamamlananS[tamamlananS.length - 4];
-            const geciken = paketIlkDersS ? paymentOverdueDays(paketIlkDersS.date) : 0;
+            const info = paymentPackageInfo(s);
+            const geciken = info ? paymentOverdueDays(info.start) : 0;
             return (
               <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fecdd3" }}>
                 <div>
@@ -1079,16 +1116,29 @@ export default function App() {
     const odemeDate = tarih||new Date().toISOString().split("T")[0];
     const updated = students.map(s => {
       if (s.id!==sid) return s;
+      const packageInfo = paymentPackageInfo(s);
       const upcoming = s.schedule.filter(l => l.status === "upcoming");
       let donem = "";
-      if (upcoming.length > 0) donem = fmtShort(upcoming[0].date)+" - "+fmtShort(upcoming[upcoming.length-1].date);
+      if (packageInfo) donem = packageInfo.donem;
+      else if (upcoming.length > 0) donem = fmtShort(upcoming[0].date)+" - "+fmtShort(upcoming[upcoming.length-1].date);
       else { const gecmis = s.schedule.filter(l => l.status !== "upcoming"); const son4 = gecmis.slice(-4); if (son4.length > 0) donem = fmtShort(son4[0].date)+" - "+fmtShort(son4[son4.length-1].date); }
       const ucret = s.ucret||0;
       const odenmemisEk = (s.ek_dersler||[]).filter(e => !e.odendi);
       const ekTutar = odenmemisEk.length * (ucret/4);
       const toplamTutar = ucret + ekTutar;
       const ekDersler = (s.ek_dersler||[]).map(e => e.odendi ? e : {...e, odendi:true});
-      const odemeler = [...(s.odemeler||[]), { tarih:odemeDate, tutar:toplamTutar, paketUcret:ucret, ekDersSayisi:odenmemisEk.length, ekTutar, donem, odendi:true }];
+      const odemeler = [...(s.odemeler||[]), {
+        tarih:odemeDate,
+        tutar:toplamTutar,
+        paketUcret:ucret,
+        ekDersSayisi:odenmemisEk.length,
+        ekTutar,
+        donem,
+        packageIndex: packageInfo?.packageIndex,
+        packageStart: packageInfo?.startKey,
+        packageEnd: packageInfo?.endKey,
+        odendi:true
+      }];
       return {...s, odemeler, ek_dersler: ekDersler};
     });
     setStudents(updated);
@@ -1121,20 +1171,7 @@ export default function App() {
   };
 
   const isÖdemeBekleyen = (s) => {
-    if (s.frozen) return false;
-    const tamamlanan = s.schedule.filter(l => l.status === "completed" || l.status === "noshow" || l.status === "lastminute");
-    if (tamamlanan.length === 0) return false;
-    const paketBasIdx = Math.floor((tamamlanan.length - 1) / 4) * 4;
-    const paketIlkDers = tamamlanan[paketBasIdx];
-    if (!paketIlkDers) return false;
-    const paketBasTarih = midday(new Date(paketIlkDers.date));
-    if (paketBasTarih > midday()) return false;
-    const odemeler = s.odemeler || [];
-    if (odemeler.length > 0) {
-      const sonÖdemeTarih = midday(new Date(odemeler[odemeler.length-1].tarih));
-      if (sonÖdemeTarih >= paketBasTarih) return false;
-    }
-    return true;
+    return isPaymentDue(s);
   };
 
   const todayPayments = students.filter(isÖdemeBekleyen);
