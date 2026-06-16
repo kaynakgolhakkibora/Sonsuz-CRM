@@ -105,7 +105,9 @@ const PAID_LESSON_STATUSES = ["completed", "noshow", "lastminute"];
 
 function getPackageLessonCount(student) {
   const firstWithCount = (student.schedule||[]).find(l=>l.packageLessonCount);
-  const n = parseInt(student.packageLessonCount || student.package_lesson_count || firstWithCount?.packageLessonCount || PAYMENT_PACK_SIZE);
+  const scheduleCount = (student.schedule||[]).length;
+  const inferredCount = scheduleCount > PAYMENT_PACK_SIZE && (student.odemeler||[]).length <= 1 ? scheduleCount : PAYMENT_PACK_SIZE;
+  const n = parseInt(student.packageLessonCount || student.package_lesson_count || firstWithCount?.packageLessonCount || inferredCount);
   return Number.isFinite(n) && n > 0 ? n : PAYMENT_PACK_SIZE;
 }
 
@@ -157,26 +159,35 @@ function paymentPackageInfo(student) {
 
 function paymentDisplayInfo(student, payment, index) {
   const schedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const inferredStudentCount = getPackageLessonCount(student);
+  const storedPaymentCount = parseInt(payment.packageLessonCount);
+  const effectiveCount = storedPaymentCount && !(storedPaymentCount === PAYMENT_PACK_SIZE && inferredStudentCount > PAYMENT_PACK_SIZE)
+    ? storedPaymentCount
+    : inferredStudentCount;
   const ids = Array.isArray(payment.packageLessonIds) ? payment.packageLessonIds : [];
   let lessons = ids.map(id => schedule.find(l=>l.id===id)).filter(Boolean);
   if (!lessons.length && payment.packageId) lessons = schedule.filter(l=>l.packageId===payment.packageId);
   if (!lessons.length && payment.packageStart) {
     const startIdx = schedule.findIndex(l=>dateKey(l.date)===payment.packageStart);
-    const count = parseInt(payment.packageLessonCount || student.packageLessonCount || student.package_lesson_count || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE;
+    const count = effectiveCount || PAYMENT_PACK_SIZE;
     if (startIdx >= 0) lessons = schedule.slice(startIdx, startIdx + count);
   }
   const first = lessons[0];
   const last = lessons[lessons.length-1];
   const periodShort = first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : (payment.donem || "");
   const periodLong = first && last ? fmtDate(first.date)+" - "+fmtDate(last.date) : (payment.donem || "");
-  const lessonCount = parseInt(payment.packageLessonCount || lessons.length || student.packageLessonCount || student.package_lesson_count || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE;
+  const lessonCount = lessons.length || effectiveCount || PAYMENT_PACK_SIZE;
   const program = studentScheduleLabel(student);
+  const expectedPackageAmount = (student.ucret || 0) * (lessonCount / PAYMENT_PACK_SIZE);
+  const expectedTotal = expectedPackageAmount + (payment.ekTutar || 0);
+  const numericAmount = typeof payment.tutar === "number" ? payment.tutar : null;
+  const amountToShow = numericAmount !== null && expectedTotal > numericAmount && lessonCount > PAYMENT_PACK_SIZE ? expectedTotal : numericAmount;
   return {
     periodShort,
     periodLong,
     lessonCount,
     program,
-    amount: typeof payment.tutar === "number" ? payment.tutar.toLocaleString("tr-TR")+" TL" : (student.ucret ? student.ucret.toLocaleString("tr-TR")+" TL" : payment.tutar),
+    amount: typeof amountToShow === "number" ? amountToShow.toLocaleString("tr-TR")+" TL" : (student.ucret ? expectedPackageAmount.toLocaleString("tr-TR")+" TL" : payment.tutar),
     paidAt: fmtMed(payment.tarih),
     extra: payment.ekDersSayisi > 0 ? "+"+payment.ekDersSayisi+" ek ders" : "",
   };
@@ -1080,7 +1091,7 @@ export default function App() {
 
   const saveStudent = async (student) => {
     const slots = getStudentSlots(student);
-    const { error } = await supabase.from("students").upsert({
+      const { error } = await supabase.from("students").upsert({
       id: student.id,
       name: student.name,
       phone: student.phone || "",
@@ -1201,11 +1212,12 @@ export default function App() {
   const handleAdd = async (f) => {
     const from = new Date((f.firstDate||new Date().toISOString().split("T")[0])+"T12:00:00");
     const slots = normalizeSlots(f.lessonSlots);
+    const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
     const newStudent = {
       id: uid(), name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"",
-      ucret: parseInt(f.ucret)||0, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
+      ucret: parseInt(f.ucret)||0, packageLessonCount, package_lesson_count: packageLessonCount, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
       no_show: 0, frozen: false, odemeler: [], telafi_records: [],
-      schedule: buildScheduleSlots(slots, f.count, from), ek_dersler: [],
+      schedule: buildScheduleSlots(slots, packageLessonCount, from), ek_dersler: [],
     };
     setStudents(p=>[...p, newStudent]);
     await saveStudent(newStudent);
@@ -1223,20 +1235,23 @@ export default function App() {
       else if (upcoming.length > 0) donem = fmtShort(upcoming[0].date)+" - "+fmtShort(upcoming[upcoming.length-1].date);
       else { const gecmis = s.schedule.filter(l => l.status !== "upcoming"); const son4 = gecmis.slice(-4); if (son4.length > 0) donem = fmtShort(son4[0].date)+" - "+fmtShort(son4[son4.length-1].date); }
       const ucret = s.ucret||0;
+      const paketDersSayisi = packageInfo?.packageSize || getPackageLessonCount(s);
+      const paketCarpani = paketDersSayisi / PAYMENT_PACK_SIZE;
+      const paketUcret = ucret * paketCarpani;
       const odenmemisEk = (s.ek_dersler||[]).filter(e => !e.odendi);
       const ekTutar = odenmemisEk.length * (ucret/4);
-      const toplamTutar = ucret + ekTutar;
+      const toplamTutar = paketUcret + ekTutar;
       const ekDersler = (s.ek_dersler||[]).map(e => e.odendi ? e : {...e, odendi:true});
       const odemeler = [...(s.odemeler||[]), {
         tarih:odemeDate,
         tutar:toplamTutar,
-        paketUcret:ucret,
+        paketUcret,
         ekDersSayisi:odenmemisEk.length,
         ekTutar,
         donem,
         packageId: packageInfo?.packageId,
         packageIndex: packageInfo?.packageIndex,
-        packageLessonCount: packageInfo?.packageSize,
+        packageLessonCount: paketDersSayisi,
         packageLessonIds: packageInfo?.lessonIds || [],
         packageStart: packageInfo?.startKey,
         packageEnd: packageInfo?.endKey,
