@@ -175,7 +175,9 @@ export default async function handler(req, res) {
 
     res.setHeader("Content-Type", "text/calendar; charset=utf-8");
     res.setHeader("Content-Disposition", "inline; filename=sonsuz-sanat-dersleri.ics");
-    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=3600");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     res.status(200).send(calendar);
   } catch (error) {
     res.status(500).send("Takvim oluşturulamadı: " + error.message);
