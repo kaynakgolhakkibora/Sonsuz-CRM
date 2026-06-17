@@ -1574,6 +1574,16 @@ export default function App() {
     pop(count ? count + " ders Google Takvim dosyasına aktarıldı" : "Aktarılacak ders bulunamadı");
   };
 
+  const handleCalendarLinkCopy = async () => {
+    const url = window.location.origin + "/api/calendar";
+    try {
+      await navigator.clipboard.writeText(url);
+      pop("Takvim abonelik linki kopyalandı");
+    } catch {
+      window.prompt("Google Takvim'e URL ile ekle:", url);
+    }
+  };
+
   const isÖdemeBekleyen = (s) => {
     return isPaymentDue(s);
   };
@@ -1646,6 +1656,7 @@ export default function App() {
             <h1 style={{ fontSize:20, fontWeight:800, margin:"2px 0 0", letterSpacing:-0.5 }}>Öğrenci Yönetimi</h1>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center", marginLeft:"auto" }}>
+            <button onClick={handleCalendarLinkCopy} style={{ background:"#dbeafe", color:"#1d4ed8", border:"none", borderRadius:12, padding:"9px 12px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>Takvim Linki</button>
             <button onClick={handleGoogleCalendarExport} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:12, padding:"9px 12px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>Google'a Aktar</button>
             <button onClick={()=>setShowAdd(true)} style={{ background:"#fff", color:"#111", border:"none", borderRadius:12, padding:"9px 18px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>+ Ekle</button>
           </div>
