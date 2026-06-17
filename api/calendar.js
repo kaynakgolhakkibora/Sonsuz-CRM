@@ -39,6 +39,18 @@ function ekDersTypeLabel(type) {
   return m[type] || "Fiziki";
 }
 
+function getLessonDuration(student, item) {
+  const scheduleDuration = (student?.schedule || []).find(l => l.durationMinutes || l.duration_minutes);
+  const n = parseInt(item?.durationMinutes || item?.duration_minutes || student?.lessonDuration || student?.lesson_duration || scheduleDuration?.durationMinutes || scheduleDuration?.duration_minutes || 45);
+  return Number.isFinite(n) && n > 0 ? n : 45;
+}
+
+function addMinutes(date, minutes) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() + minutes);
+  return d;
+}
+
 function calendarEventsFromStudents(students) {
   const events = [];
 
@@ -46,8 +58,7 @@ function calendarEventsFromStudents(students) {
     (student.schedule || []).forEach(lesson => {
       if (!lesson.date) return;
       const start = new Date(lesson.date);
-      const end = new Date(start);
-      end.setHours(end.getHours() + 1);
+      const end = addMinutes(start, getLessonDuration(student, lesson));
       events.push({
         uid: "ders-" + student.id + "-" + (lesson.id || dateKey(lesson.date)) + "@sonsuz-sanat-crm",
         start,
@@ -67,8 +78,7 @@ function calendarEventsFromStudents(students) {
     (student.ek_dersler || []).forEach(extra => {
       if (!extra.date) return;
       const start = new Date(extra.date);
-      const end = new Date(start);
-      end.setHours(end.getHours() + 1);
+      const end = addMinutes(start, getLessonDuration(student, extra));
       events.push({
         uid: "ek-ders-" + student.id + "-" + (extra.id || dateKey(extra.date)) + "@sonsuz-sanat-crm",
         start,
