@@ -52,11 +52,28 @@ function studentScheduleLabel(student) {
   return slotLabel(getStudentSlots(student));
 }
 
-function buildScheduleSlots(slots, count, from) {
+function getLessonDuration(student, item) {
+  const scheduleDuration = (student?.schedule || []).find(l => l.durationMinutes || l.duration_minutes);
+  const n = parseInt(item?.durationMinutes || item?.duration_minutes || student?.lessonDuration || student?.lesson_duration || scheduleDuration?.durationMinutes || scheduleDuration?.duration_minutes || 45);
+  return Number.isFinite(n) && n > 0 ? n : 45;
+}
+
+function lessonDurationLabel(student) {
+  return getLessonDuration(student) + " dk";
+}
+
+function addMinutes(date, minutes) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() + minutes);
+  return d;
+}
+
+function buildScheduleSlots(slots, count, from, durationMinutes = 45) {
   const cleanSlots = normalizeSlots(slots);
   const cursor = new Date(from);
   const dates = [];
   const lessonCount = Math.max(1, parseInt(count)||1);
+  const duration = getLessonDuration(null, { durationMinutes });
   const packageId = uid();
   const nextOccurrences = cleanSlots.map((slot, slotIndex) => ({
     slot,
@@ -74,6 +91,7 @@ function buildScheduleSlots(slots, count, from) {
       date: new Date(next.date).toISOString(),
       day: next.slot.day,
       time: next.slot.time,
+      durationMinutes: duration,
       status: "upcoming",
       note: "",
     });
@@ -83,7 +101,7 @@ function buildScheduleSlots(slots, count, from) {
 }
 
 function buildSchedule(day, count, from, time = "10:00") {
-  return buildScheduleSlots([{ day, time }], count, from);
+  return buildScheduleSlots([{ day, time }], count, from, 45);
 }
 
 function uid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16); }); }
@@ -132,8 +150,7 @@ function calendarEventsFromStudents(students) {
     (student.schedule || []).forEach(lesson => {
       if (!lesson.date) return;
       const start = new Date(lesson.date);
-      const end = new Date(start);
-      end.setHours(end.getHours() + 1);
+      const end = addMinutes(start, getLessonDuration(student, lesson));
       events.push({
         uid: "ders-" + student.id + "-" + (lesson.id || dateKey(lesson.date)) + "@sonsuz-sanat-crm",
         start,
@@ -153,8 +170,7 @@ function calendarEventsFromStudents(students) {
     (student.ek_dersler || []).forEach(extra => {
       if (!extra.date) return;
       const start = new Date(extra.date);
-      const end = new Date(start);
-      end.setHours(end.getHours() + 1);
+      const end = addMinutes(start, getLessonDuration(student, extra));
       events.push({
         uid: "ek-ders-" + student.id + "-" + (extra.id || dateKey(extra.date)) + "@sonsuz-sanat-crm",
         start,
@@ -528,6 +544,7 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
     instrument: student.instrument,
     day: student.day,
     time: student.time,
+    lessonDuration: getLessonDuration(student),
     lessonSlots: getStudentSlots(student),
   });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
@@ -553,6 +570,11 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
         {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
       </select>
+      <label style={LBL}>Ders Süresi</label>
+      <select style={INP} value={f.lessonDuration} onChange={e=>s("lessonDuration",parseInt(e.target.value)||45)}>
+        <option value={45}>45 dakika</option>
+        <option value={30}>30 dakika</option>
+      </select>
       <label style={LBL}>Ders Günleri</label>
       {f.lessonSlots.map((slot,i) => (
         <div key={i} style={{ display:"grid", gridTemplateColumns:f.lessonSlots.length>1?"1fr 1fr 40px":"1fr 1fr", gap:10, alignItems:"end", marginBottom:8 }}>
@@ -576,6 +598,7 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
   const [time, setTime] = useState("10:00");
   const [type, setType] = useState("physical");
   const [status, setStatus] = useState("planned");
+  const [duration, setDuration] = useState(getLessonDuration(student));
   const [note, setNote] = useState("");
   const fee = ekDersFee(student);
   return (
@@ -586,6 +609,11 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
       <label style={LBL}>Saat</label>
       <select style={INP} value={time} onChange={e=>setTime(e.target.value)}>
         {TIMES.map(t=><option key={t}>{t}</option>)}
+      </select>
+      <label style={LBL}>Ders Süresi</label>
+      <select style={INP} value={duration} onChange={e=>setDuration(parseInt(e.target.value)||45)}>
+        <option value={45}>45 dakika</option>
+        <option value={30}>30 dakika</option>
       </select>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
         <div>
@@ -609,7 +637,7 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
       <label style={LBL}>Not (opsiyonel)</label>
       <input style={INP} value={note} onChange={e=>setNote(e.target.value)} placeholder="Konu vb." />
       <div style={{ marginTop:16 }}>
-        <Btn bg="#6366f1" onClick={() => { onEkDersEkle(student.id, { id:uid(), date: date+"T"+time+":00", type, status, fee, odendi:false, note, createdAt: new Date().toISOString() }); onClose(); }}>Ek Ders Kaydet</Btn>
+        <Btn bg="#6366f1" onClick={() => { onEkDersEkle(student.id, { id:uid(), date: date+"T"+time+":00", type, status, durationMinutes:duration, fee, odendi:false, note, createdAt: new Date().toISOString() }); onClose(); }}>Ek Ders Kaydet</Btn>
         <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
       </div>
     </Sheet>
@@ -684,6 +712,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
           <Pill label={student.instrument} bg="#f3f4f6" color="#374151" />
           <Pill label={studentScheduleLabel(student)} bg="#f3f4f6" color="#374151" />
+          <Pill label={lessonDurationLabel(student)} bg="#f3f4f6" color="#374151" />
           {student.veli_adi ? <Pill label={"Veli: "+student.veli_adi} bg="#fef9c3" color="#854d0e" /> : null}
           {student.frozen ? <Pill label="Dondurulmus" bg="#dbeafe" color="#1d4ed8" /> : null}
           {ekDersler.length > 0 ? <Pill label={"+"+ekDersler.length+" ek ders"} bg="#ede9fe" color="#5b21b6" /> : null}
@@ -868,7 +897,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
 
 function AddSheet({ onClose, onAdd }) {
   const todayISO = new Date().toISOString().split("T")[0];
-  const [f, setF] = useState({ name:"", phone:"", veli_adi:"", dogum_tarihi:"", instrument:"Davul", lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"" });
+  const [f, setF] = useState({ name:"", phone:"", veli_adi:"", dogum_tarihi:"", instrument:"Davul", lessonDuration:45, lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"" });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const setSlot = (i,k,v) => setF(p=>({
     ...p,
@@ -881,7 +910,7 @@ function AddSheet({ onClose, onAdd }) {
     if (!f.firstDate || f.firstDate.length < 10) return "";
     const from = new Date(f.firstDate + "T12:00:00");
     if (isNaN(from.getTime())) return "";
-    return buildScheduleSlots(f.lessonSlots, f.count, from).map(l=>fmtShort(l.date)+" "+l.time).join(" - ");
+    return buildScheduleSlots(f.lessonSlots, f.count, from, f.lessonDuration).map(l=>fmtShort(l.date)+" "+l.time).join(" - ");
   };
   return (
     <Sheet title="Yeni Öğrenci" onClose={onClose}>
@@ -898,6 +927,11 @@ function AddSheet({ onClose, onAdd }) {
       <label style={LBL}>Enstrüman</label>
       <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
         {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
+      </select>
+      <label style={LBL}>Ders Süresi</label>
+      <select style={INP} value={f.lessonDuration} onChange={e=>s("lessonDuration",parseInt(e.target.value)||45)}>
+        <option value={45}>45 dakika</option>
+        <option value={30}>30 dakika</option>
       </select>
       <label style={LBL}>Ders Günleri</label>
       {f.lessonSlots.map((slot,i) => (
@@ -1151,7 +1185,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj }) {
             <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fed7aa" }}>
               <div>
                 <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                <p style={{ margin:"2px 0 0", fontSize:12, color:"#9a3412" }}>{s.instrument} · {studentScheduleLabel(s)}</p>
+                <p style={{ margin:"2px 0 0", fontSize:12, color:"#9a3412" }}>{s.instrument} · {studentScheduleLabel(s)} · {lessonDurationLabel(s)}</p>
               </div>
               <div style={{ display:"flex", gap:6 }}>
                 <button onClick={() => onMesaj(s)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>WA</button>
@@ -1398,7 +1432,7 @@ export default function App() {
       if (s.id!==sid) return s;
       const last = [...s.schedule].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
       const from = last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
-      const newLessons = buildScheduleSlots(getStudentSlots(s), 4, from);
+      const newLessons = buildScheduleSlots(getStudentSlots(s), 4, from, getLessonDuration(s));
       const odenmemisEk = unpaidEkDersler(s);
       const ekTutar = odenmemisEk.reduce((sum,e)=>sum+(e.fee||ekDersFee(s)),0);
       const paketUcret = s.ucret || 0;
@@ -1431,9 +1465,9 @@ export default function App() {
     const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
     const newStudent = {
       id: uid(), name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"",
-      ucret: parseInt(f.ucret)||0, packageLessonCount, package_lesson_count: packageLessonCount, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
+      ucret: parseInt(f.ucret)||0, packageLessonCount, package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
       no_show: 0, frozen: false, odemeler: [], telafi_records: [],
-      schedule: buildScheduleSlots(slots, packageLessonCount, from), ek_dersler: [],
+      schedule: buildScheduleSlots(slots, packageLessonCount, from, f.lessonDuration), ek_dersler: [],
     };
     setStudents(p=>[...p, newStudent]);
     await saveStudent(newStudent);
@@ -1512,7 +1546,19 @@ export default function App() {
   const handleDuzenle = async (sid, f) => {
     const slots = normalizeSlots(f.lessonSlots, f.day, f.time);
     const updated = students.map(s => s.id!==sid ? s : {
-      ...s, name: f.name, phone: f.phone, veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"", ucret: parseInt(f.ucret)||0, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots
+      ...s,
+      name: f.name,
+      phone: f.phone,
+      veli_adi: f.veli_adi||"",
+      dogum_tarihi: f.dogum_tarihi||"",
+      ucret: parseInt(f.ucret)||0,
+      lessonDuration: parseInt(f.lessonDuration)||45,
+      instrument: f.instrument,
+      day: slots[0].day,
+      time: slots[0].time,
+      lessonSlots: slots,
+      lesson_slots: slots,
+      schedule: (s.schedule||[]).map(l=>l.status==="upcoming" ? {...l, durationMinutes:parseInt(f.lessonDuration)||45} : l)
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
@@ -1777,7 +1823,7 @@ export default function App() {
                           {unpaidEkCount>0 ? <Pill label={unpaidEkCount+" ek ödenmedi"} bg="#ffedd5" color="#c2410c" /> : null}
                         </div>
                         <p style={{ fontSize:12, color:"#999", margin:"3px 0 2px", fontWeight:500 }}>
-                          {s.instrument} · {studentScheduleLabel(s)}
+                          {s.instrument} · {studentScheduleLabel(s)} · {lessonDurationLabel(s)}
                           {s.ucret ? <span style={{ marginLeft:8, color:"#059669", fontWeight:700 }}>{s.ucret.toLocaleString("tr-TR")} TL</span> : null}
                         </p>
                         {s.veli_adi ? <p style={{ fontSize:11, color:"#888", margin:"0 0 4px" }}>Veli: {s.veli_adi}</p> : null}
