@@ -322,6 +322,59 @@ function paymentPackageInfo(student) {
   };
 }
 
+function packageInfos(student) {
+  const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const withIds = sortedSchedule.filter(l=>l.packageId);
+  if (withIds.length) {
+    const ids = [];
+    withIds.forEach(l => { if (!ids.includes(l.packageId)) ids.push(l.packageId); });
+    return ids.map((packageId, packageIndex) => {
+      const lessons = sortedSchedule.filter(l=>l.packageId===packageId);
+      const first = lessons[0];
+      const last = lessons[lessons.length-1] || first;
+      return {
+        packageIndex,
+        packageId,
+        packageSize: parseInt(first?.packageLessonCount || lessons.length || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE,
+        lessonIds: lessons.map(l=>l.id).filter(Boolean),
+        start: first?.date,
+        end: last?.date,
+        startKey: dateKey(first?.date),
+        endKey: dateKey(last?.date),
+        donem: first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : "",
+      };
+    }).filter(info=>info.start);
+  }
+
+  const packageSize = getPackageLessonCount(student);
+  const infos = [];
+  for (let i=0; i<sortedSchedule.length; i+=packageSize) {
+    const lessons = sortedSchedule.slice(i, i + packageSize);
+    if (!lessons.length) continue;
+    const first = lessons[0];
+    const last = lessons[lessons.length-1];
+    infos.push({
+      packageIndex: infos.length,
+      packageSize: lessons.length || packageSize,
+      lessonIds: lessons.map(l=>l.id).filter(Boolean),
+      start: first.date,
+      end: last.date,
+      startKey: dateKey(first.date),
+      endKey: dateKey(last.date),
+      donem: fmtShort(first.date)+" - "+fmtShort(last.date),
+    });
+  }
+  return infos;
+}
+
+function currentPaymentDueInfo(student) {
+  if (student.frozen) return null;
+  const today = midday();
+  return packageInfos(student).find(info =>
+    midday(new Date(info.start)) <= today && !hasPaymentForPackage(student, info)
+  ) || null;
+}
+
 function paymentDisplayInfo(student, payment, index) {
   const schedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const inferredStudentCount = getPackageLessonCount(student);
@@ -380,21 +433,21 @@ function ekDersTypeLabel(type) {
 function hasPaymentForPackage(student, info) {
   if (!info) return false;
   const payments = student.odemeler || [];
-  return payments.some((o, i) =>
-    (info.packageId && o.packageId === info.packageId) ||
-    o.packageStart === info.startKey ||
-    o.package_index === info.packageIndex ||
-    o.packageIndex === info.packageIndex ||
-    i >= info.packageIndex
-  );
+  return payments.some((o, i) => {
+    if (info.packageId) {
+      return o.packageId === info.packageId || o.packageStart === info.startKey;
+    }
+    return (
+      o.packageStart === info.startKey ||
+      o.package_index === info.packageIndex ||
+      o.packageIndex === info.packageIndex ||
+      i >= info.packageIndex
+    );
+  });
 }
 
 function isPaymentDue(student) {
-  if (student.frozen) return false;
-  const info = paymentPackageInfo(student);
-  if (!info) return false;
-  if (midday(new Date(info.start)) > midday()) return false;
-  return !hasPaymentForPackage(student, info);
+  return !!currentPaymentDueInfo(student);
 }
 
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
@@ -481,7 +534,6 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
         <Btn bg="#1f2937" onClick={() => reset("yapildi")}>Yapıldı Say</Btn>
         <Btn bg="#3b82f6" onClick={() => reset("telafi")}>Telafi Hakkı Oluştur</Btn>
         {lesson && lesson.status !== "upcoming" ? <Btn bg="#6b7280" onClick={() => act("reset-upcoming")}>Planlandıya Geri Al</Btn> : null}
-        <Btn bg="#f59e0b" onClick={() => act("freeze")}>Programı Dondur</Btn>
       </>}
       {step === "telafi" && <>
         <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>24 saat önceden iptal</p>
@@ -726,7 +778,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentDateChange, onPa
   );
 }
 
-function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onÖdeme, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersDurum, onDuzenle, onPaymentDateChange, onPaymentDelete }) {
+function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onÖdeme, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentDateChange, onPaymentDelete }) {
   const [tab, setTab] = useState("takvim");
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -917,7 +969,13 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
         <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:8 }}>
           <Btn bg="#6366f1" onClick={() => setShowDuzenle(true)}>Öğrenciyi Düzenle</Btn>
           <Btn bg="#111" onClick={() => { onRecharge(student.id, new Date().toISOString().split("T")[0]); onClose(); }}>Paket Yükle (4 Ders)</Btn>
-          <Btn bg="#25D366" onClick={() => { onMesaj(student); onClose(); }}>Mesaj Şablonları</Btn>
+          <div style={{ background:student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
+            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:student.frozen?"#1d4ed8":"#6b7280", textTransform:"uppercase", letterSpacing:1 }}>Öğrenci Durumu</p>
+            <p style={{ margin:"0 0 10px", fontSize:13, color:"#475569" }}>{student.frozen ? "Program dondurulmuş. Öğrenci geri başlayacağı zaman buradan aktif edebilirsin." : "Öğrenci aktif. Uzun süre ara verecekse programı dondurabilirsin."}</p>
+            <button onClick={() => onToggleFreeze(student.id, !student.frozen)} style={{ width:"100%", background:student.frozen?"#2563eb":"#f59e0b", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>
+              {student.frozen ? "Programı Devam Ettir" : "Programı Dondur"}
+            </button>
+          </div>
           <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name+" silinsin mi?")){ onDelete(student.id); onClose(); } }}>Öğrenciyi Sil</Btn>
         </div>
       </Sheet>
@@ -1076,7 +1134,6 @@ function MesajSheet({ student, onClose }) {
 }
 
 function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
-  const [odemeDate, setÖdemeDate] = useState(new Date().toISOString().split("T")[0]);
   const ekDersler = unpaidEkDersler(student);
   const ekToplam = ekDersler.reduce((sum,e)=>sum+(e.fee||ekDersFee(student)),0);
   const paketTutar = student.ucret || 0;
@@ -1086,11 +1143,9 @@ function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
         <p style={{ margin:0, fontSize:13, color:"#166534" }}>4 yeni ders eklenecek.</p>
         <p style={{ margin:"6px 0 0", fontSize:13, color:"#166534", fontWeight:700 }}>Paket: {paketTutar.toLocaleString("tr-TR")} TL</p>
         {ekDersler.length > 0 ? <p style={{ margin:"6px 0 0", fontSize:13, color:"#5b21b6", fontWeight:700 }}>{ekDersler.length} ödenmemiş ek ders: {ekToplam.toLocaleString("tr-TR")} TL</p> : null}
-        <p style={{ margin:"8px 0 0", fontSize:15, color:"#111", fontWeight:800 }}>Toplam: {(paketTutar+ekToplam).toLocaleString("tr-TR")} TL</p>
+        <p style={{ margin:"8px 0 0", fontSize:13, color:"#166534" }}>Ödeme uyarısı yeni periyodun ilk ders günü Bugünkü Ödemeler alanına düşer.</p>
       </div>
-      <label style={LBL}>Ödeme Tarihi</label>
-      <input style={{ ...INP, marginBottom:12 }} type="date" value={odemeDate} onChange={e=>setÖdemeDate(e.target.value)} />
-      <Btn bg="#10b981" onClick={() => { onÖdemeAl(student.id, odemeDate); onClose(); }}>Ödeme Alındı - Paketi Yukle</Btn>
+      <Btn bg="#111" onClick={() => { onÖdemeAl(student.id); onClose(); }}>Paketi Yükle</Btn>
       <Btn bg="#f97316" onClick={() => { onMesajGonder(student); onClose(); }}>Ödeme Hatırlatmasi Gonder</Btn>
       <Btn bg="#6b7280" onClick={onClose} outline>İptal</Btn>
     </Sheet>
@@ -1191,18 +1246,16 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj }) {
   const [odemeModal, setÖdemeModal] = useState(null);
   const [odemeDate, setÖdemeDate] = useState(new Date().toISOString().split("T")[0]);
 
+  const ödemeInfo = (student) => currentPaymentDueInfo(student);
   const bugünÖdeme = students.filter(s => {
-    if (!isPaymentDue(s)) return false;
-    const bugünDers = s.schedule.find(l => l.status === "upcoming" && isToday(l.date));
-    const info = paymentPackageInfo(s);
-    return bugünDers || (info && isToday(info.start));
+    const info = ödemeInfo(s);
+    return info && isToday(info.start);
   });
 
   const gecikenler = students.filter(s => {
-    if (!isPaymentDue(s)) return false;
-    if (bugünÖdeme.some(x=>x.id===s.id)) return false;
-    const info = paymentPackageInfo(s);
+    const info = ödemeInfo(s);
     if (!info) return false;
+    if (bugünÖdeme.some(x=>x.id===s.id)) return false;
     const ilkDersTarih = midday(new Date(info.start));
     return ilkDersTarih < todayMid;
   });
@@ -1214,26 +1267,29 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj }) {
     <div style={{ marginBottom:14 }}>
       {bugünÖdeme.length > 0 ? (
         <div style={{ background:"#fff7ed", border:"1.5px solid #fb923c", borderRadius:14, padding:"12px 16px", marginBottom:10 }}>
-          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#c2410c" }}>Bugün Ödemesi Gelenler ({bugünÖdeme.length})</p>
-          {bugünÖdeme.map(s => (
+          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#c2410c" }}>Bugünkü Ödemeler ({bugünÖdeme.length})</p>
+          {bugünÖdeme.map(s => {
+            const info = ödemeInfo(s);
+            return (
             <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fed7aa" }}>
               <div>
                 <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                <p style={{ margin:"2px 0 0", fontSize:12, color:"#9a3412" }}>{s.instrument} · {studentScheduleLabel(s)} · {lessonDurationLabel(s)}</p>
+                <p style={{ margin:"2px 0 0", fontSize:12, color:"#9a3412" }}>{info?.donem || "Yeni dönem"} · {s.instrument} · {studentScheduleLabel(s)}</p>
               </div>
               <div style={{ display:"flex", gap:6 }}>
-                <button onClick={() => onMesaj(s)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>WA</button>
+                <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgIlkDersÖdeme()),"_blank"); else onMesaj(s); }} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Mesaj</button>
                 <button onClick={() => { setÖdemeDate(new Date().toISOString().split("T")[0]); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : null}
       {gecikenler.length > 0 ? (
         <div style={{ background:"#fff1f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 16px" }}>
           <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#be123c" }}>Geciken Ödemeler ({gecikenler.length})</p>
           {gecikenler.map(s => {
-            const info = paymentPackageInfo(s);
+            const info = ödemeInfo(s);
             const geciken = info ? paymentOverdueDays(info.start) : 0;
             return (
               <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fecdd3" }}>
@@ -1424,7 +1480,6 @@ export default function App() {
         case "lm-notelafi": msg = "Son dakika iptali"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "lastminute", note||"Son dakika iptali")};
         case "noshow": msg = "No-show kaydedildi"; return {...s, no_show:Math.max(0, s.no_show + (oldLesson?.status === "noshow" ? 0 : 1)), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "noshow", note||"Habersiz gelmedi")};
         case "reset-upcoming": msg = "Ders planlandıya alındı"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "upcoming", "")};
-        case "freeze": msg = s.frozen ? "Program aktif edildi" : "Program donduruldu"; return {...s, frozen:!s.frozen};
         default: return s;
       }
     });
@@ -1432,6 +1487,13 @@ export default function App() {
     await saveStudent(updated.find(s => s.id === sid));
     pop(msg);
     setActionModal(null);
+  };
+
+  const handleToggleFreeze = async (sid, frozen) => {
+    const updated = students.map(s => s.id!==sid ? s : { ...s, frozen });
+    setStudents(updated);
+    await saveStudent(updated.find(s=>s.id===sid));
+    pop(frozen ? "Program donduruldu" : "Program tekrar aktif edildi");
   };
 
   const handleTelafiDone = async (sid, tid, note) => {
@@ -1467,26 +1529,7 @@ export default function App() {
       const last = [...s.schedule].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
       const from = last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
       const newLessons = buildScheduleSlots(getStudentSlots(s), 4, from, getLessonDuration(s));
-      const odenmemisEk = unpaidEkDersler(s);
-      const ekTutar = odenmemisEk.reduce((sum,e)=>sum+(e.fee||ekDersFee(s)),0);
-      const paketUcret = s.ucret || 0;
-      const odemeler = [...(s.odemeler||[]), {
-        tarih: odemeDate||new Date().toISOString().split("T")[0],
-        tutar:paketUcret + ekTutar,
-        paketUcret,
-        ekDersSayisi:odenmemisEk.length,
-        ekTutar,
-        ekDersIds:odenmemisEk.map(e=>e.id),
-        donem: fmtShort(newLessons[0].date)+" - "+fmtShort(newLessons[newLessons.length-1].date),
-        packageId: newLessons[0].packageId,
-        packageLessonCount: newLessons.length,
-        packageLessonIds: newLessons.map(l=>l.id),
-        packageStart: dateKey(newLessons[0].date),
-        packageEnd: dateKey(newLessons[newLessons.length-1].date),
-        odendi:true
-      }];
-      const ekDersler = (s.ek_dersler||[]).map(e => odenmemisEk.some(x=>x.id===e.id) ? {...e, odendi:true, paidAt:odemeDate||new Date().toISOString().split("T")[0]} : e);
-      return {...s, schedule:[...s.schedule, ...newLessons], odemeler, ek_dersler:ekDersler};
+      return {...s, frozen:false, schedule:[...s.schedule, ...newLessons]};
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
@@ -1512,7 +1555,7 @@ export default function App() {
     const odemeDate = tarih||new Date().toISOString().split("T")[0];
     const updated = students.map(s => {
       if (s.id!==sid) return s;
-      const packageInfo = paymentPackageInfo(s);
+      const packageInfo = currentPaymentDueInfo(s) || paymentPackageInfo(s);
       const upcoming = s.schedule.filter(l => l.status === "upcoming");
       let donem = "";
       if (packageInfo) donem = packageInfo.donem;
@@ -1889,7 +1932,7 @@ export default function App() {
                         {ac>0 ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>4?"#d97706":"#2563eb" }}><strong>{ac}/6</strong> aktif telafi</span></div> : null}
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
-                      <button onClick={()=>setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", marginLeft:10, flexShrink:0, fontFamily:"inherit" }}>İşlem</button>
+                      <button onClick={()=>s.frozen ? setDetailSt(s) : setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", marginLeft:10, flexShrink:0, fontFamily:"inherit" }}>{s.frozen ? "Devam" : "İşlem"}</button>
                       {payDue ? <button onClick={()=>setÖdemeKaydetModal(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:700, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💳</button> : null}
                       <button onClick={()=>setMesajSt(s)} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💬</button>
                     </div>
@@ -1908,7 +1951,7 @@ export default function App() {
       </div>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdeme={(st)=>setÖdemeSt(st)} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onPaymentDateChange={handleÖdemeTarihiGuncelle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdeme={(st)=>setÖdemeSt(st)} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentDateChange={handleÖdemeTarihiGuncelle} onPaymentDelete={handleÖdemeSil} /> : null}
       {showAdd ? <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} onClose={()=>setMesajSt(null)} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
