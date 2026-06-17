@@ -51,13 +51,26 @@ function addMinutes(date, minutes) {
   return d;
 }
 
+function setTimeOnDate(date, time = "10:00") {
+  const d = new Date(date);
+  const [h, m] = String(time || "10:00").split(":").map(Number);
+  d.setHours(Number.isFinite(h) ? h : 10, Number.isFinite(m) ? m : 0, 0, 0);
+  return d;
+}
+
+function lessonStartDate(student, lesson) {
+  const base = new Date(lesson?.date);
+  const time = lesson?.time || student?.time;
+  return time ? setTimeOnDate(base, time) : base;
+}
+
 function calendarEventsFromStudents(students) {
   const events = [];
 
   students.forEach(student => {
     (student.schedule || []).forEach(lesson => {
       if (!lesson.date) return;
-      const start = new Date(lesson.date);
+      const start = lessonStartDate(student, lesson);
       const end = addMinutes(start, getLessonDuration(student, lesson));
       events.push({
         uid: "ders-" + student.id + "-" + (lesson.id || dateKey(lesson.date)) + "@sonsuz-sanat-crm",
