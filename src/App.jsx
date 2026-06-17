@@ -40,6 +40,34 @@ function getStudentSlots(student) {
   return normalizeSlots(student.lessonSlots || student.lesson_slots, student.day, student.time);
 }
 
+function sameSlots(a, b) {
+  const left = normalizeSlots(a);
+  const right = normalizeSlots(b);
+  return left.length === right.length && left.every((slot, i) => slot.day === right[i].day && slot.time === right[i].time);
+}
+
+function slotDayIndex(day) {
+  const key = TR_DAYS_MAP[day] || day;
+  return DAY_IDX[key] !== undefined ? DAY_IDX[key] : DAY_IDX[day];
+}
+
+function timeFromISO(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
+function upcomingScheduleMatchesSlots(lessons, slots) {
+  const cleanSlots = normalizeSlots(slots);
+  if (!lessons.length) return true;
+  return lessons.every(lesson => cleanSlots.some(slot => {
+    const lessonDay = lesson.day ? slotDayIndex(lesson.day) : new Date(lesson.date).getDay();
+    const lessonTimeValue = lesson.time || timeFromISO(lesson.date);
+    return lessonDay === slotDayIndex(slot.day) && lessonTimeValue === slot.time;
+  }));
+}
+
 function slotLabel(slots) {
   return normalizeSlots(slots).map(s => s.day+" "+s.time).join(" · ");
 }
@@ -66,6 +94,12 @@ function addMinutes(date, minutes) {
   const d = new Date(date);
   d.setMinutes(d.getMinutes() + minutes);
   return d;
+}
+
+function lessonStartDate(student, lesson) {
+  const base = new Date(lesson?.date);
+  const time = lesson?.time || student?.time;
+  return time ? setTimeOnDate(base, time) : base;
 }
 
 function buildScheduleSlots(slots, count, from, durationMinutes = 45) {
@@ -149,7 +183,7 @@ function calendarEventsFromStudents(students) {
   students.forEach(student => {
     (student.schedule || []).forEach(lesson => {
       if (!lesson.date) return;
-      const start = new Date(lesson.date);
+      const start = lessonStartDate(student, lesson);
       const end = addMinutes(start, getLessonDuration(student, lesson));
       events.push({
         uid: "ders-" + student.id + "-" + (lesson.id || dateKey(lesson.date)) + "@sonsuz-sanat-crm",
@@ -1545,20 +1579,39 @@ export default function App() {
 
   const handleDuzenle = async (sid, f) => {
     const slots = normalizeSlots(f.lessonSlots, f.day, f.time);
-    const updated = students.map(s => s.id!==sid ? s : {
-      ...s,
-      name: f.name,
-      phone: f.phone,
-      veli_adi: f.veli_adi||"",
-      dogum_tarihi: f.dogum_tarihi||"",
-      ucret: parseInt(f.ucret)||0,
-      lessonDuration: parseInt(f.lessonDuration)||45,
-      instrument: f.instrument,
-      day: slots[0].day,
-      time: slots[0].time,
-      lessonSlots: slots,
-      lesson_slots: slots,
-      schedule: (s.schedule||[]).map(l=>l.status==="upcoming" ? {...l, durationMinutes:parseInt(f.lessonDuration)||45} : l)
+    const duration = parseInt(f.lessonDuration)||45;
+    const updated = students.map(s => {
+      if (s.id!==sid) return s;
+      const schedule = s.schedule || [];
+      const upcomingLessons = schedule.filter(l=>l.status==="upcoming");
+      const fixedLessons = schedule.filter(l=>l.status!=="upcoming");
+      const slotsChanged = !sameSlots(getStudentSlots(s), slots);
+      const upcomingNeedsSync = !upcomingScheduleMatchesSlots(upcomingLessons, slots);
+      let nextSchedule = schedule.map(l=>l.status==="upcoming" ? {...l, durationMinutes:duration} : l);
+
+      if ((slotsChanged || upcomingNeedsSync) && upcomingLessons.length) {
+        const firstUpcoming = [...upcomingLessons].sort((a,b)=>new Date(a.date)-new Date(b.date))[0];
+        const from = firstUpcoming?.date ? new Date(firstUpcoming.date) : new Date();
+        from.setHours(12,0,0,0);
+        const regenerated = buildScheduleSlots(slots, upcomingLessons.length, from, duration);
+        nextSchedule = [...fixedLessons, ...regenerated].sort((a,b)=>new Date(a.date)-new Date(b.date));
+      }
+
+      return {
+        ...s,
+        name: f.name,
+        phone: f.phone,
+        veli_adi: f.veli_adi||"",
+        dogum_tarihi: f.dogum_tarihi||"",
+        ucret: parseInt(f.ucret)||0,
+        lessonDuration: duration,
+        instrument: f.instrument,
+        day: slots[0].day,
+        time: slots[0].time,
+        lessonSlots: slots,
+        lesson_slots: slots,
+        schedule: nextSchedule
+      };
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
