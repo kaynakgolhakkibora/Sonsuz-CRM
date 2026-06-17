@@ -10,6 +10,19 @@ function icsDate(iso) {
   return new Date(iso).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 }
 
+function icsLocalDate(date) {
+  const d = new Date(date);
+  return (
+    d.getFullYear() +
+    String(d.getMonth() + 1).padStart(2, "0") +
+    String(d.getDate()).padStart(2, "0") +
+    "T" +
+    String(d.getHours()).padStart(2, "0") +
+    String(d.getMinutes()).padStart(2, "0") +
+    String(d.getSeconds()).padStart(2, "0")
+  );
+}
+
 function icsText(value = "") {
   return String(value)
     .replace(/\\/g, "\\\\")
@@ -130,8 +143,8 @@ function buildCalendar(students) {
       "BEGIN:VEVENT",
       "UID:" + icsText(event.uid),
       "DTSTAMP:" + now,
-      "DTSTART:" + icsDate(event.start.toISOString()),
-      "DTEND:" + icsDate(event.end.toISOString()),
+      "DTSTART;TZID=Europe/Istanbul:" + icsLocalDate(event.start),
+      "DTEND;TZID=Europe/Istanbul:" + icsLocalDate(event.end),
       "SUMMARY:" + icsText(event.summary),
       "DESCRIPTION:" + icsText(event.description),
       "END:VEVENT"
