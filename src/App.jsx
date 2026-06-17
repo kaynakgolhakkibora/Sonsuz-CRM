@@ -267,6 +267,8 @@ function buildGoogleCalendarICS(students) {
   return { content: lines.join("\r\n"), count: events.length };
 }
 
+const CALENDAR_FEED_VERSION = "2026-06-18-v17";
+
 function downloadGoogleCalendarICS(students) {
   const { content, count } = buildGoogleCalendarICS(students);
   const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
@@ -1730,7 +1732,7 @@ export default function App() {
   };
 
   const handleCalendarLinkCopy = async () => {
-    const url = window.location.origin + "/api/calendar";
+    const url = window.location.origin + "/api/calendar?v=" + CALENDAR_FEED_VERSION;
     try {
       await navigator.clipboard.writeText(url);
       pop("Takvim abonelik linki kopyalandı");
