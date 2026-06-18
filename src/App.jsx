@@ -624,12 +624,20 @@ function TelafiSheet({ record, studentName, onClose, onDone }) {
   );
 }
 
-function ShiftSheet({ lesson, student, onClose, onShift }) {
+function ShiftSheet({ lesson, student, onClose, onShift, onMoveOne }) {
+  const [moveDate, setMoveDate] = useState(dateKey(lesson.date) || new Date().toISOString().split("T")[0]);
   return (
     <Sheet title="Ders Tarihi Kaydır" subtitle={fmtDate(lesson.date)+" - "+lessonTime(student, lesson)} onClose={onClose}>
-      <p style={{ fontSize:13, color:"#666", marginBottom:16 }}>Bu dersten itibaren tüm planlanmış dersler ileri alınır.</p>
+      <p style={{ fontSize:13, color:"#666", marginBottom:16 }}>1/2 hafta ileri alırsan bu dersten sonraki planlı dersler de aynı şekilde kayar.</p>
       <Btn bg="#6366f1" onClick={() => { onShift(lesson.id, 7); onClose(); }}>1 Hafta İleri Al</Btn>
       <Btn bg="#8b5cf6" onClick={() => { onShift(lesson.id, 14); onClose(); }}>2 Hafta İleri Al</Btn>
+      <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, padding:12, margin:"12px 0" }}>
+        <p style={{ margin:"0 0 8px", fontSize:13, color:"#666" }}>Sadece bu dersi başka bir tarihe taşı.</p>
+        <input style={INP} type="date" value={moveDate} onChange={e=>setMoveDate(e.target.value)} />
+        <div style={{ marginTop:10 }}>
+          <Btn bg="#0ea5e9" onClick={() => { onMoveOne(lesson.id, moveDate); onClose(); }}>Tarihe Taşı</Btn>
+        </div>
+      </div>
       <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
     </Sheet>
   );
@@ -793,7 +801,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentDateChange, onPa
   );
 }
 
-function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onTelafiDone, onMesaj, onÖdeme, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentDateChange, onPaymentDelete }) {
+function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdeme, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentDateChange, onPaymentDelete }) {
   const [tab, setTab] = useState("takvim");
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -987,7 +995,9 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
           <div style={{ background:student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
             <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:student.frozen?"#1d4ed8":"#6b7280", textTransform:"uppercase", letterSpacing:1 }}>Öğrenci Durumu</p>
             <p style={{ margin:"0 0 10px", fontSize:13, color:"#475569" }}>{student.frozen ? "Program dondurulmuş. Öğrenci geri başlayacağı zaman buradan aktif edebilirsin." : "Öğrenci aktif. Uzun süre ara verecekse programı dondurabilirsin."}</p>
-            <button onClick={() => onToggleFreeze(student.id, !student.frozen)} style={{ width:"100%", background:student.frozen?"#2563eb":"#f59e0b", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>
+            <button onClick={() => {
+              onToggleFreeze(student.id, !student.frozen);
+            }} style={{ width:"100%", background:student.frozen?"#2563eb":"#f59e0b", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>
               {student.frozen ? "Programı Devam Ettir" : "Programı Dondur"}
             </button>
           </div>
@@ -995,7 +1005,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onT
         </div>
       </Sheet>
       {telafiSel ? <TelafiSheet record={telafiSel} studentName={student.name} onClose={() => setTelafiSel(null)} onDone={(id, note) => { onTelafiDone(student.id, id, note); setTelafiSel(null); }} /> : null}
-      {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} /> : null}
+      {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date) => { onMoveOne(student.id, lid, date); setShiftSel(null); }} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
       {showDuzenle ? <DuzenleSheet student={student} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} /> : null}
     </>
@@ -1532,6 +1542,23 @@ export default function App() {
     pop((days/7)+" hafta ileri alındı");
   };
 
+  const handleMoveOneLesson = async (sid, lid, date) => {
+    const updated = students.map(s => {
+      if (s.id!==sid) return s;
+      return {
+        ...s,
+        schedule: (s.schedule||[]).map(l => {
+          if (l.id !== lid) return l;
+          const moved = setTimeOnDate(new Date((date || dateKey(l.date)) + "T12:00:00"), lessonTime(s, l));
+          return { ...l, date:moved.toISOString() };
+        }).sort((a,b)=>new Date(a.date)-new Date(b.date))
+      };
+    });
+    setStudents(updated);
+    await saveStudent(updated.find(s=>s.id===sid));
+    pop("Ders tarihe taşındı");
+  };
+
   const handleDelete = async (sid) => {
     await supabase.from("students").delete().eq("id", sid);
     setStudents(p => p.filter(s => s.id !== sid));
@@ -1966,7 +1993,7 @@ export default function App() {
       </div>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdeme={(st)=>setÖdemeSt(st)} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentDateChange={handleÖdemeTarihiGuncelle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdeme={(st)=>setÖdemeSt(st)} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentDateChange={handleÖdemeTarihiGuncelle} onPaymentDelete={handleÖdemeSil} /> : null}
       {showAdd ? <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} onClose={()=>setMesajSt(null)} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
