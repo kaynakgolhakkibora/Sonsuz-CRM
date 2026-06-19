@@ -286,9 +286,7 @@ function downloadGoogleCalendarICS(students) {
 
 function getPackageLessonCount(student) {
   const firstWithCount = (student.schedule||[]).find(l=>l.packageLessonCount);
-  const scheduleCount = (student.schedule||[]).length;
-  const inferredCount = scheduleCount > PAYMENT_PACK_SIZE && (student.odemeler||[]).length <= 1 ? scheduleCount : PAYMENT_PACK_SIZE;
-  const n = parseInt(student.packageLessonCount || student.package_lesson_count || firstWithCount?.packageLessonCount || inferredCount);
+  const n = parseInt(student.packageLessonCount || student.package_lesson_count || firstWithCount?.packageLessonCount || PAYMENT_PACK_SIZE);
   return Number.isFinite(n) && n > 0 ? n : PAYMENT_PACK_SIZE;
 }
 
@@ -340,37 +338,30 @@ function paymentPackageInfo(student) {
 
 function packageInfos(student) {
   const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  const withIds = sortedSchedule.filter(l=>l.packageId);
-  if (withIds.length) {
-    const ids = [];
-    withIds.forEach(l => { if (!ids.includes(l.packageId)) ids.push(l.packageId); });
-    return ids.map((packageId, packageIndex) => {
-      const lessons = sortedSchedule.filter(l=>l.packageId===packageId);
-      const first = lessons[0];
-      const last = lessons[lessons.length-1] || first;
-      return {
-        packageIndex,
-        packageId,
-        packageSize: parseInt(first?.packageLessonCount || lessons.length || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE,
-        lessonIds: lessons.map(l=>l.id).filter(Boolean),
-        start: first?.date,
-        end: last?.date,
-        startKey: dateKey(first?.date),
-        endKey: dateKey(last?.date),
-        donem: first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : "",
-      };
-    }).filter(info=>info.start);
-  }
-
   const packageSize = getPackageLessonCount(student);
   const infos = [];
-  for (let i=0; i<sortedSchedule.length; i+=packageSize) {
-    const lessons = sortedSchedule.slice(i, i + packageSize);
+  let i = 0;
+  while (i < sortedSchedule.length) {
+    const current = sortedSchedule[i];
+    let lessons = [];
+    if (current.packageId) {
+      const packageId = current.packageId;
+      while (i < sortedSchedule.length && sortedSchedule[i].packageId === packageId) {
+        lessons.push(sortedSchedule[i]);
+        i += 1;
+      }
+    } else {
+      while (i < sortedSchedule.length && !sortedSchedule[i].packageId && lessons.length < packageSize) {
+        lessons.push(sortedSchedule[i]);
+        i += 1;
+      }
+    }
     if (!lessons.length) continue;
     const first = lessons[0];
     const last = lessons[lessons.length-1];
     infos.push({
       packageIndex: infos.length,
+      packageId: first.packageId,
       packageSize: lessons.length || packageSize,
       lessonIds: lessons.map(l=>l.id).filter(Boolean),
       start: first.date,
@@ -401,21 +392,26 @@ function paymentDisplayInfo(student, payment, index) {
   const ids = Array.isArray(payment.packageLessonIds) ? payment.packageLessonIds : [];
   let lessons = ids.map(id => schedule.find(l=>l.id===id)).filter(Boolean);
   if (!lessons.length && payment.packageId) lessons = schedule.filter(l=>l.packageId===payment.packageId);
-  if (!lessons.length && payment.packageStart) {
+  if (!lessons.length && payment.packageStart && payment.packageEnd) {
     const startIdx = schedule.findIndex(l=>dateKey(l.date)===payment.packageStart);
     const count = effectiveCount || PAYMENT_PACK_SIZE;
     if (startIdx >= 0) lessons = schedule.slice(startIdx, startIdx + count);
   }
   const first = lessons[0];
   const last = lessons[lessons.length-1];
-  const periodShort = first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : (payment.donem || "");
-  const periodLong = first && last ? fmtDate(first.date)+" - "+fmtDate(last.date) : (payment.donem || "");
+  const storedPeriod = payment.packageStart && payment.packageEnd
+    ? fmtShort(payment.packageStart)+" - "+fmtShort(payment.packageEnd)
+    : (payment.donem || "");
+  const storedPeriodLong = payment.packageStart && payment.packageEnd
+    ? fmtDate(payment.packageStart)+" - "+fmtDate(payment.packageEnd)
+    : (payment.donem || "");
+  const periodShort = first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : storedPeriod;
+  const periodLong = first && last ? fmtDate(first.date)+" - "+fmtDate(last.date) : storedPeriodLong;
   const lessonCount = lessons.length || effectiveCount || PAYMENT_PACK_SIZE;
   const program = studentScheduleLabel(student);
   const expectedPackageAmount = (student.ucret || 0) * (lessonCount / PAYMENT_PACK_SIZE);
-  const expectedTotal = expectedPackageAmount + (payment.ekTutar || 0);
   const numericAmount = typeof payment.tutar === "number" ? payment.tutar : null;
-  const amountToShow = numericAmount !== null && expectedTotal > numericAmount && lessonCount > PAYMENT_PACK_SIZE ? expectedTotal : numericAmount;
+  const amountToShow = numericAmount;
   return {
     periodShort: payment.sadeceEkDers ? "Ek ders ödemesi" : periodShort,
     periodLong: payment.sadeceEkDers ? "Paket dışı ek ders" : periodLong,
@@ -467,14 +463,14 @@ function hasPaymentForPackage(student, info) {
         o.packageStart === info.startKey ||
         o.package_index === info.packageIndex ||
         o.packageIndex === info.packageIndex ||
-        i >= info.packageIndex
+        i === info.packageIndex
       );
     }
     return (
       o.packageStart === info.startKey ||
       o.package_index === info.packageIndex ||
       o.packageIndex === info.packageIndex ||
-      i >= info.packageIndex
+      i === info.packageIndex
     );
   });
 }
