@@ -480,6 +480,27 @@ function nextPayablePackageInfo(student) {
   return packageInfos(student).find(info => !hasPaymentForPackage(student, info)) || null;
 }
 
+function packageSummaryKey(info) {
+  if (!info) return "";
+  return [info.startKey, info.endKey, info.packageSize].filter(Boolean).join("|");
+}
+
+function lastCompletedPackageInfo(student) {
+  const schedule = student.schedule || [];
+  const infos = packageInfos(student);
+  return [...infos].reverse().find(info => {
+    const ids = new Set(info.lessonIds || []);
+    const lessons = schedule.filter(l => ids.has(l.id));
+    return lessons.length > 0 && lessons.every(l => l.status !== "upcoming");
+  }) || null;
+}
+
+function summarySentInfo(student, info) {
+  const key = packageSummaryKey(info);
+  if (!key) return null;
+  return (student.package_summary_logs || []).find(log => log.packageKey === key) || null;
+}
+
 function isPaymentDue(student) {
   return !!currentPaymentDueInfo(student);
 }
@@ -775,11 +796,15 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
   );
 }
 
-function PaymentHistoryItem({ student, payment, index, onPaymentDateChange, onPaymentDelete }) {
+function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentDelete }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(payment.tarih || new Date().toISOString().split("T")[0]);
+  const [amount, setAmount] = useState(typeof payment.tutar === "number" ? String(payment.tutar) : "");
+  const [startKey, setStartKey] = useState(payment.packageStart || "");
+  const [endKey, setEndKey] = useState(payment.packageEnd || payment.packageStart || "");
   const info = paymentDisplayInfo(student, payment, index);
+  const lessonOptions = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   return (
     <div style={{ borderBottom:"1px solid #f0f0f0", padding:"8px 0" }}>
       <button onClick={() => setOpen(v=>!v)} style={{ width:"100%", background:"transparent", border:"none", padding:0, cursor:"pointer", fontFamily:"inherit", textAlign:"left" }}>
@@ -806,14 +831,26 @@ function PaymentHistoryItem({ student, payment, index, onPaymentDateChange, onPa
             <div style={{ marginTop:10 }}>
               <label style={{ ...LBL, marginTop:0 }}>Ödeme Tarihi</label>
               <input style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:8 }}>
-                <button onClick={() => { onPaymentDateChange(index, date); setEditing(false); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Kaydet</button>
-                <button onClick={() => { setDate(payment.tarih || ""); setEditing(false); }} style={{ background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Vazgeç</button>
+              <label style={LBL}>Tutar (TL)</label>
+              <input style={INP} type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="Örn. 5600" />
+              <label style={LBL}>Kapsadığı İlk Ders</label>
+              <select style={INP} value={startKey} onChange={e=>setStartKey(e.target.value)}>
+                <option value="">Seçilmedi</option>
+                {lessonOptions.map(l => <option key={l.id} value={dateKey(l.date)}>{fmtDate(l.date)} - {lessonTime(student, l)}</option>)}
+              </select>
+              <label style={LBL}>Kapsadığı Son Ders</label>
+              <select style={INP} value={endKey} onChange={e=>setEndKey(e.target.value)}>
+                <option value="">Seçilmedi</option>
+                {lessonOptions.map(l => <option key={l.id} value={dateKey(l.date)}>{fmtDate(l.date)} - {lessonTime(student, l)}</option>)}
+              </select>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:10 }}>
+                <button onClick={() => { onPaymentEdit(index, { tarih:date, tutar:amount, packageStart:startKey, packageEnd:endKey }); setEditing(false); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Kaydet</button>
+                <button onClick={() => { setDate(payment.tarih || ""); setAmount(typeof payment.tutar === "number" ? String(payment.tutar) : ""); setStartKey(payment.packageStart || ""); setEndKey(payment.packageEnd || payment.packageStart || ""); setEditing(false); }} style={{ background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Vazgeç</button>
               </div>
             </div>
           ) : (
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:10 }}>
-              <button onClick={() => setEditing(true)} style={{ background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Tarihi Düzenle</button>
+              <button onClick={() => setEditing(true)} style={{ background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Düzelt</button>
               <button onClick={() => { if(window.confirm("Bu ödeme kaydı silinsin mi?")) onPaymentDelete(index); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Ödemeyi Sil</button>
             </div>
           )}
@@ -823,7 +860,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentDateChange, onPa
   );
 }
 
-function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdemeAl, onZamYap, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentDateChange, onPaymentDelete }) {
+function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdemeAl, onZamYap, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState("takvim");
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -879,7 +916,7 @@ function DetailSheet({ student, onClose, onRecharge, onLessonClick, onShift, onM
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Geçmişi</p>
             {[...student.odemeler].map((o,i)=>({o,i})).reverse().map(({o,i}) => (
-              <PaymentHistoryItem key={i} student={student} payment={o} index={i} onPaymentDateChange={(idx,date)=>onPaymentDateChange(student.id,idx,date)} onPaymentDelete={(idx)=>onPaymentDelete(student.id,idx)} />
+              <PaymentHistoryItem key={i} student={student} payment={o} index={i} onPaymentEdit={(idx,changes)=>onPaymentEdit(student.id,idx,changes)} onPaymentDelete={(idx)=>onPaymentDelete(student.id,idx)} />
             ))}
           </div>
         ) : null}
@@ -1552,6 +1589,7 @@ export default function App() {
       telafi_records: student.telafi_records || [],
       schedule: student.schedule || [],
       ek_dersler: student.ek_dersler || [],
+      package_summary_logs: student.package_summary_logs || [],
     });
     if (error) console.error("Kayıt hatası:", error);
   };
@@ -1726,18 +1764,45 @@ export default function App() {
     pop("Ödeme kaydedildi");
   };
 
-  const handleÖdemeTarihiGuncelle = async (sid, index, tarih) => {
-    const updated = students.map(s => s.id!==sid ? s : {
-      ...s,
-      odemeler: (s.odemeler||[]).map((o,i)=>i===index ? {...o, tarih:tarih||o.tarih} : o),
-      ek_dersler: (s.ek_dersler||[]).map(e => {
-        const edited = (s.odemeler||[])[index];
-        return edited?.ekDersIds?.includes(e.id) ? {...e, paidAt:tarih||e.paidAt} : e;
-      })
+  const handleÖdemeDuzenle = async (sid, index, changes) => {
+    const updated = students.map(s => {
+      if (s.id!==sid) return s;
+      const original = (s.odemeler||[])[index];
+      if (!original) return s;
+      let packageStart = changes.packageStart || null;
+      let packageEnd = changes.packageEnd || null;
+      if (packageStart && !packageEnd) packageEnd = packageStart;
+      if (!packageStart && packageEnd) packageStart = packageEnd;
+      if (packageStart && packageEnd && new Date(packageStart) > new Date(packageEnd)) {
+        const tmp = packageStart;
+        packageStart = packageEnd;
+        packageEnd = tmp;
+      }
+      const schedule = [...(s.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+      const packageLessons = packageStart && packageEnd
+        ? schedule.filter(l => dateKey(l.date) >= packageStart && dateKey(l.date) <= packageEnd)
+        : [];
+      const parsedAmount = parseFloat(String(changes.tutar || "").replace(",", "."));
+      const nextPayment = {
+        ...original,
+        tarih: changes.tarih || original.tarih,
+        tutar: Number.isFinite(parsedAmount) ? parsedAmount : original.tutar,
+        packageStart: packageStart || undefined,
+        packageEnd: packageEnd || undefined,
+        packageLessonIds: packageLessons.length ? packageLessons.map(l=>l.id).filter(Boolean) : (packageStart || packageEnd ? [] : original.packageLessonIds),
+        packageLessonCount: packageLessons.length || (packageStart || packageEnd ? 0 : original.packageLessonCount),
+        packageId: packageLessons.length && packageLessons.every(l=>l.packageId && l.packageId===packageLessons[0].packageId) ? packageLessons[0].packageId : original.packageId,
+        donem: packageLessons.length ? fmtShort(packageLessons[0].date)+" - "+fmtShort(packageLessons[packageLessons.length-1].date) : original.donem,
+      };
+      return {
+        ...s,
+        odemeler: (s.odemeler||[]).map((o,i)=>i===index ? nextPayment : o),
+        ek_dersler: (s.ek_dersler||[]).map(e => original?.ekDersIds?.includes(e.id) ? {...e, paidAt:nextPayment.tarih||e.paidAt} : e),
+      };
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
-    pop("Ödeme tarihi güncellendi");
+    pop("Ödeme kaydı düzeltildi");
   };
 
   const handleÖdemeSil = async (sid, index) => {
@@ -1752,6 +1817,31 @@ export default function App() {
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
     pop("Ödeme kaydı silindi");
+  };
+
+  const handlePaketOzetiGonderildi = async (sid) => {
+    const updated = students.map(s => {
+      if (s.id!==sid) return s;
+      const info = lastCompletedPackageInfo(s);
+      const key = packageSummaryKey(info);
+      if (!info || !key) return s;
+      const logs = (s.package_summary_logs || []).filter(log => log.packageKey !== key);
+      return {
+        ...s,
+        package_summary_logs: [
+          ...logs,
+          {
+            packageKey:key,
+            sentAt:new Date().toISOString().split("T")[0],
+            packageStart:info.startKey,
+            packageEnd:info.endKey,
+          }
+        ]
+      };
+    });
+    setStudents(updated);
+    await saveStudent(updated.find(s=>s.id===sid));
+    pop("Paket özeti gönderildi işaretlendi");
   };
 
   const handleDuzenle = async (sid, f) => {
@@ -1991,15 +2081,25 @@ export default function App() {
             {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <div style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#7e22ce" }}>Paketi Biten Öğrenciler</p>
-                {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => (
-                  <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
-                    <div>
-                      <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                      <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Paket tamamlandı</p>
+                {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
+                  const info = lastCompletedPackageInfo(s);
+                  const sent = summarySentInfo(s, info);
+                  return (
+                    <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
+                      <div>
+                        <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
+                        <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Paket tamamlandı{info?.donem ? " · "+info.donem : ""}</p>
+                        <p style={{ margin:"2px 0 0", fontSize:12, color:sent?"#059669":"#c2410c", fontWeight:700 }}>
+                          {sent ? "Özet gönderildi · "+fmtMed(sent.sentAt) : "Özet gönderilmedi"}
+                        </p>
+                      </div>
+                      <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                        <button onClick={() => setMesajSt(s)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Özeti Aç</button>
+                        {!sent ? <button onClick={() => handlePaketOzetiGonderildi(s.id)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Gönderildi</button> : null}
+                      </div>
                     </div>
-                    <button onClick={() => setMesajSt(s)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Özet</button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : null}
             <BugünÖdemeleri students={students} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} />
@@ -2107,7 +2207,7 @@ export default function App() {
       </div>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentDateChange={handleÖdemeTarihiGuncelle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {showAdd ? <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} onClose={()=>setMesajSt(null)} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
