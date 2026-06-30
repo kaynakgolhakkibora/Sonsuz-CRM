@@ -81,6 +81,7 @@ function calendarEventsFromStudents(students) {
   const events = [];
 
   students.forEach(student => {
+    if (student.frozen) return;
     (student.schedule || []).forEach(lesson => {
       if (!lesson.date) return;
       const start = lessonStartDate(student, lesson);
