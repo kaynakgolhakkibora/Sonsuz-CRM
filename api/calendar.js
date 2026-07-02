@@ -6,6 +6,13 @@ function dateKey(iso) {
   return new Date(iso).toISOString().split("T")[0];
 }
 
+function timeFromISO(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
 function icsDate(iso) {
   return new Date(iso).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 }
@@ -42,6 +49,14 @@ function lessonStatusText(status) {
   return m[status] || status || "Planlandı";
 }
 
+function shouldShowLessonOnCalendar(lesson) {
+  return ["upcoming", "completed"].includes(lesson?.status || "upcoming");
+}
+
+function shouldShowExtraLessonOnCalendar(extra) {
+  return (extra?.status || "planned") !== "cancelled";
+}
+
 function ekDersStatusLabel(status) {
   const m = { planned:"Planlandı", done:"Yapıldı", cancelled:"İptal" };
   return m[status] || "Planlandı";
@@ -73,7 +88,7 @@ function setTimeOnDate(date, time = "10:00") {
 
 function lessonStartDate(student, lesson) {
   const base = new Date(lesson?.date);
-  const time = lesson?.time || student?.time;
+  const time = lesson?.time || timeFromISO(lesson?.date) || student?.time;
   return time ? setTimeOnDate(base, time) : base;
 }
 
@@ -84,6 +99,7 @@ function calendarEventsFromStudents(students) {
     if (student.frozen) return;
     (student.schedule || []).forEach(lesson => {
       if (!lesson.date) return;
+      if (!shouldShowLessonOnCalendar(lesson)) return;
       const start = lessonStartDate(student, lesson);
       const end = addMinutes(start, getLessonDuration(student, lesson));
       events.push({
@@ -104,6 +120,7 @@ function calendarEventsFromStudents(students) {
 
     (student.ek_dersler || []).forEach(extra => {
       if (!extra.date) return;
+      if (!shouldShowExtraLessonOnCalendar(extra)) return;
       const start = new Date(extra.date);
       const end = addMinutes(start, getLessonDuration(student, extra));
       events.push({
