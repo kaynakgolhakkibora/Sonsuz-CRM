@@ -46,6 +46,12 @@ function sameSlots(a, b) {
   return left.length === right.length && left.every((slot, i) => slot.day === right[i].day && slot.time === right[i].time);
 }
 
+function sameSlotDays(a, b) {
+  const left = normalizeSlots(a);
+  const right = normalizeSlots(b);
+  return left.length === right.length && left.every((slot, i) => slot.day === right[i].day);
+}
+
 function slotDayIndex(day) {
   const key = TR_DAYS_MAP[day] || day;
   return DAY_IDX[key] !== undefined ? DAY_IDX[key] : DAY_IDX[day];
@@ -73,7 +79,7 @@ function slotLabel(slots) {
 }
 
 function lessonTime(student, lesson) {
-  return lesson?.time || student?.time || "";
+  return lesson?.time || timeFromISO(lesson?.date) || student?.time || "";
 }
 
 function studentScheduleLabel(student) {
@@ -98,7 +104,7 @@ function addMinutes(date, minutes) {
 
 function lessonStartDate(student, lesson) {
   const base = new Date(lesson?.date);
-  const time = lesson?.time || student?.time;
+  const time = lesson?.time || timeFromISO(lesson?.date) || student?.time;
   return time ? setTimeOnDate(base, time) : base;
 }
 
@@ -197,12 +203,21 @@ function lessonStatusText(status) {
   return m[status] || status || "Planlandı";
 }
 
+function shouldShowLessonOnCalendar(lesson) {
+  return ["upcoming", "completed"].includes(lesson?.status || "upcoming");
+}
+
+function shouldShowExtraLessonOnCalendar(extra) {
+  return (extra?.status || "planned") !== "cancelled";
+}
+
 function calendarEventsFromStudents(students) {
   const events = [];
   students.forEach(student => {
     if (student.frozen) return;
     (student.schedule || []).forEach(lesson => {
       if (!lesson.date) return;
+      if (!shouldShowLessonOnCalendar(lesson)) return;
       const start = lessonStartDate(student, lesson);
       const end = addMinutes(start, getLessonDuration(student, lesson));
       events.push({
@@ -223,6 +238,7 @@ function calendarEventsFromStudents(students) {
 
     (student.ek_dersler || []).forEach(extra => {
       if (!extra.date) return;
+      if (!shouldShowExtraLessonOnCalendar(extra)) return;
       const start = new Date(extra.date);
       const end = addMinutes(start, getLessonDuration(student, extra));
       events.push({
@@ -448,6 +464,13 @@ function paymentHabitStats(student) {
   };
 }
 
+function paymentHabitLabel(stats) {
+  if (!stats) return "";
+  if (stats.onTimeRate >= 80 && stats.avgDelay <= 1) return "Düzenli";
+  if (stats.onTimeRate >= 50 && stats.avgDelay <= 4) return "Ara sıra gecikir";
+  return "Sık gecikir";
+}
+
 function ekDersFee(student) {
   return (student.ucret || 0) / PAYMENT_PACK_SIZE;
 }
@@ -514,6 +537,16 @@ function lastUndoablePackageInfo(student) {
   return lessons.every(l => l.status === "upcoming") ? last : null;
 }
 
+function undoablePackagePreview(student, info) {
+  if (!info) return "";
+  const ids = new Set(info.lessonIds || []);
+  return (student.schedule || [])
+    .filter(l => ids.has(l.id))
+    .sort((a,b)=>new Date(a.date)-new Date(b.date))
+    .map(l => fmtShort(l.date)+" "+lessonTime(student, l))
+    .join(" · ");
+}
+
 function packageSummaryKey(info) {
   if (!info) return "";
   return [info.startKey, info.endKey, info.packageSize].filter(Boolean).join("|");
@@ -543,13 +576,16 @@ function summarySentInfo(student, info) {
 function lessonEngagementStats(student, info) {
   const ids = new Set(info?.lessonIds || []);
   const lessons = (student.schedule || []).filter(l => ids.has(l.id) && l.status === "completed");
-  const withStats = lessons.filter(l => l.activeMinutes || l.focusMinutes);
+  const withStats = lessons.filter(l => l.activeMinutes || l.focusMinutes || l.productiveMinutes);
   if (!withStats.length) return null;
   const totalActive = withStats.reduce((sum,l)=>sum+(parseInt(l.activeMinutes)||0),0);
   const totalDuration = withStats.reduce((sum,l)=>sum+getLessonDuration(student, l),0);
   const avgActiveRate = totalDuration ? Math.round((totalActive / totalDuration) * 100) : 0;
   const focusValues = withStats.map(l=>parseInt(l.focusMinutes)||0).filter(Boolean);
   const avgFocus = focusValues.length ? focusValues.reduce((a,b)=>a+b,0) / focusValues.length : 0;
+  const productiveValues = withStats.map(l=>parseInt(l.productiveMinutes)||0).filter(Boolean);
+  const avgProductive = productiveValues.length ? productiveValues.reduce((a,b)=>a+b,0) / productiveValues.length : 0;
+  const maxProductive = productiveValues.length ? Math.max(...productiveValues) : 0;
   const sectionCounts = {};
   withStats.forEach(l => {
     if (l.focusSection) sectionCounts[l.focusSection] = (sectionCounts[l.focusSection] || 0) + 1;
@@ -560,8 +596,37 @@ function lessonEngagementStats(student, info) {
     totalActive,
     avgActiveRate,
     avgFocus,
+    avgProductive,
+    maxProductive,
     topSection,
   };
+}
+
+function currentPackageInfoForLesson(student, lesson) {
+  if (!lesson) return currentPaymentDueInfo(student) || nextPayablePackageInfo(student) || lastCompletedPackageInfo(student);
+  return packageInfos(student).find(info => (info.lessonIds || []).includes(lesson.id)) || currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
+}
+
+function packageLessonStatusText(lesson) {
+  if (isToday(lesson.date) && lesson.status === "upcoming") return "Bugünkü ders";
+  const m = {
+    upcoming: "Planlandı",
+    completed: "Katıldı",
+    telafi: "Telafi",
+    lastminute: "Katılmadı",
+    noshow: "Katılmadı",
+  };
+  return m[lesson.status] || "Planlandı";
+}
+
+function packageStatusText(student, info) {
+  if (!info) return "";
+  const ids = new Set(info.lessonIds || []);
+  const lessons = (student.schedule || [])
+    .filter(l => ids.has(l.id))
+    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if (!lessons.length) return "";
+  return lessons.map((l,i) => (i+1)+". ders: "+packageLessonStatusText(l)+" - "+fmtShort(l.date)).join("\n");
 }
 
 function lessonReminderSentInfo(student, lesson) {
@@ -632,6 +697,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
   const [note, setNote] = useState("");
   const [activeMinutes, setActiveMinutes] = useState("");
   const [focusMinutes, setFocusMinutes] = useState("");
+  const [productiveMinutes, setProductiveMinutes] = useState("");
   const [focusSection, setFocusSection] = useState(FOCUS_SECTIONS[0]);
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
   const activeTelafi = student.telafi_records.filter(r=>!r.done).length;
@@ -675,6 +741,8 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
         <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={activeMinutes} onChange={e=>setActiveMinutes(e.target.value)} placeholder="Örn. 35" />
         <label style={LBL}>En Uzun Odaklanma (dk)</label>
         <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={focusMinutes} onChange={e=>setFocusMinutes(e.target.value)} placeholder="Örn. 12" />
+        <label style={LBL}>En Verimli Süre (dk)</label>
+        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={productiveMinutes} onChange={e=>setProductiveMinutes(e.target.value)} placeholder="Örn. 20" />
         <label style={LBL}>En Verimli Bölüm</label>
         <select style={INP} value={focusSection} onChange={e=>setFocusSection(e.target.value)}>
           {FOCUS_SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -685,6 +753,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
           note,
           activeMinutes:parseInt(activeMinutes)||0,
           focusMinutes:parseInt(focusMinutes)||0,
+          productiveMinutes:parseInt(productiveMinutes)||0,
           focusSection,
         }, lessonId || lesson?.id)}>Katılımı Kaydet</Btn>
         <Btn bg="#111" outline onClick={() => reset("main")}>Geri</Btn>
@@ -980,6 +1049,8 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
   const odenmemisEk = unpaidEkDersler(student);
   const undoablePackage = lastUndoablePackageInfo(student);
   const payStats = paymentHabitStats(student);
+  const currentOrLastInfo = currentPaymentDueInfo(student) || nextPayablePackageInfo(student) || lastCompletedPackageInfo(student);
+  const engagementStats = lessonEngagementStats(student, currentOrLastInfo);
 
   return (
     <>
@@ -1020,8 +1091,19 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
         {payStats ? (
           <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Alışkanlığı</p>
-            <p style={{ margin:"4px 0 0", fontSize:14, fontWeight:800, color:"#111" }}>%{payStats.onTimeRate} zamanında · ort. {payStats.avgDelay.toFixed(1)} gün gecikme</p>
+            <p style={{ margin:"4px 0 0", fontSize:14, fontWeight:800, color:"#111" }}>{paymentHabitLabel(payStats)} · %{payStats.onTimeRate} zamanında · ort. {payStats.avgDelay.toFixed(1)} gün gecikme</p>
             <p style={{ margin:"3px 0 0", fontSize:12, color:payStats.lastDelay>0?"#be123c":"#059669", fontWeight:700 }}>Son ödeme: {payStats.lastDelay>0 ? payStats.lastDelay+" gün gecikti" : "zamanında"}</p>
+          </div>
+        ) : null}
+        {engagementStats ? (
+          <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
+            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#166534", textTransform:"uppercase", letterSpacing:1 }}>Ders Verimi</p>
+            <p style={{ margin:"4px 0 0", fontSize:14, fontWeight:800, color:"#111" }}>%{engagementStats.avgActiveRate} aktif katılım · {engagementStats.totalActive} dk aktif süre</p>
+            <p style={{ margin:"3px 0 0", fontSize:12, color:"#166534", fontWeight:700 }}>
+              {engagementStats.avgFocus ? "Ort. odak "+engagementStats.avgFocus.toFixed(1)+" dk" : ""}
+              {engagementStats.avgProductive ? (engagementStats.avgFocus ? " · " : "")+"Ort. verimli "+engagementStats.avgProductive.toFixed(1)+" dk" : ""}
+              {engagementStats.topSection ? " · "+engagementStats.topSection : ""}
+            </p>
           </div>
         ) : null}
         {student.odemeler && student.odemeler.length > 0 ? (
@@ -1168,7 +1250,12 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
           <Btn bg="#f97316" onClick={() => setShowZam(true)}>Zam Yap</Btn>
           <Btn bg="#6366f1" onClick={() => setShowDuzenle(true)}>Öğrenciyi Düzenle</Btn>
           <Btn bg="#111" onClick={() => { onRecharge(student.id, new Date().toISOString().split("T")[0]); onClose(); }}>Paket Yükle ({getPackageLessonCount(student)} Ders)</Btn>
-          {undoablePackage ? <Btn bg="#ef4444" onClick={() => { if(window.confirm("Son yüklenen paket geri alınsın mı?")) { onUndoLastPackage(student.id); onClose(); } }}>Son Paketi Geri Al</Btn> : null}
+          {undoablePackage ? (
+            <div style={{ background:"#fff1f2", border:"1px solid #fecdd3", borderRadius:12, padding:"10px 12px" }}>
+              <p style={{ margin:"0 0 8px", fontSize:12, color:"#be123c", fontWeight:700 }}>Geri alınacak dersler: {undoablePackagePreview(student, undoablePackage)}</p>
+              <Btn bg="#ef4444" onClick={() => { if(window.confirm("Son yüklenen paket geri alınsın mı?")) { onUndoLastPackage(student.id); onClose(); } }}>Son Paketi Geri Al</Btn>
+            </div>
+          ) : null}
           <div style={{ background:student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
             <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:student.frozen?"#1d4ed8":"#6b7280", textTransform:"uppercase", letterSpacing:1 }}>Öğrenci Durumu</p>
             <p style={{ margin:"0 0 10px", fontSize:13, color:"#475569" }}>{student.frozen ? "Program dondurulmuş. Öğrenci geri başlayacağı zaman buradan aktif edebilirsin." : "Öğrenci aktif. Uzun süre ara verecekse programı dondurabilirsin."}</p>
@@ -1251,9 +1338,13 @@ function AddSheet({ onClose, onAdd }) {
 }
 
 function msgDersHatirlatma(student) {
-const todayLesson = student.schedule.find(l => isToday(l.date) && l.status === "upcoming");
-const nextLesson = todayLesson || student.schedule.find(l => l.status === "upcoming");
-return "Günaydın :) Bugünkü ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
+  const todayLesson = student.schedule.find(l => isToday(l.date) && l.status === "upcoming");
+  const nextLesson = todayLesson || student.schedule.find(l => l.status === "upcoming");
+  const info = currentPackageInfoForLesson(student, nextLesson);
+  const status = packageStatusText(student, info);
+  let msg = "Günaydın :)\nBugünkü ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
+  if (status) msg += "\n\nMevcut paket durumu:\n"+status;
+  return msg;
 }
 function packageLessonsText(student, info) {
   if (!info) return "";
@@ -1268,13 +1359,17 @@ function packageLessonsText(student, info) {
 function msgIlkDersÖdeme(student) {
   const info = currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
   const lessons = packageLessonsText(student, info);
-  let msg = "Sayın velimiz, yeni ders paketi bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\n";
+  let msg = "Merhaba,\n\nYeni ders paketimiz bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\n";
   if (info) {
     msg += "Paket dönemi: "+info.donem+"\n";
     if (lessons) msg += "Planlanan dersler:\n"+lessons+"\n\n";
   }
-  msg += "İlginiz için teşekkür ederiz.";
+  msg += "İlginiz için teşekkür eder, iyi dersler dileriz.\n\nBodrum Sonsuz Sanat";
   return msg;
+}
+
+function msgYeniKayitKurallari() {
+  return "Sonsuz Sanat Ders Süreci Bilgilendirmesi\n\nDerslerimiz haftalık sabit gün ve saatlerde ilerler. Eğitim sürecinde devamlılık ve düzenli katılım büyük önem taşır.\n\nLütfen aşağıdaki kuralları inceleyiniz:\n\nDers İptalleri\n\n• Ders iptallerinin en az 24 saat önceden bildirilmesi gerekir.\n• Her telafi hakkı oluşturulduğu tarihten itibaren 30 gün geçerlidir.\n• Kullanılmayan telafi hakları bir sonraki döneme devredilmez.\n\nDers Günü İptalleri\n\n• Ders günü yapılan iptallerde, eğer iptal sebebi sağlık sorunlarının dışındaysa ders yapılmış sayılır.\n• Derse habersiz gelinmemesi durumunda ders yapılmış sayılır ve telafi hakkı oluşmaz.\n\nTelafi Dersleri\n\n• Telafi dersleri kurumun uygunluk durumuna göre planlanır, uygunluk oluştuğunda tarafınıza bilgi verilir.\n• Telafi derslerinde gün ve saat seçimi yapılamaz.\n\nProgram Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi durumunda size ayrılan gün ve saat, öğrenciye özel olarak korunur.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.\n\nÖdeme Düzeni\n\n• Ödemelerin zamanında yapılması programın devamlılığı açısından önemlidir.\n• Ödeme sürecinin aksaması durumunda program dondurulabilir ve ayrılan gün/saat başka öğrencilere açılabilir.\n\nAmacımız tüm öğrencilerimiz için düzenli, adil ve sürdürülebilir bir eğitim süreci oluşturmaktır.\n\nBodrum Sonsuz Sanat";
 }
 function msgÖdemeHatirlatma() {
   return "Merhaba,\nDers ödemesini henüz tarafımıza ulaşmış olarak göremiyoruz.\nÖdemenizi uygun olduğunuzda gerçekleştirmenizi rica ederiz. Herhangi bir sorunuz olması durumunda bizimle iletişime geçebilirsiniz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
@@ -1299,10 +1394,11 @@ function msgPaketOzeti(student) {
   if (sonPaket.length > 0) {
     sonPaket.forEach(l => {
       const katildi = l.status === "completed";
-      dersler += (katildi ? "Katıldı" : "Katilmadi") + " - " + fmtShort(l.date);
-      if (l.activeMinutes || l.focusMinutes || l.focusSection) {
+      dersler += (katildi ? "Katıldı" : "Katılmadı") + " - " + fmtShort(l.date);
+      if (l.activeMinutes || l.focusMinutes || l.productiveMinutes || l.focusSection) {
         dersler += " ("+(l.activeMinutes||0)+" dk aktif";
         if (l.focusMinutes) dersler += ", "+l.focusMinutes+" dk odak";
+        if (l.productiveMinutes) dersler += ", "+l.productiveMinutes+" dk verimli";
         if (l.focusSection) dersler += ", "+l.focusSection;
         dersler += ")";
       }
@@ -1321,6 +1417,8 @@ function msgPaketOzeti(student) {
     msg += "Toplam aktif ders süresi: "+verim.totalActive+" dk\n";
     msg += "Ortalama aktif katılım: %"+verim.avgActiveRate+"\n";
     if (verim.avgFocus) msg += "Ortalama odaklanma süresi: "+verim.avgFocus.toFixed(1)+" dk\n";
+    if (verim.avgProductive) msg += "Ortalama en verimli süre: "+verim.avgProductive.toFixed(1)+" dk\n";
+    if (verim.maxProductive) msg += "En yüksek verimli süre: "+verim.maxProductive+" dk\n";
     if (verim.topSection) msg += "En verimli bölüm: "+verim.topSection+"\n";
   }
   if (aktifTelafi.length > 0) {
@@ -1347,7 +1445,8 @@ function msgPaketOzeti(student) {
 function MesajSheet({ student, onClose }) {
   const msgs = [
     { key:"ders", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
-    { key:"ilkders", label:"İlk Ders - Ödeme Günu", text:msgIlkDersÖdeme(student) },
+    { key:"ilkders", label:"İlk Ders - Ödeme Günü", text:msgIlkDersÖdeme(student) },
+    { key:"yenikayit", label:"Yeni Kayıt - Ders Süreci", text:msgYeniKayitKurallari() },
     { key:"ozet", label:"Paket Sonu Özeti", text:msgPaketOzeti(student) },
     { key:"odeme1", label:"Ödeme Hatırlatma (1.)", text:msgÖdemeHatirlatma() },
     { key:"odeme2", label:"Ödeme Hatırlatma (2.)", text:msgÖdemeHatirlatma2() },
@@ -1393,7 +1492,7 @@ function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
         <p style={{ margin:"8px 0 0", fontSize:13, color:"#166534" }}>Ödeme uyarısı yeni periyodun ilk ders günü Bugünkü Ödemeler alanına düşer.</p>
       </div>
       <Btn bg="#111" onClick={() => { onÖdemeAl(student.id); onClose(); }}>Paketi Yükle</Btn>
-      <Btn bg="#f97316" onClick={() => { onMesajGonder(student); onClose(); }}>Ödeme Hatırlatmasi Gonder</Btn>
+      <Btn bg="#f97316" onClick={() => { onMesajGonder(student); onClose(); }}>Ödeme Hatırlatması Gönder</Btn>
       <Btn bg="#6b7280" onClick={onClose} outline>İptal</Btn>
     </Sheet>
   );
@@ -1791,6 +1890,7 @@ export default function App() {
               note:detail.note || "",
               activeMinutes:detail.activeMinutes || 0,
               focusMinutes:detail.focusMinutes || 0,
+              productiveMinutes:detail.productiveMinutes || 0,
               focusSection:detail.focusSection || "",
             } : l),
           };
@@ -1813,7 +1913,7 @@ export default function App() {
         }
         case "lm-notelafi": msg = "Son dakika iptali"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "lastminute", note||"Son dakika iptali")};
         case "noshow": msg = "No-show kaydedildi"; return {...s, no_show:Math.max(0, s.no_show + (oldLesson?.status === "noshow" ? 0 : 1)), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "noshow", note||"Habersiz gelmedi")};
-        case "reset-upcoming": msg = "Ders planlandıya alındı"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: (s.schedule||[]).map(l => l.id===lid ? {...l, status:"upcoming", note:"", activeMinutes:0, focusMinutes:0, focusSection:""} : l)};
+        case "reset-upcoming": msg = "Ders planlandıya alındı"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: (s.schedule||[]).map(l => l.id===lid ? {...l, status:"upcoming", note:"", activeMinutes:0, focusMinutes:0, productiveMinutes:0, focusSection:""} : l)};
         default: return s;
       }
     });
@@ -2062,13 +2162,28 @@ export default function App() {
       const upcomingLessons = schedule.filter(l=>l.status==="upcoming");
       const fixedLessons = schedule.filter(l=>l.status!=="upcoming");
       const slotsChanged = !sameSlots(getStudentSlots(s), slots);
+      const daysChanged = !sameSlotDays(getStudentSlots(s), slots);
       const upcomingNeedsSync = !upcomingScheduleMatchesSlots(upcomingLessons, slots);
       let nextSchedule = schedule.map(l=>l.status==="upcoming" ? {...l, durationMinutes:duration} : l);
 
-      if ((slotsChanged || upcomingNeedsSync) && upcomingLessons.length) {
+      if (slotsChanged && !daysChanged && upcomingLessons.length) {
+        const cleanSlots = normalizeSlots(slots);
+        const byDay = {};
+        cleanSlots.forEach(slot => { byDay[slotDayIndex(slot.day)] = slot; });
+        nextSchedule = schedule.map(l => {
+          if (l.status !== "upcoming") return l;
+          const slot = byDay[new Date(l.date).getDay()] || cleanSlots[0];
+          const nextDate = setTimeOnDate(l.date, slot.time);
+          return { ...l, date:nextDate.toISOString(), day:slot.day, time:slot.time, durationMinutes:duration };
+        }).sort((a,b)=>new Date(a.date)-new Date(b.date));
+      } else if ((slotsChanged || upcomingNeedsSync) && upcomingLessons.length) {
+        const lastFixed = [...fixedLessons].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
         const firstUpcoming = [...upcomingLessons].sort((a,b)=>new Date(a.date)-new Date(b.date))[0];
-        const from = firstUpcoming?.date ? new Date(firstUpcoming.date) : new Date();
-        from.setHours(12,0,0,0);
+        const from = lastFixed?.date
+          ? new Date(new Date(lastFixed.date).getTime()+86400000)
+          : (firstUpcoming?.date ? new Date(firstUpcoming.date) : new Date());
+        if (lastFixed?.date) from.setHours(12,0,0,0);
+        else from.setHours(0,0,0,0);
         const regenerated = buildScheduleSlots(slots, upcomingLessons.length, from, duration);
         nextSchedule = [...fixedLessons, ...regenerated].sort((a,b)=>new Date(a.date)-new Date(b.date));
       }
@@ -2415,7 +2530,7 @@ export default function App() {
                           {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{done}/{total}</strong> <strong>{pct}%</strong> devam</span>; })()}
                         </div>
                         {ac>0 ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>4?"#d97706":"#2563eb" }}><strong>{ac}/6</strong> aktif telafi</span></div> : null}
-                        {payHabit ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:payHabit.avgDelay>0?"#be123c":"#059669" }}><strong>%{payHabit.onTimeRate}</strong> zamanında · ort. {payHabit.avgDelay.toFixed(1)} gün gecikme</span></div> : null}
+                        {payHabit ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:payHabit.avgDelay>0?"#be123c":"#059669" }}><strong>{paymentHabitLabel(payHabit)}</strong> · %{payHabit.onTimeRate} zamanında · ort. {payHabit.avgDelay.toFixed(1)} gün gecikme</span></div> : null}
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
                       <button onClick={()=>s.frozen ? setDetailSt(s) : setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", marginLeft:10, flexShrink:0, fontFamily:"inherit" }}>{s.frozen ? "Devam" : "İşlem"}</button>
