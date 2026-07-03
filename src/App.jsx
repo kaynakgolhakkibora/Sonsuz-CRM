@@ -166,6 +166,20 @@ function dateKey(iso) { if (!iso) return ""; return new Date(iso).toISOString().
 function addMonths(iso, n) { const d = iso ? new Date(iso) : new Date(); d.setMonth(d.getMonth() + n); return d.toISOString(); }
 const PAYMENT_PACK_SIZE = 4;
 const PAID_LESSON_STATUSES = ["completed", "noshow", "lastminute"];
+const SCORE_STATUSES = ["completed", "telafi", "lastminute", "noshow"];
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function fmtNumber(n, digits = 1) {
+  if (!Number.isFinite(n)) return "0";
+  return Number.isInteger(n) ? String(n) : n.toFixed(digits);
+}
+
+function scoreLabel(score) {
+  return Number.isFinite(score) ? fmtNumber(score, 1) + "/10" : "-";
+}
 
 function icsDate(iso) {
   return new Date(iso).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
@@ -404,28 +418,82 @@ function currentPaymentDueInfo(student) {
   ) || null;
 }
 
-function paymentDisplayInfo(student, payment, index) {
+function nonExtraPaymentIndex(student, originalIndex) {
+  let n = -1;
+  for (let i = 0; i <= originalIndex; i++) {
+    const payment = (student.odemeler || [])[i];
+    if (payment && !payment.sadeceEkDers) n += 1;
+  }
+  return n;
+}
+
+function paymentPackageLessons(student, payment, index) {
   const schedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const packages = packageInfos(student);
   const inferredStudentCount = getPackageLessonCount(student);
   const storedPaymentCount = parseInt(payment.packageLessonCount);
   const effectiveCount = storedPaymentCount && !(storedPaymentCount === PAYMENT_PACK_SIZE && inferredStudentCount > PAYMENT_PACK_SIZE)
     ? storedPaymentCount
     : inferredStudentCount;
-  const ids = Array.isArray(payment.packageLessonIds) ? payment.packageLessonIds : [];
-  let lessons = ids.map(id => schedule.find(l=>l.id===id)).filter(Boolean);
+  const lessonIds = Array.isArray(payment.packageLessonIds) ? payment.packageLessonIds : [];
+  let lessons = lessonIds.map(id => schedule.find(l=>l.id===id)).filter(Boolean);
+
   if (!lessons.length && payment.packageId) lessons = schedule.filter(l=>l.packageId===payment.packageId);
+
   if (!lessons.length && payment.packageStart && payment.packageEnd) {
     const startIdx = schedule.findIndex(l=>dateKey(l.date)===payment.packageStart);
     const count = effectiveCount || PAYMENT_PACK_SIZE;
     if (startIdx >= 0) lessons = schedule.slice(startIdx, startIdx + count);
   }
+
+  if (!lessons.length && typeof payment.packageIndex === "number" && packages[payment.packageIndex]) {
+    const ids = new Set(packages[payment.packageIndex].lessonIds || []);
+    lessons = schedule.filter(l=>ids.has(l.id));
+  }
+
+  if (!lessons.length && typeof payment.package_index === "number" && packages[payment.package_index]) {
+    const ids = new Set(packages[payment.package_index].lessonIds || []);
+    lessons = schedule.filter(l=>ids.has(l.id));
+  }
+
+  if (!lessons.length && payment.tarih) {
+    const paidKey = dateKey(payment.tarih);
+    const byDate = packages.find(info => info.startKey <= paidKey && paidKey <= info.endKey)
+      || packages.find(info => paidKey <= info.startKey);
+    if (byDate) {
+      const ids = new Set(byDate.lessonIds || []);
+      lessons = schedule.filter(l=>ids.has(l.id));
+    }
+  }
+
+  if (!lessons.length) {
+    const idx = nonExtraPaymentIndex(student, index);
+    const info = packages[idx];
+    if (info) {
+      const ids = new Set(info.lessonIds || []);
+      lessons = schedule.filter(l=>ids.has(l.id));
+    }
+  }
+
   const first = lessons[0];
   const last = lessons[lessons.length-1];
-  const storedPeriod = payment.packageStart && payment.packageEnd
-    ? fmtShort(payment.packageStart)+" - "+fmtShort(payment.packageEnd)
+  return {
+    lessons,
+    effectiveCount,
+    startKey:first ? dateKey(first.date) : (payment.packageStart || ""),
+    endKey:last ? dateKey(last.date) : (payment.packageEnd || payment.packageStart || ""),
+  };
+}
+
+function paymentDisplayInfo(student, payment, index) {
+  const { lessons, effectiveCount, startKey, endKey } = paymentPackageLessons(student, payment, index);
+  const first = lessons[0];
+  const last = lessons[lessons.length-1];
+  const storedPeriod = startKey && endKey
+    ? fmtShort(startKey)+" - "+fmtShort(endKey)
     : (payment.donem || "");
-  const storedPeriodLong = payment.packageStart && payment.packageEnd
-    ? fmtDate(payment.packageStart)+" - "+fmtDate(payment.packageEnd)
+  const storedPeriodLong = startKey && endKey
+    ? fmtDate(startKey)+" - "+fmtDate(endKey)
     : (payment.donem || "");
   const periodShort = first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : storedPeriod;
   const periodLong = first && last ? fmtDate(first.date)+" - "+fmtDate(last.date) : storedPeriodLong;
@@ -444,7 +512,48 @@ function paymentDisplayInfo(student, payment, index) {
     delayText: typeof payment.gecikmeGunu === "number" ? (payment.gecikmeGunu > 0 ? payment.gecikmeGunu+" gün gecikti" : "Zamanında") : "",
     extra: payment.ekDersSayisi > 0 ? "+"+payment.ekDersSayisi+" ek ders" : "",
     extraOnly: !!payment.sadeceEkDers,
+    startKey,
+    endKey,
+    inferredPackage: !payment.packageStart || !payment.packageEnd || !Array.isArray(payment.packageLessonIds) || payment.packageLessonIds.length === 0,
   };
+}
+
+function dataQualityIssues(students) {
+  const issues = [];
+  students.forEach(student => {
+    (student.odemeler || []).forEach((payment, index) => {
+      if (payment.sadeceEkDers) return;
+      const info = paymentDisplayInfo(student, payment, index);
+      if (info.inferredPackage) {
+        issues.push({
+          type:"Ödeme",
+          level:"warning",
+          student,
+          text:"Ödeme dönemi tahminle gösteriliyor. Düzelt ekranından Kaydet yapınca kalıcılaşır.",
+          detail:(info.periodShort || payment.donem || "Dönem bulunamadı")+" · "+fmtMed(payment.tarih),
+        });
+      }
+      if (!info.startKey || !info.endKey) {
+        issues.push({
+          type:"Ödeme",
+          level:"danger",
+          student,
+          text:"Ödemenin kapsadığı dersler bulunamadı.",
+          detail:fmtMed(payment.tarih)+" · "+(payment.tutar || ""),
+        });
+      }
+    });
+
+    (student.schedule || []).forEach(lesson => {
+      if (!lesson.date) {
+        issues.push({ type:"Ders", level:"danger", student, text:"Ders tarihinde eksik kayıt var.", detail:lesson.id || "" });
+      }
+      if (lesson.status === "upcoming" && !lesson.time && !timeFromISO(lesson.date)) {
+        issues.push({ type:"Ders", level:"warning", student, text:"Planlı derste saat bilgisi eksik.", detail:fmtShort(lesson.date) });
+      }
+    });
+  });
+  return issues;
 }
 
 function paymentHabitStats(student) {
@@ -455,12 +564,15 @@ function paymentHabitStats(student) {
   const totalDelay = withDelay.reduce((sum,o)=>sum+(o.gecikmeGunu||0),0);
   const avgDelay = totalDelay / withDelay.length;
   const onTimeRate = Math.round((onTime / withDelay.length) * 100);
+  const scores = withDelay.map(o => paymentDelayScore(o.gecikmeGunu || 0));
+  const score = scores.reduce((sum,n)=>sum+n,0) / scores.length;
   return {
     total: withDelay.length,
     onTime,
     onTimeRate,
     avgDelay,
     lastDelay: withDelay[withDelay.length - 1]?.gecikmeGunu || 0,
+    score,
   };
 }
 
@@ -469,6 +581,34 @@ function paymentHabitLabel(stats) {
   if (stats.onTimeRate >= 80 && stats.avgDelay <= 1) return "Düzenli";
   if (stats.onTimeRate >= 50 && stats.avgDelay <= 4) return "Ara sıra gecikir";
   return "Sık gecikir";
+}
+
+function paymentDelayScore(days) {
+  if (days <= 0) return 10;
+  if (days <= 3) return 8;
+  if (days <= 7) return 6;
+  if (days <= 14) return 4;
+  return 2;
+}
+
+function attendanceScoreForStatus(status) {
+  const scores = { completed:10, telafi:7, lastminute:4, noshow:0 };
+  return scores[status] ?? null;
+}
+
+function attendanceStats(student) {
+  const lessons = (student.schedule || []).filter(l => SCORE_STATUSES.includes(l.status));
+  if (!lessons.length) return null;
+  const scores = lessons.map(l => attendanceScoreForStatus(l.status)).filter(n => n !== null);
+  if (!scores.length) return null;
+  const score = scores.reduce((sum,n)=>sum+n,0) / scores.length;
+  const attended = lessons.filter(l => l.status === "completed").length;
+  return {
+    score,
+    total: lessons.length,
+    attended,
+    attendedRate: Math.round((attended / lessons.length) * 100),
+  };
 }
 
 function ekDersFee(student) {
@@ -586,20 +726,84 @@ function lessonEngagementStats(student, info) {
   const productiveValues = withStats.map(l=>parseInt(l.productiveMinutes)||0).filter(Boolean);
   const avgProductive = productiveValues.length ? productiveValues.reduce((a,b)=>a+b,0) / productiveValues.length : 0;
   const maxProductive = productiveValues.length ? Math.max(...productiveValues) : 0;
-  const sectionCounts = {};
+  const windowCounts = {};
   withStats.forEach(l => {
-    if (l.focusSection) sectionCounts[l.focusSection] = (sectionCounts[l.focusSection] || 0) + 1;
+    const window = l.productiveWindow || l.productive_window || "";
+    if (window) windowCounts[window] = (windowCounts[window] || 0) + 1;
   });
-  const topSection = Object.entries(sectionCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || "";
+  const topWindow = Object.entries(windowCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || "";
   return {
     lessonCount: withStats.length,
     totalActive,
     avgActiveRate,
+    avgActive: totalActive / withStats.length,
     avgFocus,
     avgProductive,
     maxProductive,
-    topSection,
+    topWindow,
   };
+}
+
+function allLessonEngagementStats(student) {
+  const lessons = (student.schedule || []).filter(l => l.status === "completed" && (l.activeMinutes || l.focusMinutes || l.productiveMinutes));
+  if (!lessons.length) return null;
+  const totalActive = lessons.reduce((sum,l)=>sum+(parseInt(l.activeMinutes)||0),0);
+  const activeValues = lessons.map(l=>parseInt(l.activeMinutes)||0).filter(Boolean);
+  const focusValues = lessons.map(l=>parseInt(l.focusMinutes)||0).filter(Boolean);
+  const productiveValues = lessons.map(l=>parseInt(l.productiveMinutes)||0).filter(Boolean);
+  const windowCounts = {};
+  lessons.forEach(l => {
+    const window = l.productiveWindow || l.productive_window || "";
+    if (window) windowCounts[window] = (windowCounts[window] || 0) + 1;
+  });
+  const topWindow = Object.entries(windowCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || "";
+  return {
+    lessonCount: lessons.length,
+    avgActive: activeValues.length ? activeValues.reduce((a,b)=>a+b,0) / activeValues.length : 0,
+    avgFocus: focusValues.length ? focusValues.reduce((a,b)=>a+b,0) / focusValues.length : 0,
+    avgProductive: productiveValues.length ? productiveValues.reduce((a,b)=>a+b,0) / productiveValues.length : 0,
+    totalActive,
+    topWindow,
+  };
+}
+
+function lessonPerformanceScore(student, lesson) {
+  if (!lesson || lesson.status !== "completed") return null;
+  const duration = getLessonDuration(student, lesson);
+  if (!duration) return null;
+  const active = parseInt(lesson.activeMinutes) || 0;
+  const focus = parseInt(lesson.focusMinutes) || 0;
+  const productive = parseInt(lesson.productiveMinutes) || 0;
+  if (!active && !focus && !productive) return null;
+  const score =
+    (clamp(active / duration, 0, 1) * 5) +
+    (clamp(focus / duration, 0, 1) * 3.5) +
+    (clamp(productive / duration, 0, 1) * 1.5);
+  return clamp(score, 0, 10);
+}
+
+function performanceSeries(student) {
+  return (student.schedule || [])
+    .filter(l => l.status === "completed")
+    .sort((a,b)=>new Date(a.date)-new Date(b.date))
+    .map((lesson, i) => ({ lesson, index:i+1, score:lessonPerformanceScore(student, lesson) }))
+    .filter(p => p.score !== null);
+}
+
+function asciiBar(value, max) {
+  const safeMax = max > 0 ? max : 1;
+  const filled = clamp(Math.round((value / safeMax) * 10), 0, 10);
+  return "█".repeat(filled) + "░".repeat(10 - filled);
+}
+
+function trendText(values, label) {
+  const clean = values.filter(n => Number.isFinite(n));
+  if (clean.length < 2) return "";
+  const first = clean[0];
+  const last = clean[clean.length - 1];
+  if (last > first) return label + " " + fmtNumber(first, 1) + " dk'dan " + fmtNumber(last, 1) + " dk'ya çıkmış.";
+  if (last < first) return label + " " + fmtNumber(first, 1) + " dk'dan " + fmtNumber(last, 1) + " dk'ya düşmüş.";
+  return label + " " + fmtNumber(last, 1) + " dk seviyesinde dengeli ilerlemiş.";
 }
 
 function currentPackageInfoForLesson(student, lesson) {
@@ -641,6 +845,7 @@ function isPaymentDue(student) {
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
 const FOCUS_SECTIONS = ["Teknik çalışma","Ritim","Nota okuma","Parça çalışması","Doğaçlama","Teori","Tekrar"];
+const PRODUCTIVE_WINDOWS = ["İlk 15 dk","Orta 15 dk","Son 15 dk","İlk 30 dk","Son 30 dk","Ders geneli dengeli"];
 const TIMES = [];
 for (let h=10;h<=19;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
@@ -689,6 +894,64 @@ function Sheet({ title, subtitle, onClose, children }) {
   );
 }
 
+function ProgressChart({ student }) {
+  const points = performanceSeries(student);
+  if (points.length < 2) {
+    return (
+      <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"14px", marginBottom:14 }}>
+        <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Gelişim Grafiği</p>
+        <p style={{ margin:"8px 0 0", fontSize:13, color:"#94a3b8", fontWeight:700 }}>Grafik için en az 2 verimli ders kaydı gerekiyor.</p>
+      </div>
+    );
+  }
+  const width = 330;
+  const height = 170;
+  const padL = 34;
+  const padR = 12;
+  const padT = 16;
+  const padB = 30;
+  const innerW = width - padL - padR;
+  const innerH = height - padT - padB;
+  const xFor = (i) => padL + (points.length === 1 ? innerW / 2 : (i / (points.length - 1)) * innerW);
+  const yFor = (score) => padT + (1 - clamp(score, 0, 10) / 10) * innerH;
+  const path = points.map((p,i) => (i === 0 ? "M" : "L") + xFor(i).toFixed(1) + " " + yFor(p.score).toFixed(1)).join(" ");
+  const first = points[0].score;
+  const last = points[points.length - 1].score;
+  const trend = last > first + 0.4 ? "Yükseliyor" : last < first - 0.4 ? "Düşüyor" : "Dengeli";
+
+  return (
+    <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10, marginBottom:8 }}>
+        <div>
+          <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Gelişim Grafiği</p>
+          <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontWeight:700 }}>Tüm geçmiş verimli dersler</p>
+        </div>
+        <p style={{ margin:0, fontSize:13, fontWeight:800, color:trend==="Yükseliyor"?"#059669":trend==="Düşüyor"?"#be123c":"#475569" }}>{trend}</p>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width:"100%", height:"auto", display:"block" }} role="img" aria-label="Öğrenci gelişim grafiği">
+        {[0,2,4,6,8,10].map(tick => {
+          const y = yFor(tick);
+          return (
+            <g key={tick}>
+              <line x1={padL} x2={width-padR} y1={y} y2={y} stroke="#f1f5f9" strokeWidth="1" />
+              <text x={padL-8} y={y+4} textAnchor="end" fontSize="10" fill="#64748b">{tick}</text>
+            </g>
+          );
+        })}
+        <line x1={padL} x2={padL} y1={padT} y2={height-padB} stroke="#cbd5e1" strokeWidth="1.5" />
+        <line x1={padL} x2={width-padR} y1={height-padB} y2={height-padB} stroke="#cbd5e1" strokeWidth="1.5" />
+        <path d={path} fill="none" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+        {points.map((p,i) => (
+          <circle key={p.lesson.id || i} cx={xFor(i)} cy={yFor(p.score)} r="3.5" fill="#2563eb" stroke="#fff" strokeWidth="1.5" />
+        ))}
+        <text x={padL} y={height-8} fontSize="10" fill="#64748b">1. ders</text>
+        <text x={width-padR} y={height-8} textAnchor="end" fontSize="10" fill="#64748b">{points.length}. ders</text>
+      </svg>
+      <p style={{ margin:"8px 0 0", fontSize:12, color:"#475569", fontWeight:700 }}>Son skor: {scoreLabel(last)} · İlk skor: {scoreLabel(first)}</p>
+    </div>
+  );
+}
+
 const INP = { width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fafafa", color:"#111" };
 const LBL = { display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:4, marginTop:14 };
 
@@ -698,6 +961,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
   const [activeMinutes, setActiveMinutes] = useState("");
   const [focusMinutes, setFocusMinutes] = useState("");
   const [productiveMinutes, setProductiveMinutes] = useState("");
+  const [productiveWindow, setProductiveWindow] = useState(PRODUCTIVE_WINDOWS[0]);
   const [focusSection, setFocusSection] = useState(FOCUS_SECTIONS[0]);
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
   const activeTelafi = student.telafi_records.filter(r=>!r.done).length;
@@ -743,7 +1007,11 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
         <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={focusMinutes} onChange={e=>setFocusMinutes(e.target.value)} placeholder="Örn. 12" />
         <label style={LBL}>En Verimli Süre (dk)</label>
         <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={productiveMinutes} onChange={e=>setProductiveMinutes(e.target.value)} placeholder="Örn. 20" />
-        <label style={LBL}>En Verimli Bölüm</label>
+        <label style={LBL}>En Verimli Zaman</label>
+        <select style={INP} value={productiveWindow} onChange={e=>setProductiveWindow(e.target.value)}>
+          {PRODUCTIVE_WINDOWS.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <label style={LBL}>Dersin Güçlü Bölümü</label>
         <select style={INP} value={focusSection} onChange={e=>setFocusSection(e.target.value)}>
           {FOCUS_SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
@@ -754,6 +1022,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
           activeMinutes:parseInt(activeMinutes)||0,
           focusMinutes:parseInt(focusMinutes)||0,
           productiveMinutes:parseInt(productiveMinutes)||0,
+          productiveWindow,
           focusSection,
         }, lessonId || lesson?.id)}>Katılımı Kaydet</Btn>
         <Btn bg="#111" outline onClick={() => reset("main")}>Geri</Btn>
@@ -963,13 +1232,13 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
 }
 
 function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentDelete }) {
+  const info = paymentDisplayInfo(student, payment, index);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(payment.tarih || new Date().toISOString().split("T")[0]);
   const [amount, setAmount] = useState(typeof payment.tutar === "number" ? String(payment.tutar) : "");
-  const [startKey, setStartKey] = useState(payment.packageStart || "");
-  const [endKey, setEndKey] = useState(payment.packageEnd || payment.packageStart || "");
-  const info = paymentDisplayInfo(student, payment, index);
+  const [startKey, setStartKey] = useState(payment.packageStart || info.startKey || "");
+  const [endKey, setEndKey] = useState(payment.packageEnd || payment.packageStart || info.endKey || info.startKey || "");
   const lessonOptions = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   return (
     <div style={{ borderBottom:"1px solid #f0f0f0", padding:"8px 0" }}>
@@ -1017,7 +1286,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
               </select>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:10 }}>
                 <button onClick={() => { onPaymentEdit(index, { tarih:date, tutar:amount, packageStart:startKey, packageEnd:endKey }); setEditing(false); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Kaydet</button>
-                <button onClick={() => { setDate(payment.tarih || ""); setAmount(typeof payment.tutar === "number" ? String(payment.tutar) : ""); setStartKey(payment.packageStart || ""); setEndKey(payment.packageEnd || payment.packageStart || ""); setEditing(false); }} style={{ background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Vazgeç</button>
+                <button onClick={() => { setDate(payment.tarih || ""); setAmount(typeof payment.tutar === "number" ? String(payment.tutar) : ""); setStartKey(payment.packageStart || info.startKey || ""); setEndKey(payment.packageEnd || payment.packageStart || info.endKey || info.startKey || ""); setEditing(false); }} style={{ background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"9px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Vazgeç</button>
               </div>
             </div>
           ) : (
@@ -1049,8 +1318,9 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
   const odenmemisEk = unpaidEkDersler(student);
   const undoablePackage = lastUndoablePackageInfo(student);
   const payStats = paymentHabitStats(student);
+  const attStats = attendanceStats(student);
   const currentOrLastInfo = currentPaymentDueInfo(student) || nextPayablePackageInfo(student) || lastCompletedPackageInfo(student);
-  const engagementStats = lessonEngagementStats(student, currentOrLastInfo);
+  const engagementStats = allLessonEngagementStats(student);
 
   return (
     <>
@@ -1077,6 +1347,16 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
             </div>
           ))}
         </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
+          <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 8px", textAlign:"center" }}>
+            <p style={{ fontSize:24, fontWeight:800, color:"#047857", margin:0 }}>{scoreLabel(attStats?.score)}</p>
+            <p style={{ fontSize:10, color:"#166534", margin:"2px 0 0", fontWeight:700 }}>Devam Skoru</p>
+          </div>
+          <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:12, padding:"12px 8px", textAlign:"center" }}>
+            <p style={{ fontSize:24, fontWeight:800, color:"#1d4ed8", margin:0 }}>{scoreLabel(payStats?.score)}</p>
+            <p style={{ fontSize:10, color:"#1e40af", margin:"2px 0 0", fontWeight:700 }}>Ödeme Skoru</p>
+          </div>
+        </div>
         {np ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -1091,18 +1371,19 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
         {payStats ? (
           <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Alışkanlığı</p>
-            <p style={{ margin:"4px 0 0", fontSize:14, fontWeight:800, color:"#111" }}>{paymentHabitLabel(payStats)} · %{payStats.onTimeRate} zamanında · ort. {payStats.avgDelay.toFixed(1)} gün gecikme</p>
+            <p style={{ margin:"4px 0 0", fontSize:14, fontWeight:800, color:"#111" }}>{scoreLabel(payStats.score)} · {paymentHabitLabel(payStats)} · %{payStats.onTimeRate} zamanında · ort. {payStats.avgDelay.toFixed(1)} gün gecikme</p>
             <p style={{ margin:"3px 0 0", fontSize:12, color:payStats.lastDelay>0?"#be123c":"#059669", fontWeight:700 }}>Son ödeme: {payStats.lastDelay>0 ? payStats.lastDelay+" gün gecikti" : "zamanında"}</p>
           </div>
         ) : null}
+        <ProgressChart student={student} />
         {engagementStats ? (
           <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#166534", textTransform:"uppercase", letterSpacing:1 }}>Ders Verimi</p>
-            <p style={{ margin:"4px 0 0", fontSize:14, fontWeight:800, color:"#111" }}>%{engagementStats.avgActiveRate} aktif katılım · {engagementStats.totalActive} dk aktif süre</p>
+            <p style={{ margin:"4px 0 0", fontSize:14, fontWeight:800, color:"#111" }}>Ort. aktif {fmtNumber(engagementStats.avgActive, 1)} dk · toplam {engagementStats.totalActive} dk</p>
             <p style={{ margin:"3px 0 0", fontSize:12, color:"#166534", fontWeight:700 }}>
               {engagementStats.avgFocus ? "Ort. odak "+engagementStats.avgFocus.toFixed(1)+" dk" : ""}
               {engagementStats.avgProductive ? (engagementStats.avgFocus ? " · " : "")+"Ort. verimli "+engagementStats.avgProductive.toFixed(1)+" dk" : ""}
-              {engagementStats.topSection ? " · "+engagementStats.topSection : ""}
+              {engagementStats.topWindow ? " · "+engagementStats.topWindow : ""}
             </p>
           </div>
         ) : null}
@@ -1395,11 +1676,11 @@ function msgPaketOzeti(student) {
     sonPaket.forEach(l => {
       const katildi = l.status === "completed";
       dersler += (katildi ? "Katıldı" : "Katılmadı") + " - " + fmtShort(l.date);
-      if (l.activeMinutes || l.focusMinutes || l.productiveMinutes || l.focusSection) {
+      if (l.activeMinutes || l.focusMinutes || l.productiveMinutes || l.productiveWindow || l.focusSection) {
         dersler += " ("+(l.activeMinutes||0)+" dk aktif";
         if (l.focusMinutes) dersler += ", "+l.focusMinutes+" dk odak";
         if (l.productiveMinutes) dersler += ", "+l.productiveMinutes+" dk verimli";
-        if (l.focusSection) dersler += ", "+l.focusSection;
+        if (l.productiveWindow) dersler += ", "+l.productiveWindow;
         dersler += ")";
       }
       dersler += "\n";
@@ -1413,13 +1694,37 @@ function msgPaketOzeti(student) {
   msg += "Donem: "+donem+"\n\n";
   msg += "Dersler:\n"+dersler;
   if (verim) {
+    const completedWithStats = sonPaket.filter(l => l.status === "completed" && (l.activeMinutes || l.focusMinutes || l.productiveMinutes));
+    const activeValues = completedWithStats.map(l=>parseInt(l.activeMinutes)||0);
+    const focusValues = completedWithStats.map(l=>parseInt(l.focusMinutes)||0);
+    const durationMax = completedWithStats.reduce((max,l)=>Math.max(max, getLessonDuration(student, l)), getLessonDuration(student));
     msg += "\nDers Verimi:\n";
-    msg += "Toplam aktif ders süresi: "+verim.totalActive+" dk\n";
-    msg += "Ortalama aktif katılım: %"+verim.avgActiveRate+"\n";
-    if (verim.avgFocus) msg += "Ortalama odaklanma süresi: "+verim.avgFocus.toFixed(1)+" dk\n";
-    if (verim.avgProductive) msg += "Ortalama en verimli süre: "+verim.avgProductive.toFixed(1)+" dk\n";
-    if (verim.maxProductive) msg += "En yüksek verimli süre: "+verim.maxProductive+" dk\n";
-    if (verim.topSection) msg += "En verimli bölüm: "+verim.topSection+"\n";
+    msg += "Ortalama aktif ders süresi: "+fmtNumber(verim.avgActive, 1)+" dk\n";
+    if (verim.avgFocus) msg += "Ortalama odaklanma süresi: "+fmtNumber(verim.avgFocus, 1)+" dk\n";
+    if (verim.topWindow) msg += "Genelde en verimli bölüm: "+verim.topWindow+"\n";
+    msg += "\nGelişim Grafiği\n";
+    if (activeValues.some(Boolean)) {
+      msg += "Aktif süre:\n";
+      completedWithStats.forEach((l, i) => {
+        const active = parseInt(l.activeMinutes) || 0;
+        msg += (i+1)+". ders "+asciiBar(active, durationMax)+" "+active+" dk\n";
+      });
+    }
+    if (focusValues.some(Boolean)) {
+      msg += "\nOdaklanma:\n";
+      completedWithStats.forEach((l, i) => {
+        const focus = parseInt(l.focusMinutes) || 0;
+        msg += (i+1)+". ders "+asciiBar(focus, durationMax)+" "+focus+" dk\n";
+      });
+    }
+    const activeTrend = activeValues.length >= 2 ? activeValues[activeValues.length-1] - activeValues[0] : 0;
+    msg += "\nGenel yorum:\n";
+    if (activeTrend > 0) msg += "Bu ders döneminde aktif katılım düzenli olarak yükselmiş.\n";
+    else if (activeTrend < 0) msg += "Bu ders döneminde aktif katılımda düşüş görülmüş.\n";
+    else msg += "Bu ders döneminde aktif katılım dengeli ilerlemiş.\n";
+    const focusTrend = trendText(focusValues, "Odaklanma süresi");
+    if (focusTrend) msg += focusTrend + "\n";
+    if (verim.topWindow) msg += "En verimli zaman çoğunlukla dersin "+verim.topWindow.toLowerCase()+" bölümünde görülmüş.\n";
   }
   if (aktifTelafi.length > 0) {
     msg += "\nTelafi Haklari ("+aktifTelafi.length+"):\n";
@@ -1819,6 +2124,10 @@ export default function App() {
   const loadStudents = async () => {
     const { data, error } = await supabase.from("students").select("*").order("created_at");
     if (!error && data) setStudents(data);
+    if (error) {
+      console.error("Veri yükleme hatası:", error);
+      pop("Veriler yüklenemedi. Bağlantı veya Supabase yetkisini kontrol et.", 6000);
+    }
     setLoading(false);
   };
 
@@ -1826,7 +2135,7 @@ export default function App() {
 
   const saveStudent = async (student) => {
     const slots = getStudentSlots(student);
-      const { error } = await supabase.from("students").upsert({
+      const { data, error } = await supabase.from("students").upsert({
       id: student.id,
       name: student.name,
       phone: student.phone || "",
@@ -1848,11 +2157,12 @@ export default function App() {
       ek_dersler: student.ek_dersler || [],
       package_summary_logs: student.package_summary_logs || [],
       lesson_reminder_logs: student.lesson_reminder_logs || [],
-    });
-    if (error) {
+    }).select("id").single();
+    if (error || !data?.id) {
       console.error("Kayıt hatası:", error);
-      pop("Kayıt veritabanına yazılamadı. SQL güncellemesini kontrol et.", 5000);
-      return false;
+      pop("Kayıt veritabanına yazılamadı. Ekran geri yüklendi.", 7000);
+      await loadStudents();
+      throw new Error("Veritabanı kaydı başarısız");
     }
     return true;
   };
@@ -1891,6 +2201,7 @@ export default function App() {
               activeMinutes:detail.activeMinutes || 0,
               focusMinutes:detail.focusMinutes || 0,
               productiveMinutes:detail.productiveMinutes || 0,
+              productiveWindow:detail.productiveWindow || "",
               focusSection:detail.focusSection || "",
             } : l),
           };
@@ -1913,7 +2224,7 @@ export default function App() {
         }
         case "lm-notelafi": msg = "Son dakika iptali"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "lastminute", note||"Son dakika iptali")};
         case "noshow": msg = "No-show kaydedildi"; return {...s, no_show:Math.max(0, s.no_show + (oldLesson?.status === "noshow" ? 0 : 1)), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "noshow", note||"Habersiz gelmedi")};
-        case "reset-upcoming": msg = "Ders planlandıya alındı"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: (s.schedule||[]).map(l => l.id===lid ? {...l, status:"upcoming", note:"", activeMinutes:0, focusMinutes:0, productiveMinutes:0, focusSection:""} : l)};
+        case "reset-upcoming": msg = "Ders planlandıya alındı"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: (s.schedule||[]).map(l => l.id===lid ? {...l, status:"upcoming", note:"", activeMinutes:0, focusMinutes:0, productiveMinutes:0, productiveWindow:"", focusSection:""} : l)};
         default: return s;
       }
     });
@@ -1970,7 +2281,13 @@ export default function App() {
   };
 
   const handleDelete = async (sid) => {
-    await supabase.from("students").delete().eq("id", sid);
+    const { error } = await supabase.from("students").delete().eq("id", sid);
+    if (error) {
+      console.error("Silme hatası:", error);
+      pop("Öğrenci silinemedi. Ekran geri yüklendi.", 6000);
+      await loadStudents();
+      return;
+    }
     setStudents(p => p.filter(s => s.id !== sid));
     pop("Öğrenci silindi");
   };
@@ -2457,7 +2774,6 @@ export default function App() {
 
         {mainTab === "takvim" ? <WeekCal students={students} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} /> : null}
         {mainTab === "gelir" ? <GelirRaporu students={students} /> : null}
-
         {mainTab === "liste" ? (
           <div>
             {telafiWarnList.length > 0 ? (
@@ -2503,6 +2819,7 @@ export default function App() {
                 const nextL = s.schedule.find(l=>l.status==="upcoming");
                 const payDue = isÖdemeBekleyen(s);
                 const payHabit = paymentHabitStats(s);
+                const att = attendanceStats(s);
                 const ekCount = (s.ek_dersler||[]).length;
                 const unpaidEkCount = unpaidEkDersler(s).length;
                 return (
@@ -2530,7 +2847,10 @@ export default function App() {
                           {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{done}/{total}</strong> <strong>{pct}%</strong> devam</span>; })()}
                         </div>
                         {ac>0 ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>4?"#d97706":"#2563eb" }}><strong>{ac}/6</strong> aktif telafi</span></div> : null}
-                        {payHabit ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:payHabit.avgDelay>0?"#be123c":"#059669" }}><strong>{paymentHabitLabel(payHabit)}</strong> · %{payHabit.onTimeRate} zamanında · ort. {payHabit.avgDelay.toFixed(1)} gün gecikme</span></div> : null}
+                        {(att || payHabit) ? <div style={{ marginTop:4, display:"flex", gap:8, flexWrap:"wrap" }}>
+                          {att ? <span style={{ fontSize:12, color:"#047857" }}><strong>Devam {scoreLabel(att.score)}</strong></span> : null}
+                          {payHabit ? <span style={{ fontSize:12, color:payHabit.avgDelay>0?"#be123c":"#059669" }}><strong>Ödeme {scoreLabel(payHabit.score)}</strong> · {paymentHabitLabel(payHabit)}</span> : null}
+                        </div> : null}
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
                       <button onClick={()=>s.frozen ? setDetailSt(s) : setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", marginLeft:10, flexShrink:0, fontFamily:"inherit" }}>{s.frozen ? "Devam" : "İşlem"}</button>
