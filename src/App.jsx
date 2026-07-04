@@ -4,6 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 const SUPABASE_URL = "https://wuizpkfueudglmgdsavu.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1aXpwa2Z1ZXVkZ2xtZ2RzYXZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMTg4OTUsImV4cCI6MjA5NDc5NDg5NX0.p1-d04TxeQfa_sg6QfoL8eAD4A9DULCwaS3GEiUcqmk";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
+const MAX_SAVE_RETRIES = 3;
 
 const DAY_IDX = { "Pazartesi":1, "Sali":2, "Carsamba":3, "Persembe":4, "Cuma":5, "Cumartesi":6, "Pazar":0 };
 const TR_DAYS_MAP = { "Pazartesi":"Pazartesi", "Salı":"Sali", "Çarşamba":"Carsamba", "Perşembe":"Persembe", "Cuma":"Cuma", "Cumartesi":"Cumartesi", "Pazar":"Pazar" };
@@ -179,6 +181,30 @@ function fmtNumber(n, digits = 1) {
 
 function scoreLabel(score) {
   return Number.isFinite(score) ? fmtNumber(score, 1) + "/10" : "-";
+}
+
+function readFailedOps() {
+  try {
+    const raw = localStorage.getItem(FAILED_OPS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeFailedOps(items) {
+  localStorage.setItem(FAILED_OPS_KEY, JSON.stringify(items || []));
+}
+
+function failedOperationLabel(op) {
+  if (!op) return "Kaydedilemeyen işlem";
+  const names = {
+    lessonAction:"Ders işlemi",
+    payment:"Ödeme kaydı",
+    editStudent:"Öğrenci düzenleme",
+  };
+  return names[op.type] || "Kaydedilemeyen işlem";
 }
 
 function icsDate(iso) {
@@ -376,29 +402,18 @@ function packageInfos(student) {
   const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const packageSize = getPackageLessonCount(student);
   const infos = [];
-  let i = 0;
-  while (i < sortedSchedule.length) {
-    const current = sortedSchedule[i];
-    let lessons = [];
-    if (current.packageId) {
-      const packageId = current.packageId;
-      while (i < sortedSchedule.length && sortedSchedule[i].packageId === packageId) {
-        lessons.push(sortedSchedule[i]);
-        i += 1;
-      }
-    } else {
-      while (i < sortedSchedule.length && !sortedSchedule[i].packageId && lessons.length < packageSize) {
-        lessons.push(sortedSchedule[i]);
-        i += 1;
-      }
-    }
+  for (let i = 0; i < sortedSchedule.length; i += packageSize) {
+    const lessons = sortedSchedule.slice(i, i + packageSize);
     if (!lessons.length) continue;
     const first = lessons[0];
     const last = lessons[lessons.length-1];
+    const packageIds = [...new Set(lessons.map(l=>l.packageId).filter(Boolean))];
     infos.push({
       packageIndex: infos.length,
-      packageId: first.packageId,
+      packageId: packageIds.length === 1 ? packageIds[0] : undefined,
       packageSize: lessons.length || packageSize,
+      expectedPackageSize: packageSize,
+      complete: lessons.length >= packageSize,
       lessonIds: lessons.map(l=>l.id).filter(Boolean),
       start: first.date,
       end: last.date,
@@ -414,7 +429,7 @@ function currentPaymentDueInfo(student) {
   if (student.frozen) return null;
   const today = midday();
   return packageInfos(student).find(info =>
-    midday(new Date(info.start)) <= today && !hasPaymentForPackage(student, info)
+    info.complete && midday(new Date(info.start)) <= today && !hasPaymentForPackage(student, info)
   ) || null;
 }
 
@@ -664,7 +679,7 @@ function hasPaymentForPackage(student, info) {
 
 function nextPayablePackageInfo(student) {
   if (student.frozen) return null;
-  return packageInfos(student).find(info => !hasPaymentForPackage(student, info)) || null;
+  return packageInfos(student).find(info => info.complete && !hasPaymentForPackage(student, info)) || null;
 }
 
 function lastUndoablePackageInfo(student) {
@@ -2118,12 +2133,31 @@ export default function App() {
   const [odemeKaydetModal, setÖdemeKaydetModal] = useState(null);
   const [odemeKaydetDate, setÖdemeKaydetDate] = useState(new Date().toISOString().split("T")[0]);
   const [search, setSearch] = useState("");
+  const [failedOps, setFailedOps] = useState(() => readFailedOps());
+  const [retryingOps, setRetryingOps] = useState({});
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
 
+  const persistFailedOps = (items) => {
+    setFailedOps(items);
+    writeFailedOps(items);
+  };
+
+  const rememberFailedOperation = (operation, error) => {
+    if (!operation) return;
+    const nextOp = {
+      ...operation,
+      id: operation.id || uid(),
+      failedAt: new Date().toISOString(),
+      attempts: operation.attempts || MAX_SAVE_RETRIES,
+      error: error?.message || "Kayıt doğrulanamadı",
+    };
+    persistFailedOps([nextOp, ...failedOps.filter(op => op.id !== nextOp.id)]);
+  };
+
   const loadStudents = async () => {
     const { data, error } = await supabase.from("students").select("*").order("created_at");
-    if (!error && data) setStudents(data);
+    if (!error && data) setStudents(data.map(s => ({ ...s, record_version: typeof s.record_version === "number" ? s.record_version : 0 })));
     if (error) {
       console.error("Veri yükleme hatası:", error);
       pop("Veriler yüklenemedi. Bağlantı veya Supabase yetkisini kontrol et.", 6000);
@@ -2133,9 +2167,9 @@ export default function App() {
 
   useEffect(() => { loadStudents(); document.title = "Sonsuz Sanat CRM"; }, []);
 
-  const saveStudent = async (student) => {
+  const studentPayload = (student, recordVersion, writeId) => {
     const slots = getStudentSlots(student);
-      const { data, error } = await supabase.from("students").upsert({
+    return {
       id: student.id,
       name: student.name,
       phone: student.phone || "",
@@ -2157,14 +2191,70 @@ export default function App() {
       ek_dersler: student.ek_dersler || [],
       package_summary_logs: student.package_summary_logs || [],
       lesson_reminder_logs: student.lesson_reminder_logs || [],
-    }).select("id").single();
-    if (error || !data?.id) {
-      console.error("Kayıt hatası:", error);
-      pop("Kayıt veritabanına yazılamadı. Ekran geri yüklendi.", 7000);
-      await loadStudents();
-      throw new Error("Veritabanı kaydı başarısız");
+      record_version: recordVersion,
+      last_write_id: writeId,
+      last_saved_at: new Date().toISOString(),
+    };
+  };
+
+  const saveStudent = async (student) => {
+    const currentVersion = typeof student.record_version === "number" ? student.record_version : 0;
+    const writeId = uid();
+    const nextVersion = currentVersion + 1;
+    const payload = studentPayload(student, nextVersion, writeId);
+    const isExisting = !!student.created_at || typeof student.record_version === "number";
+    let data = null;
+    let error = null;
+
+    if (isExisting) {
+      const result = await supabase
+        .from("students")
+        .update(payload)
+        .eq("id", student.id)
+        .eq("record_version", currentVersion)
+        .select("*")
+        .single();
+      data = result.data;
+      error = result.error;
+    } else {
+      const result = await supabase
+        .from("students")
+        .insert(payload)
+        .select("*")
+        .single();
+      data = result.data;
+      error = result.error;
     }
-    return true;
+
+    if (error || !data?.id || data.last_write_id !== writeId || data.record_version !== nextVersion) {
+      console.error("Kayıt hatası:", error);
+      pop("Kayıt güvenli şekilde doğrulanamadı. Ekran veritabanından yenilendi.", 8000);
+      await loadStudents();
+      throw new Error("Veritabanı kaydı doğrulanamadı");
+    }
+
+    setStudents(prev => prev.map(s => s.id === data.id ? data : s));
+    return data;
+  };
+
+  const saveStudentWithRetry = async (student, operation=null, options={}) => {
+    let lastError = null;
+    const attempts = options.attempts || MAX_SAVE_RETRIES;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        return await saveStudent(student);
+      } catch (error) {
+        lastError = error;
+        if (attempt < attempts) {
+          await new Promise(resolve => setTimeout(resolve, 450 * attempt));
+          const { data } = await supabase.from("students").select("*").eq("id", student.id).single();
+          if (data) student = { ...student, record_version: typeof data.record_version === "number" ? data.record_version : 0 };
+        }
+      }
+    }
+    rememberFailedOperation(operation, lastError);
+    pop("İşlem şu an kaydedilemedi. Tekrar denemek için üstte uyarı olarak tutuldu.", 9000);
+    throw lastError || new Error("Kayıt başarısız");
   };
 
   const updLesson = (schedule, lid, status, note="") => {
@@ -2179,9 +2269,9 @@ export default function App() {
     return { id:uid(), lessonId:lesson?.id||null, lessonDate:lesson?.date||new Date().toISOString(), note, createdAt:new Date().toISOString(), expiry:expiry30(), done:false, doneAt:null };
   };
 
-  const handleAction = async (sid, action, note="", lid=null) => {
+  const buildActionUpdate = (sourceStudents, sid, action, note="", lid=null) => {
     let msg = "Kaydedildi";
-    const updated = students.map(s => {
+    const updated = sourceStudents.map(s => {
       if (s.id !== sid) return s;
       const oldLesson = lid ? s.schedule.find(l=>l.id===lid) : s.schedule.find(l=>l.status==="upcoming");
       const noShowFix = oldLesson?.status === "noshow" ? -1 : 0;
@@ -2228,10 +2318,32 @@ export default function App() {
         default: return s;
       }
     });
+    return { updated, msg };
+  };
+
+  const handleAction = async (sid, action, note="", lid=null) => {
+    const { updated, msg } = buildActionUpdate(students, sid, action, note, lid);
+    const student = updated.find(s => s.id === sid);
+    const originalStudent = students.find(s => s.id === sid);
+    const lesson = originalStudent?.schedule?.find(l => l.id === lid) || originalStudent?.schedule?.find(l => l.status === "upcoming");
+    const operation = {
+      type:"lessonAction",
+      studentId:sid,
+      studentName:originalStudent?.name || student?.name || "Öğrenci",
+      lessonId:lid,
+      action,
+      note,
+      label:(originalStudent?.name || student?.name || "Öğrenci") + " - " + msg,
+      detail:lesson ? fmtDate(lesson.date)+" "+lessonTime(originalStudent, lesson) : "",
+    };
     setStudents(updated);
-    await saveStudent(updated.find(s => s.id === sid));
-    pop(msg);
-    setActionModal(null);
+    try {
+      await saveStudentWithRetry(student, operation);
+      pop(msg);
+      setActionModal(null);
+    } catch {
+      setActionModal(null);
+    }
   };
 
   const handleToggleFreeze = async (sid, frozen) => {
@@ -2337,9 +2449,9 @@ export default function App() {
     pop("Öğrenci eklendi");
   };
 
-  const handleÖdemeKaydet = async (sid, tarih) => {
+  const buildPaymentUpdate = (sourceStudents, sid, tarih) => {
     const odemeDate = tarih||new Date().toISOString().split("T")[0];
-    const updated = students.map(s => {
+    const updated = sourceStudents.map(s => {
       if (s.id!==sid) return s;
       const packageInfo = currentPaymentDueInfo(s) || nextPayablePackageInfo(s);
       const upcoming = s.schedule.filter(l => l.status === "upcoming");
@@ -2379,9 +2491,56 @@ export default function App() {
       }];
       return {...s, odemeler, ek_dersler: ekDersler};
     });
+    return { updated, odemeDate };
+  };
+
+  const handleÖdemeKaydet = async (sid, tarih) => {
+    const { updated, odemeDate } = buildPaymentUpdate(students, sid, tarih);
+    const student = updated.find(s=>s.id===sid);
+    const originalStudent = students.find(s=>s.id===sid);
+    const operation = {
+      type:"payment",
+      studentId:sid,
+      studentName:originalStudent?.name || student?.name || "Öğrenci",
+      date:odemeDate,
+      label:(originalStudent?.name || student?.name || "Öğrenci") + " - ödeme kaydı",
+      detail:fmtMed(odemeDate),
+    };
     setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
-    pop("Ödeme kaydedildi");
+    try {
+      await saveStudentWithRetry(student, operation);
+      pop("Ödeme kaydedildi");
+    } catch {}
+  };
+
+  const removeFailedOperation = (id) => {
+    persistFailedOps(failedOps.filter(op => op.id !== id));
+  };
+
+  const retryFailedOperation = async (op) => {
+    if (!op?.studentId || retryingOps[op.id]) return;
+    setRetryingOps(prev => ({ ...prev, [op.id]: true }));
+    try {
+      const { data, error } = await supabase.from("students").select("*").eq("id", op.studentId).single();
+      if (error || !data) throw error || new Error("Öğrenci bulunamadı");
+      let built = null;
+      if (op.type === "lessonAction") {
+        built = buildActionUpdate([data], op.studentId, op.action, op.note, op.lessonId);
+      } else if (op.type === "payment") {
+        built = buildPaymentUpdate([data], op.studentId, op.date);
+      }
+      const nextStudent = built?.updated?.[0];
+      if (!nextStudent) throw new Error("İşlem tekrar hazırlanamadı");
+      await saveStudentWithRetry(nextStudent, { ...op, attempts:(op.attempts||0)+1 }, { attempts:1 });
+      persistFailedOps(failedOps.filter(item => item.id !== op.id));
+      await loadStudents();
+      pop("Bekleyen işlem kaydedildi");
+    } catch (error) {
+      persistFailedOps(failedOps.map(item => item.id === op.id ? { ...item, attempts:(item.attempts||0)+1, error:error?.message || "Tekrar deneme başarısız" } : item));
+      pop("Bekleyen işlem hâlâ kaydedilemedi.", 7000);
+    } finally {
+      setRetryingOps(prev => ({ ...prev, [op.id]: false }));
+    }
   };
 
   const handleÖdemeDuzenle = async (sid, index, changes) => {
@@ -2501,8 +2660,20 @@ export default function App() {
           : (firstUpcoming?.date ? new Date(firstUpcoming.date) : new Date());
         if (lastFixed?.date) from.setHours(12,0,0,0);
         else from.setHours(0,0,0,0);
-        const regenerated = buildScheduleSlots(slots, upcomingLessons.length, from, duration);
-        nextSchedule = [...fixedLessons, ...regenerated].sort((a,b)=>new Date(a.date)-new Date(b.date));
+        const plannedDates = buildScheduleSlots(slots, upcomingLessons.length, from, duration);
+        const upcomingSorted = [...upcomingLessons].sort((a,b)=>new Date(a.date)-new Date(b.date));
+        const movedUpcoming = upcomingSorted.map((lesson, i) => {
+          const planned = plannedDates[i];
+          if (!planned) return { ...lesson, durationMinutes:duration };
+          return {
+            ...lesson,
+            date:planned.date,
+            day:planned.day,
+            time:planned.time,
+            durationMinutes:duration,
+          };
+        });
+        nextSchedule = [...fixedLessons, ...movedUpcoming].sort((a,b)=>new Date(a.date)-new Date(b.date));
       }
 
       return {
@@ -2710,6 +2881,24 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth:600, margin:"0 auto", padding:"14px 14px 80px" }}>
+        {failedOps.length > 0 ? (
+          <div style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
+            <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:800, color:"#991b1b" }}>{failedOps.length} işlem kaydedilemedi</p>
+            <p style={{ margin:"0 0 10px", fontSize:12, color:"#7f1d1d", fontWeight:600 }}>Bilgiler kaybolmadı. Sistem tekrar deneyebilir; başarıyla kaydedilince bu uyarı kalkar.</p>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {failedOps.slice(0,3).map(op => (
+                <div key={op.id} style={{ background:"#fff", border:"1px solid #fecaca", borderRadius:10, padding:"10px 12px" }}>
+                  <p style={{ margin:0, fontSize:13, fontWeight:800, color:"#111" }}>{op.label || failedOperationLabel(op)}</p>
+                  <p style={{ margin:"3px 0 8px", fontSize:12, color:"#7f1d1d" }}>{op.detail || ""}{op.error ? " · " + op.error : ""}</p>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                    <button onClick={() => retryFailedOperation(op)} disabled={!!retryingOps[op.id]} style={{ background:"#dc2626", color:"#fff", border:"none", borderRadius:8, padding:"8px 10px", fontSize:12, fontWeight:800, cursor:retryingOps[op.id]?"wait":"pointer", fontFamily:"inherit" }}>{retryingOps[op.id] ? "Deneniyor..." : "Tekrar Dene"}</button>
+                    <button onClick={() => removeFailedOperation(op.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"8px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Vazgeç</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {mainTab === "bugün" ? (
           <div>
             {(() => {
