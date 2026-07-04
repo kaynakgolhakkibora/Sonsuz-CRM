@@ -731,16 +731,13 @@ function summarySentInfo(student, info) {
 function lessonEngagementStats(student, info) {
   const ids = new Set(info?.lessonIds || []);
   const lessons = (student.schedule || []).filter(l => ids.has(l.id) && l.status === "completed");
-  const withStats = lessons.filter(l => l.activeMinutes || l.focusMinutes || l.productiveMinutes);
+  const withStats = lessons.filter(l => l.activeMinutes || l.focusMinutes || l.productiveWindow || l.focusSection);
   if (!withStats.length) return null;
   const totalActive = withStats.reduce((sum,l)=>sum+(parseInt(l.activeMinutes)||0),0);
   const totalDuration = withStats.reduce((sum,l)=>sum+getLessonDuration(student, l),0);
   const avgActiveRate = totalDuration ? Math.round((totalActive / totalDuration) * 100) : 0;
   const focusValues = withStats.map(l=>parseInt(l.focusMinutes)||0).filter(Boolean);
   const avgFocus = focusValues.length ? focusValues.reduce((a,b)=>a+b,0) / focusValues.length : 0;
-  const productiveValues = withStats.map(l=>parseInt(l.productiveMinutes)||0).filter(Boolean);
-  const avgProductive = productiveValues.length ? productiveValues.reduce((a,b)=>a+b,0) / productiveValues.length : 0;
-  const maxProductive = productiveValues.length ? Math.max(...productiveValues) : 0;
   const windowCounts = {};
   withStats.forEach(l => {
     const window = l.productiveWindow || l.productive_window || "";
@@ -753,31 +750,6 @@ function lessonEngagementStats(student, info) {
     avgActiveRate,
     avgActive: totalActive / withStats.length,
     avgFocus,
-    avgProductive,
-    maxProductive,
-    topWindow,
-  };
-}
-
-function allLessonEngagementStats(student) {
-  const lessons = (student.schedule || []).filter(l => l.status === "completed" && (l.activeMinutes || l.focusMinutes || l.productiveMinutes));
-  if (!lessons.length) return null;
-  const totalActive = lessons.reduce((sum,l)=>sum+(parseInt(l.activeMinutes)||0),0);
-  const activeValues = lessons.map(l=>parseInt(l.activeMinutes)||0).filter(Boolean);
-  const focusValues = lessons.map(l=>parseInt(l.focusMinutes)||0).filter(Boolean);
-  const productiveValues = lessons.map(l=>parseInt(l.productiveMinutes)||0).filter(Boolean);
-  const windowCounts = {};
-  lessons.forEach(l => {
-    const window = l.productiveWindow || l.productive_window || "";
-    if (window) windowCounts[window] = (windowCounts[window] || 0) + 1;
-  });
-  const topWindow = Object.entries(windowCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || "";
-  return {
-    lessonCount: lessons.length,
-    avgActive: activeValues.length ? activeValues.reduce((a,b)=>a+b,0) / activeValues.length : 0,
-    avgFocus: focusValues.length ? focusValues.reduce((a,b)=>a+b,0) / focusValues.length : 0,
-    avgProductive: productiveValues.length ? productiveValues.reduce((a,b)=>a+b,0) / productiveValues.length : 0,
-    totalActive,
     topWindow,
   };
 }
@@ -788,21 +760,55 @@ function lessonPerformanceScore(student, lesson) {
   if (!duration) return null;
   const active = parseInt(lesson.activeMinutes) || 0;
   const focus = parseInt(lesson.focusMinutes) || 0;
-  const productive = parseInt(lesson.productiveMinutes) || 0;
-  if (!active && !focus && !productive) return null;
+  const windowBonus = lesson.productiveWindow || lesson.productive_window ? 1 : 0;
+  const sectionBonus = lesson.focusSection || lesson.focus_section ? 1 : 0;
+  if (!active && !focus && !windowBonus && !sectionBonus) return null;
   const score =
-    (clamp(active / duration, 0, 1) * 5) +
-    (clamp(focus / duration, 0, 1) * 3.5) +
-    (clamp(productive / duration, 0, 1) * 1.5);
+    (clamp(active / duration, 0, 1) * 6) +
+    (clamp(focus / duration, 0, 1) * 3) +
+    (windowBonus * 0.6) +
+    (sectionBonus * 0.4);
   return clamp(score, 0, 10);
 }
 
 function performanceSeries(student) {
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  sixMonthsAgo.setHours(0,0,0,0);
   return (student.schedule || [])
     .filter(l => l.status === "completed")
     .sort((a,b)=>new Date(a.date)-new Date(b.date))
     .map((lesson, i) => ({ lesson, index:i+1, score:lessonPerformanceScore(student, lesson) }))
-    .filter(p => p.score !== null);
+    .filter(p => p.score !== null && new Date(p.lesson.date) >= sixMonthsAgo);
+}
+
+function monthShort(date) {
+  return new Date(date).toLocaleDateString("tr-TR", { month:"short" }).replace(".", "");
+}
+
+function monthsCoveredText(points) {
+  if (!points.length) return "mevcut";
+  const first = new Date(points[0].lesson.date);
+  const last = new Date(points[points.length - 1].lesson.date);
+  const months = Math.max(1, (last.getFullYear() - first.getFullYear()) * 12 + last.getMonth() - first.getMonth() + 1);
+  return months >= 6 ? "son 6 ayda" : "son " + months + " ayda";
+}
+
+function lessonStartInfo(student) {
+  const raw = student.lesson_start_date || student.lessonStartDate;
+  if (!raw) return "";
+  const start = new Date(raw + "T12:00:00");
+  if (isNaN(start.getTime())) return "";
+  const now = new Date();
+  let months = (now.getFullYear() - start.getFullYear()) * 12 + now.getMonth() - start.getMonth();
+  if (now.getDate() < start.getDate()) months -= 1;
+  months = Math.max(0, months);
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  const parts = [];
+  if (years) parts.push(years + " yıl");
+  if (rest) parts.push(rest + " ay");
+  return (parts.length ? parts.join(" ") : "1 aydan az") + " · Başlangıç: " + start.toLocaleDateString("tr-TR", { month:"long", year:"numeric" });
 }
 
 function asciiBar(value, max) {
@@ -927,23 +933,44 @@ function ProgressChart({ student }) {
   const padB = 30;
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
-  const xFor = (i) => padL + (points.length === 1 ? innerW / 2 : (i / (points.length - 1)) * innerW);
+  const dates = points.map(p => new Date(p.lesson.date).getTime());
+  const minDate = Math.min(...dates);
+  const maxDate = Math.max(...dates);
+  const xForDate = (date) => {
+    const time = new Date(date).getTime();
+    return padL + (maxDate === minDate ? innerW / 2 : ((time - minDate) / (maxDate - minDate)) * innerW);
+  };
   const yFor = (score) => padT + (1 - clamp(score, 0, 10) / 10) * innerH;
-  const path = points.map((p,i) => (i === 0 ? "M" : "L") + xFor(i).toFixed(1) + " " + yFor(p.score).toFixed(1)).join(" ");
+  const path = points.map((p,i) => (i === 0 ? "M" : "L") + xForDate(p.lesson.date).toFixed(1) + " " + yFor(p.score).toFixed(1)).join(" ");
   const first = points[0].score;
   const last = points[points.length - 1].score;
   const trend = last > first + 0.4 ? "Yükseliyor" : last < first - 0.4 ? "Düşüyor" : "Dengeli";
+  const chartId = "progress-chart-" + student.id;
+  const monthLabels = [];
+  points.forEach(p => {
+    const label = monthShort(p.lesson.date);
+    if (!monthLabels.some(item => item.label === label)) monthLabels.push({ label, date:p.lesson.date });
+  });
+  const shownMonths = monthLabels.slice(-6);
+  const sendProgressText = () => {
+    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    const text = "Merhaba,\n\n" + student.name + " için gelişim grafiğini sizinle paylaşıyorum.\n\nGrafik, öğrencimizin kendi ders verileri üzerinden hazırlanmıştır; başka öğrencilerle kıyaslama içermez.\n\nBodrum Sonsuz Sanat";
+    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
+    else alert("Telefon numarası yok");
+  };
+  const downloadPng = () => downloadSvgAsPng(chartId, (student.name || "ogrenci").replace(/\s+/g, "-").toLowerCase()+"-gelisim-grafigi.png");
 
   return (
     <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10, marginBottom:8 }}>
         <div>
           <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Gelişim Grafiği</p>
-          <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontWeight:700 }}>Tüm geçmiş verimli dersler</p>
+          <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontWeight:700 }}>Kendi ders verileri üzerinden</p>
         </div>
         <p style={{ margin:0, fontSize:13, fontWeight:800, color:trend==="Yükseliyor"?"#059669":trend==="Düşüyor"?"#be123c":"#475569" }}>{trend}</p>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width:"100%", height:"auto", display:"block" }} role="img" aria-label="Öğrenci gelişim grafiği">
+      <svg id={chartId} viewBox={`0 0 ${width} ${height}`} style={{ width:"100%", height:"auto", display:"block", background:"#fff" }} role="img" aria-label="Öğrenci gelişim grafiği" xmlns="http://www.w3.org/2000/svg">
+        <rect x="0" y="0" width={width} height={height} fill="#ffffff" />
         {[0,2,4,6,8,10].map(tick => {
           const y = yFor(tick);
           return (
@@ -957,14 +984,51 @@ function ProgressChart({ student }) {
         <line x1={padL} x2={width-padR} y1={height-padB} y2={height-padB} stroke="#cbd5e1" strokeWidth="1.5" />
         <path d={path} fill="none" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
         {points.map((p,i) => (
-          <circle key={p.lesson.id || i} cx={xFor(i)} cy={yFor(p.score)} r="3.5" fill="#2563eb" stroke="#fff" strokeWidth="1.5" />
+          <circle key={p.lesson.id || i} cx={xForDate(p.lesson.date)} cy={yFor(p.score)} r="3.5" fill="#2563eb" stroke="#fff" strokeWidth="1.5" />
         ))}
-        <text x={padL} y={height-8} fontSize="10" fill="#64748b">1. ders</text>
-        <text x={width-padR} y={height-8} textAnchor="end" fontSize="10" fill="#64748b">{points.length}. ders</text>
+        {shownMonths.map((item, i) => (
+          <text key={item.label+"-"+i} x={xForDate(item.date)} y={height-8} textAnchor={i === 0 ? "start" : i === shownMonths.length - 1 ? "end" : "middle"} fontSize="10" fill="#64748b">{item.label}</text>
+        ))}
       </svg>
       <p style={{ margin:"8px 0 0", fontSize:12, color:"#475569", fontWeight:700 }}>Son skor: {scoreLabel(last)} · İlk skor: {scoreLabel(first)}</p>
+      <p style={{ margin:"4px 0 10px", fontSize:11, color:"#64748b", fontWeight:700 }}>Grafik {monthsCoveredText(points)} girilen ders verileri üzerinden hesaplanmıştır.</p>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+        <button onClick={downloadPng} style={{ background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:10, padding:"9px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>PNG İndir</button>
+        <button onClick={sendProgressText} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:10, padding:"9px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>WhatsApp</button>
+      </div>
     </div>
   );
+}
+
+function downloadSvgAsPng(svgId, filename) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+  const xml = new XMLSerializer().serializeToString(svg);
+  const svgBlob = new Blob([xml], { type:"image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(svgBlob);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 990;
+    canvas.height = 510;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const pngUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = pngUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(pngUrl);
+    }, "image/png");
+  };
+  img.src = url;
 }
 
 const INP = { width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fafafa", color:"#111" };
@@ -975,7 +1039,6 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
   const [note, setNote] = useState("");
   const [activeMinutes, setActiveMinutes] = useState("");
   const [focusMinutes, setFocusMinutes] = useState("");
-  const [productiveMinutes, setProductiveMinutes] = useState("");
   const [productiveWindow, setProductiveWindow] = useState(PRODUCTIVE_WINDOWS[0]);
   const [focusSection, setFocusSection] = useState(FOCUS_SECTIONS[0]);
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
@@ -987,8 +1050,8 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
 
   const TelafiWarn = () => (
     <>
-      {willWarn && <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#92400e", fontWeight:600 }}>Uyari: Bu telafi ile 5. hakka ulasilacak.</div>}
-      {willFreeze && <div style={{ background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#991b1b", fontWeight:600 }}>Uyari: 6. telafi limiti — program dondurulacak.</div>}
+      {willWarn && <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#92400e", fontWeight:600 }}>Uyarı: Bu telafi ile 5. hakka ulaşılacak.</div>}
+      {willFreeze && <div style={{ background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#991b1b", fontWeight:600 }}>Uyarı: 6. telafi limiti - program dondurulacak.</div>}
     </>
   );
 
@@ -1020,8 +1083,6 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
         <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={activeMinutes} onChange={e=>setActiveMinutes(e.target.value)} placeholder="Örn. 35" />
         <label style={LBL}>En Uzun Odaklanma (dk)</label>
         <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={focusMinutes} onChange={e=>setFocusMinutes(e.target.value)} placeholder="Örn. 12" />
-        <label style={LBL}>En Verimli Süre (dk)</label>
-        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={productiveMinutes} onChange={e=>setProductiveMinutes(e.target.value)} placeholder="Örn. 20" />
         <label style={LBL}>En Verimli Zaman</label>
         <select style={INP} value={productiveWindow} onChange={e=>setProductiveWindow(e.target.value)}>
           {PRODUCTIVE_WINDOWS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1036,7 +1097,6 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
           note,
           activeMinutes:parseInt(activeMinutes)||0,
           focusMinutes:parseInt(focusMinutes)||0,
-          productiveMinutes:parseInt(productiveMinutes)||0,
           productiveWindow,
           focusSection,
         }, lessonId || lesson?.id)}>Katılımı Kaydet</Btn>
@@ -1057,7 +1117,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
         <Btn bg="#111" outline onClick={() => reset("yapildi")}>Geri</Btn>
       </>}
       {step === "noshow" && <>
-        <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Habersiz gelmedi — aciklama ekle</p>
+        <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Habersiz gelmedi - açıklama ekle</p>
         <NoteArea value={note} onChange={setNote} />
         <Btn bg="#ef4444" onClick={() => act("noshow")}>Kaydet</Btn>
         <Btn bg="#111" outline onClick={() => reset("yapildi")}>Geri</Btn>
@@ -1097,10 +1157,10 @@ function TelafiSheet({ record, studentName, onClose, onDone }) {
             {record.doneAt && <p style={{ margin:"4px 0 0", fontSize:13, color:"#4ade80" }}>{record.doneAt}</p>}
           </div>
         : step === "main"
-          ? <Btn bg="#10b981" onClick={() => setStep("done")}>Telafi Yapıldı Isaretke</Btn>
+          ? <Btn bg="#10b981" onClick={() => setStep("done")}>Telafi Yapıldı İşaretle</Btn>
           : <>
               <p style={{ fontSize:13, color:"#666", marginBottom:8 }}>Tarih ve saati yaz:</p>
-              <NoteArea value={note} onChange={setNote} placeholder="Örn: 22 Mayis yapildi" />
+              <NoteArea value={note} onChange={setNote} placeholder="Örn: 22 Mayıs yapıldı" />
               <Btn bg="#10b981" onClick={() => { onDone(record.id, note || fmtDate(new Date().toISOString())); onClose(); }}>Kaydet</Btn>
               <Btn bg="#111" outline onClick={() => setStep("main")}>Geri</Btn>
             </>
@@ -1139,6 +1199,7 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
     phone: student.phone || "",
     veli_adi: student.veli_adi || "",
     dogum_tarihi: student.dogum_tarihi || "",
+    lesson_start_date: student.lesson_start_date || student.lessonStartDate || "",
     ucret: student.ucret || "",
     last_raise_date: student.last_raise_date || "",
     instrument: student.instrument,
@@ -1162,6 +1223,8 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
       <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
       <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
+      <label style={LBL}>Derse Başlama Tarihi</label>
+      <input style={INP} type="date" value={f.lesson_start_date||""} onChange={e=>s("lesson_start_date",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
       <label style={LBL}>4 Ders Ücreti (TL)</label>
@@ -1205,7 +1268,7 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
   const fee = ekDersFee(student);
   return (
     <Sheet title="Ek Ders Ekle" subtitle={student.name} onClose={onClose}>
-      <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Bu ders pakete dahil degil, ayrica ucretlendirilecek.</p>
+      <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Bu ders döneme dahil değil, ayrıca ücretlendirilecek.</p>
       <label style={LBL}>Tarih</label>
       <input style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
       <label style={LBL}>Saat</label>
@@ -1335,7 +1398,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
   const payStats = paymentHabitStats(student);
   const attStats = attendanceStats(student);
   const currentOrLastInfo = currentPaymentDueInfo(student) || nextPayablePackageInfo(student) || lastCompletedPackageInfo(student);
-  const engagementStats = allLessonEngagementStats(student);
+  const startInfo = lessonStartInfo(student);
 
   return (
     <>
@@ -1345,11 +1408,17 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
           <Pill label={studentScheduleLabel(student)} bg="#f3f4f6" color="#374151" />
           <Pill label={lessonDurationLabel(student)} bg="#f3f4f6" color="#374151" />
           {student.veli_adi ? <Pill label={"Veli: "+student.veli_adi} bg="#fef9c3" color="#854d0e" /> : null}
-          {student.frozen ? <Pill label="Dondurulmus" bg="#dbeafe" color="#1d4ed8" /> : null}
+          {student.frozen ? <Pill label="Dondurulmuş" bg="#dbeafe" color="#1d4ed8" /> : null}
           {isRaiseDue(student) ? <Pill label="Zam zamanı" bg="#fff7ed" color="#c2410c" /> : null}
           {ekDersler.length > 0 ? <Pill label={"+"+ekDersler.length+" ek ders"} bg="#ede9fe" color="#5b21b6" /> : null}
           {odenmemisEk.length > 0 ? <Pill label={odenmemisEk.length+" ödenmemiş ek"} bg="#ffedd5" color="#c2410c" /> : null}
         </div>
+        {startInfo ? (
+          <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 14px", marginBottom:12 }}>
+            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Derse Başlama</p>
+            <p style={{ margin:"4px 0 0", fontSize:13, color:"#111", fontWeight:800 }}>{startInfo}</p>
+          </div>
+        ) : null}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 }}>
           {[
             { label:"Kalan Ders", val:bal, bg:"#f9fafb", color:"#111" },
@@ -1391,17 +1460,6 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
           </div>
         ) : null}
         <ProgressChart student={student} />
-        {engagementStats ? (
-          <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#166534", textTransform:"uppercase", letterSpacing:1 }}>Ders Verimi</p>
-            <p style={{ margin:"4px 0 0", fontSize:14, fontWeight:800, color:"#111" }}>Ort. aktif {fmtNumber(engagementStats.avgActive, 1)} dk · toplam {engagementStats.totalActive} dk</p>
-            <p style={{ margin:"3px 0 0", fontSize:12, color:"#166534", fontWeight:700 }}>
-              {engagementStats.avgFocus ? "Ort. odak "+engagementStats.avgFocus.toFixed(1)+" dk" : ""}
-              {engagementStats.avgProductive ? (engagementStats.avgFocus ? " · " : "")+"Ort. verimli "+engagementStats.avgProductive.toFixed(1)+" dk" : ""}
-              {engagementStats.topWindow ? " · "+engagementStats.topWindow : ""}
-            </p>
-          </div>
-        ) : null}
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Geçmişi</p>
@@ -1499,7 +1557,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
                 <p style={{ fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Yapilmis</p>
                 {done.map(r => (
                   <div key={r.id} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginBottom:6 }}>
-                    <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>{fmtDate(r.lessonDate)} dersi yapildi</p>
+                    <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>{fmtDate(r.lessonDate)} dersi yapıldı</p>
                     {r.doneAt ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#4ade80" }}>{r.doneAt}</p> : null}
                   </div>
                 ))}
@@ -1576,7 +1634,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
 
 function AddSheet({ onClose, onAdd }) {
   const todayISO = new Date().toISOString().split("T")[0];
-  const [f, setF] = useState({ name:"", phone:"", veli_adi:"", dogum_tarihi:"", instrument:"Davul", lessonDuration:45, lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"", last_raise_date:"" });
+  const [f, setF] = useState({ name:"", phone:"", veli_adi:"", dogum_tarihi:"", lesson_start_date:"", instrument:"Davul", lessonDuration:45, lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"", last_raise_date:"" });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const setSlot = (i,k,v) => setF(p=>({
     ...p,
@@ -1599,6 +1657,8 @@ function AddSheet({ onClose, onAdd }) {
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
       <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
       <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
+      <label style={LBL}>Derse Başlama Tarihi</label>
+      <input style={INP} type="date" value={f.lesson_start_date||""} onChange={e=>s("lesson_start_date",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
       <label style={LBL}>4 Ders Ücreti (TL)</label>
@@ -1639,7 +1699,7 @@ function msgDersHatirlatma(student) {
   const info = currentPackageInfoForLesson(student, nextLesson);
   const status = packageStatusText(student, info);
   let msg = "Günaydın :)\nBugünkü ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
-  if (status) msg += "\n\nMevcut paket durumu:\n"+status;
+  if (status) msg += "\n\nMevcut dönem durumu:\n"+status;
   return msg;
 }
 function packageLessonsText(student, info) {
@@ -1655,9 +1715,9 @@ function packageLessonsText(student, info) {
 function msgIlkDersÖdeme(student) {
   const info = currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
   const lessons = packageLessonsText(student, info);
-  let msg = "Merhaba,\n\nYeni ders paketimiz bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\n";
+  let msg = "Merhaba,\n\nYeni ders dönemimiz bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\n";
   if (info) {
-    msg += "Paket dönemi: "+info.donem+"\n";
+    msg += "Dönem: "+info.donem+"\n";
     if (lessons) msg += "Planlanan dersler:\n"+lessons+"\n\n";
   }
   msg += "İlginiz için teşekkür eder, iyi dersler dileriz.\n\nBodrum Sonsuz Sanat";
@@ -1691,10 +1751,9 @@ function msgPaketOzeti(student) {
     sonPaket.forEach(l => {
       const katildi = l.status === "completed";
       dersler += (katildi ? "Katıldı" : "Katılmadı") + " - " + fmtShort(l.date);
-      if (l.activeMinutes || l.focusMinutes || l.productiveMinutes || l.productiveWindow || l.focusSection) {
+      if (l.activeMinutes || l.focusMinutes || l.productiveWindow || l.focusSection) {
         dersler += " ("+(l.activeMinutes||0)+" dk aktif";
         if (l.focusMinutes) dersler += ", "+l.focusMinutes+" dk odak";
-        if (l.productiveMinutes) dersler += ", "+l.productiveMinutes+" dk verimli";
         if (l.productiveWindow) dersler += ", "+l.productiveWindow;
         dersler += ")";
       }
@@ -1704,12 +1763,12 @@ function msgPaketOzeti(student) {
   const verim = lessonEngagementStats(student, info);
   const aktifTelafi = (student.telafi_records||[]).filter(r => !r.done);
   const yapilanTelafi = (student.telafi_records||[]).filter(r => r.done);
-  let msg = "Sonsuz Sanat - Ders Ozeti\n\n";
+  let msg = "Sonsuz Sanat - Ders Özeti\n\n";
   msg += "Öğrenci: "+student.name+"\n";
-  msg += "Donem: "+donem+"\n\n";
+  msg += "Dönem: "+donem+"\n\n";
   msg += "Dersler:\n"+dersler;
   if (verim) {
-    const completedWithStats = sonPaket.filter(l => l.status === "completed" && (l.activeMinutes || l.focusMinutes || l.productiveMinutes));
+    const completedWithStats = sonPaket.filter(l => l.status === "completed" && (l.activeMinutes || l.focusMinutes || l.productiveWindow || l.focusSection));
     const activeValues = completedWithStats.map(l=>parseInt(l.activeMinutes)||0);
     const focusValues = completedWithStats.map(l=>parseInt(l.focusMinutes)||0);
     const durationMax = completedWithStats.reduce((max,l)=>Math.max(max, getLessonDuration(student, l)), getLessonDuration(student));
@@ -1742,12 +1801,12 @@ function msgPaketOzeti(student) {
     if (verim.topWindow) msg += "En verimli zaman çoğunlukla dersin "+verim.topWindow.toLowerCase()+" bölümünde görülmüş.\n";
   }
   if (aktifTelafi.length > 0) {
-    msg += "\nTelafi Haklari ("+aktifTelafi.length+"):\n";
+    msg += "\nTelafi Hakları ("+aktifTelafi.length+"):\n";
     aktifTelafi.forEach(r => { msg += "- "+fmtShort(r.lessonDate)+" dersi\n"; });
   }
   if (yapilanTelafi.length > 0) {
     msg += "\nYapılan Telafiler:\n";
-    yapilanTelafi.forEach(r => { msg += "- "+fmtShort(r.lessonDate)+" dersi - "+(r.doneAt||"yapildi")+"\n"; });
+    yapilanTelafi.forEach(r => { msg += "- "+fmtShort(r.lessonDate)+" dersi - "+(r.doneAt||"yapıldı")+"\n"; });
   }
   const bekleyenEkDersler = unpaidEkDersler(student);
   if (bekleyenEkDersler.length > 0) {
@@ -1756,7 +1815,7 @@ function msgPaketOzeti(student) {
   }
   const upcoming = student.schedule.filter(l => l.status === "upcoming");
   if (upcoming.length > 0) {
-    msg += "\nYeni donem: "+fmtMed(upcoming[0].date)+"\n";
+    msg += "\nYeni dönem: "+fmtMed(upcoming[0].date)+"\n";
     msg += "Ödeme: "+fmtMed(upcoming[0].date);
   }
   return msg;
@@ -1767,7 +1826,7 @@ function MesajSheet({ student, onClose }) {
     { key:"ders", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
     { key:"ilkders", label:"İlk Ders - Ödeme Günü", text:msgIlkDersÖdeme(student) },
     { key:"yenikayit", label:"Yeni Kayıt - Ders Süreci", text:msgYeniKayitKurallari() },
-    { key:"ozet", label:"Paket Sonu Özeti", text:msgPaketOzeti(student) },
+    { key:"ozet", label:"Dönem Sonu Özeti", text:msgPaketOzeti(student) },
     { key:"odeme1", label:"Ödeme Hatırlatma (1.)", text:msgÖdemeHatirlatma() },
     { key:"odeme2", label:"Ödeme Hatırlatma (2.)", text:msgÖdemeHatirlatma2() },
     { key:"odeme3", label:"Ödeme Hatırlatma (3.)", text:msgÖdemeHatirlatma3() },
@@ -2175,6 +2234,7 @@ export default function App() {
       phone: student.phone || "",
       veli_adi: student.veli_adi || "",
       dogum_tarihi: student.dogum_tarihi || "",
+      lesson_start_date: student.lesson_start_date || student.lessonStartDate || null,
       ucret: student.ucret || 0,
       last_raise_date: student.last_raise_date || null,
       package_lesson_count: getPackageLessonCount(student),
@@ -2290,7 +2350,6 @@ export default function App() {
               note:detail.note || "",
               activeMinutes:detail.activeMinutes || 0,
               focusMinutes:detail.focusMinutes || 0,
-              productiveMinutes:detail.productiveMinutes || 0,
               productiveWindow:detail.productiveWindow || "",
               focusSection:detail.focusSection || "",
             } : l),
@@ -2440,7 +2499,7 @@ export default function App() {
     const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
     const newStudent = {
       id: uid(), name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"",
-      ucret: parseInt(f.ucret)||0, last_raise_date: f.last_raise_date || null, packageLessonCount, package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, lesson_duration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
+      lesson_start_date: f.lesson_start_date || null, ucret: parseInt(f.ucret)||0, last_raise_date: f.last_raise_date || null, packageLessonCount, package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, lesson_duration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
       no_show: 0, frozen: false, odemeler: [], telafi_records: [],
       schedule: buildScheduleSlots(slots, packageLessonCount, from, f.lessonDuration), ek_dersler: [],
     };
@@ -2682,6 +2741,7 @@ export default function App() {
         phone: f.phone,
         veli_adi: f.veli_adi||"",
         dogum_tarihi: f.dogum_tarihi||"",
+        lesson_start_date: f.lesson_start_date || null,
         ucret: parseInt(f.ucret)||0,
         last_raise_date: f.last_raise_date || null,
         lessonDuration: duration,
@@ -2936,7 +2996,7 @@ export default function App() {
                     <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
                       <div>
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                        <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Paket tamamlandı{info?.donem ? " · "+info.donem : ""}</p>
+                        <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Dönem tamamlandı{info?.donem ? " · "+info.donem : ""}</p>
                         <p style={{ margin:"2px 0 0", fontSize:12, color:sent?"#059669":"#c2410c", fontWeight:700 }}>
                           {sent ? "Özet gönderildi · "+fmtMed(sent.sentAt) : "Özet gönderilmedi"}
                         </p>
@@ -3031,7 +3091,7 @@ export default function App() {
                         {s.veli_adi ? <p style={{ fontSize:11, color:"#888", margin:"0 0 4px" }}>Veli: {s.veli_adi}</p> : null}
                         {nextL ? <p style={{ fontSize:12, color:"#0369a1", fontWeight:600, margin:"0 0 6px", background:"#f0f9ff", display:"inline-block", borderRadius:6, padding:"2px 8px" }}>{fmtDate(nextL.date)}</p> : null}
                         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-                          <span style={{ fontSize:12, color:"#444" }}><strong>{bal}</strong> ders kaldi</span>
+                          <span style={{ fontSize:12, color:"#444" }}><strong>{bal}</strong> ders kaldı</span>
                           {np ? <span style={{ fontSize:12, color:"#6b7280" }}><strong>{fmtShort(np)}</strong> odeme</span> : null}
                           {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{done}/{total}</strong> <strong>{pct}%</strong> devam</span>; })()}
                         </div>
