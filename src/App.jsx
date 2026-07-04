@@ -1452,13 +1452,6 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
             </div>
           </div>
         ) : null}
-        {payStats ? (
-          <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Alışkanlığı</p>
-            <p style={{ margin:"4px 0 0", fontSize:14, fontWeight:800, color:"#111" }}>{scoreLabel(payStats.score)} · {paymentHabitLabel(payStats)} · %{payStats.onTimeRate} zamanında · ort. {payStats.avgDelay.toFixed(1)} gün gecikme</p>
-            <p style={{ margin:"3px 0 0", fontSize:12, color:payStats.lastDelay>0?"#be123c":"#059669", fontWeight:700 }}>Son ödeme: {payStats.lastDelay>0 ? payStats.lastDelay+" gün gecikti" : "zamanında"}</p>
-          </div>
-        ) : null}
         <ProgressChart student={student} />
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
