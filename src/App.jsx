@@ -400,10 +400,21 @@ function paymentPackageInfo(student) {
 
 function packageInfos(student) {
   const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  const packageSize = getPackageLessonCount(student);
+  const defaultPackageSize = getPackageLessonCount(student);
   const infos = [];
-  for (let i = 0; i < sortedSchedule.length; i += packageSize) {
-    const lessons = sortedSchedule.slice(i, i + packageSize);
+  for (let i = 0; i < sortedSchedule.length;) {
+    const current = sortedSchedule[i];
+    const currentPackageId = current?.packageId;
+    const packageSize = parseInt(current?.packageLessonCount || current?.package_lesson_count || defaultPackageSize) || defaultPackageSize;
+    let lessons = [];
+    if (currentPackageId) {
+      lessons = sortedSchedule.filter(l => l.packageId === currentPackageId);
+      const lastIdx = sortedSchedule.reduce((idx, l, lessonIndex) => l.packageId === currentPackageId ? lessonIndex : idx, i);
+      i = Math.max(lastIdx + 1, i + lessons.length);
+    } else {
+      lessons = sortedSchedule.slice(i, i + packageSize);
+      i += packageSize;
+    }
     if (!lessons.length) continue;
     const first = lessons[0];
     const last = lessons[lessons.length-1];
@@ -411,7 +422,7 @@ function packageInfos(student) {
     infos.push({
       packageIndex: infos.length,
       packageId: packageIds.length === 1 ? packageIds[0] : undefined,
-      packageSize: lessons.length || packageSize,
+      packageSize,
       expectedPackageSize: packageSize,
       complete: lessons.length >= packageSize,
       lessonIds: lessons.map(l=>l.id).filter(Boolean),
@@ -456,9 +467,12 @@ function paymentPackageLessons(student, payment, index) {
   if (!lessons.length && payment.packageId) lessons = schedule.filter(l=>l.packageId===payment.packageId);
 
   if (!lessons.length && payment.packageStart && payment.packageEnd) {
-    const startIdx = schedule.findIndex(l=>dateKey(l.date)===payment.packageStart);
-    const count = effectiveCount || PAYMENT_PACK_SIZE;
-    if (startIdx >= 0) lessons = schedule.slice(startIdx, startIdx + count);
+    lessons = schedule.filter(l => dateKey(l.date) >= payment.packageStart && dateKey(l.date) <= payment.packageEnd);
+    if (!lessons.length) {
+      const startIdx = schedule.findIndex(l=>dateKey(l.date)===payment.packageStart);
+      const count = effectiveCount || PAYMENT_PACK_SIZE;
+      if (startIdx >= 0) lessons = schedule.slice(startIdx, startIdx + count);
+    }
   }
 
   if (!lessons.length && typeof payment.packageIndex === "number" && packages[payment.packageIndex]) {
@@ -500,6 +514,17 @@ function paymentPackageLessons(student, payment, index) {
   };
 }
 
+function lessonProgramLabel(student, lessons) {
+  const clean = (lessons || []).filter(Boolean);
+  if (!clean.length) return studentScheduleLabel(student);
+  const labels = clean.map(l => {
+    const day = l.day || DAYS[new Date(l.date).getDay()-1] || "";
+    return (day ? day + " " : "") + lessonTime(student, l);
+  });
+  const unique = [...new Set(labels.filter(Boolean))];
+  return unique.length ? unique.join(" / ") : studentScheduleLabel(student);
+}
+
 function paymentDisplayInfo(student, payment, index) {
   const { lessons, effectiveCount, startKey, endKey } = paymentPackageLessons(student, payment, index);
   const first = lessons[0];
@@ -513,7 +538,7 @@ function paymentDisplayInfo(student, payment, index) {
   const periodShort = first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : storedPeriod;
   const periodLong = first && last ? fmtDate(first.date)+" - "+fmtDate(last.date) : storedPeriodLong;
   const lessonCount = lessons.length || effectiveCount || PAYMENT_PACK_SIZE;
-  const program = studentScheduleLabel(student);
+  const program = lessonProgramLabel(student, lessons);
   const expectedPackageAmount = (student.ucret || 0) * (lessonCount / PAYMENT_PACK_SIZE);
   const numericAmount = typeof payment.tutar === "number" ? payment.tutar : null;
   const amountToShow = numericAmount;
@@ -851,7 +876,7 @@ function packageStatusText(student, info) {
     .filter(l => ids.has(l.id))
     .sort((a,b)=>new Date(a.date)-new Date(b.date));
   if (!lessons.length) return "";
-  return lessons.map((l,i) => (i+1)+". ders: "+packageLessonStatusText(l)+" - "+fmtShort(l.date)).join("\n");
+  return lessons.map((l,i) => (i+1)+". Ders: "+packageLessonStatusText(l)+" -").join("\n");
 }
 
 function lessonReminderSentInfo(student, lesson) {
@@ -866,7 +891,8 @@ function isPaymentDue(student) {
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
 const FOCUS_SECTIONS = ["Teknik çalışma","Ritim","Nota okuma","Parça çalışması","Doğaçlama","Teori","Tekrar"];
-const PRODUCTIVE_WINDOWS = ["İlk 15 dk","Orta 15 dk","Son 15 dk","İlk 30 dk","Son 30 dk","Ders geneli dengeli"];
+const PACKAGE_LESSON_OPTIONS = [4, 8, 12];
+const PRODUCTIVE_WINDOWS = ["İlk 10 dk","İlk 15 dk","İlk 20 dk","İlk 30 dk","Orta 15 dk","Son 15 dk","Son 20 dk","Son 30 dk","Ders geneli dengeli"];
 const TIMES = [];
 for (let h=10;h<=19;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
@@ -891,7 +917,7 @@ function Btn({ children, onClick, bg="#111", color="#fff", outline=false, mb=8 }
 function NoteArea({ value, onChange, placeholder="Açıklama ekle..." }) {
   return (
     <div style={{ marginBottom:12 }}>
-      <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Açıklama (opsiyonel)</label>
+      <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:6 }}>Açıklama (opsiyonel)</label>
       <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={3}
         style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa", color:"#111" }} />
     </div>
@@ -920,7 +946,7 @@ function ProgressChart({ student }) {
   if (points.length < 2) {
     return (
       <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"14px", marginBottom:14 }}>
-        <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Gelişim Grafiği</p>
+        <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Gelişim Grafiği</p>
         <p style={{ margin:"8px 0 0", fontSize:13, color:"#94a3b8", fontWeight:700 }}>Grafik için en az 2 verimli ders kaydı gerekiyor.</p>
       </div>
     );
@@ -964,7 +990,7 @@ function ProgressChart({ student }) {
     <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10, marginBottom:8 }}>
         <div>
-          <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Gelişim Grafiği</p>
+          <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Gelişim Grafiği</p>
           <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontWeight:700 }}>Kendi ders verileri üzerinden</p>
         </div>
         <p style={{ margin:0, fontSize:13, fontWeight:800, color:trend==="Yükseliyor"?"#059669":trend==="Düşüyor"?"#be123c":"#475569" }}>{trend}</p>
@@ -1032,7 +1058,7 @@ function downloadSvgAsPng(svgId, filename) {
 }
 
 const INP = { width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fafafa", color:"#111" };
-const LBL = { display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:4, marginTop:14 };
+const LBL = { display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:4, marginTop:14 };
 
 function ActionSheet({ student, lessonId, onClose, onAction }) {
   const [step, setStep] = useState("main");
@@ -1060,7 +1086,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
       {step === "main" && <>
         {lesson && lesson.status !== "upcoming" ? (
           <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:12, padding:"10px 12px", marginBottom:12 }}>
-            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Mevcut durum</p>
+            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Mevcut durum</p>
             <StatusPill status={lesson.status} />
             <p style={{ margin:"8px 0 0", fontSize:12, color:"#64748b" }}>Yanlış işaretlendiyse buradan düzeltebilirsin.</p>
           </div>
@@ -1136,14 +1162,14 @@ function TelafiSheet({ record, studentName, onClose, onDone }) {
   return (
     <Sheet title="Telafi Dersi" subtitle={studentName} onClose={onClose}>
       <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
-        <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", textTransform:"uppercase", letterSpacing:1 }}>İptal Edilen Ders</p>
+        <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", letterSpacing:1 }}>İptal Edilen Ders</p>
         <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color:"#111" }}>{fmtDate(record.lessonDate)}</p>
         {record.note && <p style={{ margin:"4px 0 0", fontSize:13, color:"#475569", fontStyle:"italic" }}>{record.note}</p>}
       </div>
       <div style={{ background: expired?"#fee2e2":urgent?"#fffbeb":"#f0fdf4", border:`1px solid ${expired?"#fca5a5":urgent?"#fcd34d":"#bbf7d0"}`, borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div>
-            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Son Geçerlilik</p>
+            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Son Geçerlilik</p>
             <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color: expired?"#dc2626":urgent?"#d97706":"#166534" }}>{fmtMed(record.expiry)}</p>
           </div>
           <div style={{ background: expired?"#dc2626":urgent?"#d97706":"#16a34a", color:"#fff", borderRadius:20, padding:"6px 14px", fontWeight:800, fontSize:14 }}>
@@ -1206,6 +1232,7 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
     day: student.day,
     time: student.time,
     lessonDuration: getLessonDuration(student),
+    packageLessonCount: getPackageLessonCount(student),
     lessonSlots: getStudentSlots(student),
   });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
@@ -1239,6 +1266,10 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       <select style={INP} value={f.lessonDuration} onChange={e=>s("lessonDuration",parseInt(e.target.value)||45)}>
         <option value={45}>45 dakika</option>
         <option value={30}>30 dakika</option>
+      </select>
+      <label style={LBL}>Dönem Ders Sayısı</label>
+      <select style={INP} value={f.packageLessonCount} onChange={e=>s("packageLessonCount",parseInt(e.target.value)||PAYMENT_PACK_SIZE)}>
+        {PACKAGE_LESSON_OPTIONS.map(n => <option key={n} value={n}>{n} Ders</option>)}
       </select>
       <label style={LBL}>Ders Günleri</label>
       {f.lessonSlots.map((slot,i) => (
@@ -1334,17 +1365,17 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
       </button>
       {open ? (
         <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 12px", marginTop:8 }}>
-          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Ödenen dönem</p>
+          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Ödenen dönem</p>
           <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:700, color:"#111" }}>{info.periodLong || "Dönem bilgisi yok"}</p>
-          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Kapsam</p>
+          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Kapsam</p>
           <p style={{ margin:"0 0 8px", fontSize:13, color:"#374151" }}>{info.extraOnly ? (info.extra || "Ek ders") : info.lessonCount+" ders"+(info.extra ? " · "+info.extra : "")}</p>
           {info.delayText ? (
             <>
-              <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Alışkanlığı</p>
+              <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Ödeme Alışkanlığı</p>
               <p style={{ margin:"0 0 8px", fontSize:13, color:payment.gecikmeGunu>0?"#be123c":"#059669", fontWeight:700 }}>{info.delayText}</p>
             </>
           ) : null}
-          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Program</p>
+          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Program</p>
           <p style={{ margin:0, fontSize:13, color:"#374151" }}>{info.program}</p>
           {editing ? (
             <div style={{ marginTop:10 }}>
@@ -1386,6 +1417,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
   const [showEkDers, setShowEkDers] = useState(false);
   const [showDuzenle, setShowDuzenle] = useState(false);
   const [showOdemeAl, setShowOdemeAl] = useState(false);
+  const [showRecharge, setShowRecharge] = useState(false);
   const [showZam, setShowZam] = useState(false);
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
@@ -1415,7 +1447,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
         </div>
         {startInfo ? (
           <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 14px", marginBottom:12 }}>
-            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Derse Başlama</p>
+            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#64748b", letterSpacing:1 }}>Derse Başlama</p>
             <p style={{ margin:"4px 0 0", fontSize:13, color:"#111", fontWeight:800 }}>{startInfo}</p>
           </div>
         ) : null}
@@ -1445,7 +1477,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div>
-                <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Tahmini Sonraki Ödeme</p>
+                <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Tahmini Sonraki Ödeme</p>
                 <p style={{ margin:"3px 0 0", fontSize:14, fontWeight:700, color:"#111" }}>{fmtMed(np)}</p>
               </div>
               <span style={{ fontSize:22 }}>💳</span>
@@ -1455,7 +1487,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
         <ProgressChart student={student} />
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Geçmişi</p>
+            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Ödeme Geçmişi</p>
             {[...student.odemeler].map((o,i)=>({o,i})).reverse().map(({o,i}) => (
               <PaymentHistoryItem key={i} student={student} payment={o} index={i} onPaymentEdit={(idx,changes)=>onPaymentEdit(student.id,idx,changes)} onPaymentDelete={(idx)=>onPaymentDelete(student.id,idx)} />
             ))}
@@ -1492,12 +1524,14 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
               </div>
             );
           };
-          const upcomingDersler = student.schedule.filter(l => l.status === "upcoming");
-          const gecmisDersler = student.schedule.filter(l => l.status !== "upcoming");
-          const güncelGecmisSayisi = gecmisDersler.length % 4;
-          const güncelGecmis = güncelGecmisSayisi > 0 ? gecmisDersler.slice(-güncelGecmisSayisi) : [];
-          const eskiPaketler = güncelGecmisSayisi > 0 ? gecmisDersler.slice(0, -güncelGecmisSayisi) : gecmisDersler;
-          const güncel = [...güncelGecmis, ...upcomingDersler];
+          const currentIds = new Set(currentOrLastInfo?.lessonIds || []);
+          const sortedLessons = [...(student.schedule || [])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+          const güncel = currentIds.size
+            ? sortedLessons.filter(l => currentIds.has(l.id))
+            : sortedLessons.filter(l => l.status === "upcoming");
+          const eskiPaketler = currentIds.size
+            ? sortedLessons.filter(l => !currentIds.has(l.id) && l.status !== "upcoming")
+            : sortedLessons.filter(l => l.status !== "upcoming");
           return (
             <div>
               {eskiPaketler.length > 0 ? (
@@ -1523,7 +1557,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
             {student.telafi_records.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Aktif telafi hakkı yok</p> : null}
             {active.length > 0 ? (
               <div style={{ marginBottom:16 }}>
-                <p style={{ fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Bekleyen</p>
+                <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Bekleyen</p>
                 {active.map(r => {
                   const d = daysLeft(r.expiry);
                   const exp = d !== null && d < 0;
@@ -1547,7 +1581,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
             ) : null}
             {done.length > 0 ? (
               <div>
-                <p style={{ fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Yapilmis</p>
+                <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Yapılmış</p>
                 {done.map(r => (
                   <div key={r.id} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginBottom:6 }}>
                     <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>{fmtDate(r.lessonDate)} dersi yapıldı</p>
@@ -1596,7 +1630,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
           <Btn bg="#10b981" onClick={() => setShowOdemeAl(true)}>Ödeme Al</Btn>
           <Btn bg="#f97316" onClick={() => setShowZam(true)}>Zam Yap</Btn>
           <Btn bg="#6366f1" onClick={() => setShowDuzenle(true)}>Öğrenciyi Düzenle</Btn>
-          <Btn bg="#111" onClick={() => { onRecharge(student.id, new Date().toISOString().split("T")[0]); onClose(); }}>Paket Yükle ({getPackageLessonCount(student)} Ders)</Btn>
+          <Btn bg="#111" onClick={() => setShowRecharge(true)}>Paket Yükle</Btn>
           {undoablePackage ? (
             <div style={{ background:"#fff1f2", border:"1px solid #fecdd3", borderRadius:12, padding:"10px 12px" }}>
               <p style={{ margin:"0 0 8px", fontSize:12, color:"#be123c", fontWeight:700 }}>Geri alınacak dersler: {undoablePackagePreview(student, undoablePackage)}</p>
@@ -1604,7 +1638,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
             </div>
           ) : null}
           <div style={{ background:student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
-            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:student.frozen?"#1d4ed8":"#6b7280", textTransform:"uppercase", letterSpacing:1 }}>Öğrenci Durumu</p>
+            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:student.frozen?"#1d4ed8":"#6b7280", letterSpacing:1 }}>Öğrenci Durumu</p>
             <p style={{ margin:"0 0 10px", fontSize:13, color:"#475569" }}>{student.frozen ? "Program dondurulmuş. Öğrenci geri başlayacağı zaman buradan aktif edebilirsin." : "Öğrenci aktif. Uzun süre ara verecekse programı dondurabilirsin."}</p>
             <button onClick={() => {
               onToggleFreeze(student.id, !student.frozen);
@@ -1618,6 +1652,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
       {telafiSel ? <TelafiSheet record={telafiSel} studentName={student.name} onClose={() => setTelafiSel(null)} onDone={(id, note) => { onTelafiDone(student.id, id, note); setTelafiSel(null); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => { onMoveOne(student.id, lid, date, time); setShiftSel(null); }} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
+      {showRecharge ? <ÖdemeSheet student={student} onClose={() => setShowRecharge(false)} onÖdemeAl={onRecharge} onMesajGonder={(st)=>onMesaj(st)} /> : null}
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
       {showDuzenle ? <DuzenleSheet student={student} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} /> : null}
@@ -1676,8 +1711,10 @@ function AddSheet({ onClose, onAdd }) {
         </div>
       ))}
       <button onClick={addSlot} style={{ width:"100%", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", marginTop:2 }}>+ Ders günü ekle</button>
-      <label style={LBL}>Paket (ders sayısı)</label>
-      <input style={INP} type="number" value={f.count} onChange={e=>s("count",Math.max(1,parseInt(e.target.value)||1))} min={1} max={12} />
+      <label style={LBL}>Dönem Ders Sayısı</label>
+      <select style={INP} value={f.count} onChange={e=>s("count",parseInt(e.target.value)||PAYMENT_PACK_SIZE)}>
+        {PACKAGE_LESSON_OPTIONS.map(n => <option key={n} value={n}>{n} Ders</option>)}
+      </select>
       <label style={LBL}>İlk Ders Tarihi</label>
       <input style={INP} type="date" value={f.firstDate} onChange={e=>s("firstDate",e.target.value)} />
       {f.name && previewDates() ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginTop:12, fontSize:12, color:"#166534" }}><strong>Planlanacak dersler:</strong><br />{previewDates()}</div> : null}
@@ -1691,7 +1728,7 @@ function msgDersHatirlatma(student) {
   const nextLesson = todayLesson || student.schedule.find(l => l.status === "upcoming");
   const info = currentPackageInfoForLesson(student, nextLesson);
   const status = packageStatusText(student, info);
-  let msg = "Günaydın :)\nBugünkü ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
+  let msg = "Günaydın :) Bugünkü ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
   if (status) msg += "\n\nMevcut dönem durumu:\n"+status;
   return msg;
 }
@@ -1701,7 +1738,7 @@ function packageLessonsText(student, info) {
   return (student.schedule || [])
     .filter(l => ids.has(l.id))
     .sort((a,b)=>new Date(a.date)-new Date(b.date))
-    .map((l,i) => (i+1)+". ders: "+fmtDate(l.date)+" "+lessonTime(student, l))
+    .map((l,i) => (i+1)+". Ders: "+fmtDate(l.date)+" "+lessonTime(student, l))
     .join("\n");
 }
 
@@ -1774,14 +1811,14 @@ function msgPaketOzeti(student) {
       msg += "Aktif süre:\n";
       completedWithStats.forEach((l, i) => {
         const active = parseInt(l.activeMinutes) || 0;
-        msg += (i+1)+". ders "+asciiBar(active, durationMax)+" "+active+" dk\n";
+        msg += (i+1)+". Ders "+asciiBar(active, durationMax)+" "+active+" dk\n";
       });
     }
     if (focusValues.some(Boolean)) {
       msg += "\nOdaklanma:\n";
       completedWithStats.forEach((l, i) => {
         const focus = parseInt(l.focusMinutes) || 0;
-        msg += (i+1)+". ders "+asciiBar(focus, durationMax)+" "+focus+" dk\n";
+        msg += (i+1)+". Ders "+asciiBar(focus, durationMax)+" "+focus+" dk\n";
       });
     }
     const activeTrend = activeValues.length >= 2 ? activeValues[activeValues.length-1] - activeValues[0] : 0;
@@ -1851,19 +1888,25 @@ function MesajSheet({ student, onClose }) {
 }
 
 function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
+  const [lessonCount, setLessonCount] = useState(getPackageLessonCount(student));
   const ekDersler = unpaidEkDersler(student);
   const ekToplam = ekDersler.reduce((sum,e)=>sum+(e.fee||ekDersFee(student)),0);
-  const paketTutar = student.ucret || 0;
-  const paketDersSayisi = getPackageLessonCount(student);
+  const paketTutar = (student.ucret || 0) * (lessonCount / PAYMENT_PACK_SIZE);
   return (
     <Sheet title="Paket Yükle" subtitle={student.name} onClose={onClose}>
       <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
-        <p style={{ margin:0, fontSize:13, color:"#166534" }}>{paketDersSayisi} yeni ders eklenecek.</p>
+        <p style={{ margin:0, fontSize:13, color:"#166534" }}>{lessonCount} yeni ders eklenecek.</p>
         <p style={{ margin:"6px 0 0", fontSize:13, color:"#166534", fontWeight:700 }}>Paket: {paketTutar.toLocaleString("tr-TR")} TL</p>
         {ekDersler.length > 0 ? <p style={{ margin:"6px 0 0", fontSize:13, color:"#5b21b6", fontWeight:700 }}>{ekDersler.length} ödenmemiş ek ders: {ekToplam.toLocaleString("tr-TR")} TL</p> : null}
         <p style={{ margin:"8px 0 0", fontSize:13, color:"#166534" }}>Ödeme uyarısı yeni periyodun ilk ders günü Bugünkü Ödemeler alanına düşer.</p>
       </div>
-      <Btn bg="#111" onClick={() => { onÖdemeAl(student.id); onClose(); }}>Paketi Yükle</Btn>
+      <label style={LBL}>Yüklenecek Ders Sayısı</label>
+      <select style={INP} value={lessonCount} onChange={e=>setLessonCount(parseInt(e.target.value)||PAYMENT_PACK_SIZE)}>
+        {PACKAGE_LESSON_OPTIONS.map(n => <option key={n} value={n}>{n} Ders</option>)}
+      </select>
+      <div style={{ marginTop:16 }}>
+        <Btn bg="#111" onClick={() => { onÖdemeAl(student.id, new Date().toISOString().split("T")[0], lessonCount); onClose(); }}>Paketi Yükle</Btn>
+      </div>
       <Btn bg="#f97316" onClick={() => { onMesajGonder(student); onClose(); }}>Ödeme Hatırlatması Gönder</Btn>
       <Btn bg="#6b7280" onClick={onClose} outline>İptal</Btn>
     </Sheet>
@@ -2127,23 +2170,23 @@ function GelirRaporu({ students }) {
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
         <button onClick={()=>setAyOffset(o=>o-1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>‹</button>
         <div style={{ textAlign:"center" }}>
-          <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111", textTransform:"capitalize" }}>{ayAdi}</p>
+          <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111" }}>{ayAdi}</p>
           {ayOffset!==0 ? <button onClick={()=>setAyOffset(0)} style={{ background:"none", border:"none", fontSize:11, color:"#3b82f6", fontWeight:600, cursor:"pointer", padding:0, marginTop:2 }}>Bu aya dön</button> : null}
         </div>
         <button onClick={()=>setAyOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
       </div>
       <div style={{ background:"linear-gradient(135deg, #059669, #10b981)", borderRadius:18, padding:"20px", marginBottom:14, color:"#fff" }}>
-        <p style={{ margin:0, fontSize:12, opacity:0.85, fontWeight:600, letterSpacing:1, textTransform:"uppercase" }}>Toplam Tahsilat</p>
+        <p style={{ margin:0, fontSize:12, opacity:0.85, fontWeight:600, letterSpacing:1 }}>Toplam Tahsilat</p>
         <p style={{ margin:"6px 0 0", fontSize:34, fontWeight:800 }}>{toplamGelir.toLocaleString("tr-TR")} TL</p>
         <p style={{ margin:"4px 0 0", fontSize:13, opacity:0.85 }}>{ayÖdemeleri.length} ödeme alındı</p>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
         <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
-          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Paket Geliri</p>
+          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, letterSpacing:1 }}>Paket Geliri</p>
           <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#111" }}>{paketGeliri.toLocaleString("tr-TR")} TL</p>
         </div>
         <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
-          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Ek Ders Geliri</p>
+          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, letterSpacing:1 }}>Ek Ders Geliri</p>
           <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#5b21b6" }}>{ekGeliri.toLocaleString("tr-TR")} TL</p>
         </div>
       </div>
@@ -2456,15 +2499,16 @@ export default function App() {
     pop("Öğrenci silindi");
   };
 
-  const handleRecharge = async (sid, odemeDate) => {
+  const handleRecharge = async (sid, odemeDate, requestedLessonCount=null) => {
     let lessonCount = PAYMENT_PACK_SIZE;
     const updated = students.map(s => {
       if (s.id!==sid) return s;
       const last = [...s.schedule].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
       const from = last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
-      lessonCount = getPackageLessonCount(s);
+      const requested = parseInt(requestedLessonCount);
+      lessonCount = PACKAGE_LESSON_OPTIONS.includes(requested) ? requested : getPackageLessonCount(s);
       const newLessons = buildScheduleSlots(getStudentSlots(s), lessonCount, from, getLessonDuration(s));
-      return {...s, frozen:false, schedule:[...s.schedule, ...newLessons]};
+      return {...s, frozen:false, packageLessonCount:lessonCount, package_lesson_count:lessonCount, schedule:[...s.schedule, ...newLessons]};
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
@@ -2684,6 +2728,9 @@ export default function App() {
   const handleDuzenle = async (sid, f) => {
     const slots = normalizeSlots(f.lessonSlots, f.day, f.time);
     const duration = parseInt(f.lessonDuration)||45;
+    const packageLessonCount = PACKAGE_LESSON_OPTIONS.includes(parseInt(f.packageLessonCount))
+      ? parseInt(f.packageLessonCount)
+      : getPackageLessonCount(students.find(s=>s.id===sid) || {});
     const updated = students.map(s => {
       if (s.id!==sid) return s;
       const schedule = s.schedule || [];
@@ -2739,8 +2786,8 @@ export default function App() {
         last_raise_date: f.last_raise_date || null,
         lessonDuration: duration,
         lesson_duration: duration,
-        packageLessonCount: getPackageLessonCount(s),
-        package_lesson_count: getPackageLessonCount(s),
+        packageLessonCount,
+        package_lesson_count: packageLessonCount,
         instrument: f.instrument,
         day: slots[0].day,
         time: slots[0].time,
@@ -2868,9 +2915,9 @@ export default function App() {
     return (
       <div style={{ fontFamily:"sans-serif", background:"#111", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
         <div style={{ background:"#fff", borderRadius:20, padding:"40px 32px", width:"100%", maxWidth:360, boxShadow:"0 8px 40px rgba(0,0,0,.3)" }}>
-          <p style={{ fontSize:11, letterSpacing:3, color:"#999", textTransform:"uppercase", margin:"0 0 6px" }}>Sonsuz Sanat</p>
+          <p style={{ fontSize:11, letterSpacing:3, color:"#999", margin:"0 0 6px" }}>Sonsuz Sanat</p>
           <h1 style={{ fontSize:22, fontWeight:800, margin:"0 0 28px", color:"#111" }}>Öğrenci Yönetimi</h1>
-          <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Şifre</label>
+          <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:6 }}>Şifre</label>
           <input
             type="password"
             value={sifre}
@@ -2915,7 +2962,7 @@ export default function App() {
       <div style={{ background:"#111", color:"#fff", padding:"16px 20px 0" }}>
         <div style={{ maxWidth:600, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap", paddingBottom:12 }}>
           <div>
-            <p style={{ fontSize:10, letterSpacing:3, color:"#666", textTransform:"uppercase", margin:0 }}>Sonsuz Sanat</p>
+            <p style={{ fontSize:10, letterSpacing:3, color:"#666", margin:0 }}>Sonsuz Sanat</p>
             <h1 style={{ fontSize:20, fontWeight:800, margin:"2px 0 0", letterSpacing:-0.5 }}>Öğrenci Yönetimi</h1>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center", marginLeft:"auto" }}>
@@ -2997,7 +3044,7 @@ export default function App() {
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
                         <button onClick={() => setMesajSt(s)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Özeti Aç</button>
                         {!sent ? <button onClick={() => handlePaketOzetiGonderildi(s.id)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Gönderildi</button> : null}
-                        <button onClick={() => handleRecharge(s.id, new Date().toISOString().split("T")[0])} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
+                        <button onClick={() => setÖdemeSt(s)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
                       </div>
                     </div>
                   );
