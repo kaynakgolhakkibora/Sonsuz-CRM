@@ -851,7 +851,7 @@ function packageStatusText(student, info) {
     .filter(l => ids.has(l.id))
     .sort((a,b)=>new Date(a.date)-new Date(b.date));
   if (!lessons.length) return "";
-  return lessons.map((l,i) => (i+1)+". ders: "+packageLessonStatusText(l)+" - "+fmtShort(l.date)).join("\n");
+  return lessons.map((l,i) => (i+1)+". Ders: "+packageLessonStatusText(l)+" -").join("\n");
 }
 
 function lessonReminderSentInfo(student, lesson) {
@@ -866,7 +866,7 @@ function isPaymentDue(student) {
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
 const FOCUS_SECTIONS = ["Teknik çalışma","Ritim","Nota okuma","Parça çalışması","Doğaçlama","Teori","Tekrar"];
-const PRODUCTIVE_WINDOWS = ["İlk 15 dk","Orta 15 dk","Son 15 dk","İlk 30 dk","Son 30 dk","Ders geneli dengeli"];
+const PRODUCTIVE_WINDOWS = ["İlk 10 dk","İlk 15 dk","İlk 20 dk","İlk 30 dk","Orta 15 dk","Son 15 dk","Son 20 dk","Son 30 dk","Ders geneli dengeli"];
 const TIMES = [];
 for (let h=10;h<=19;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
@@ -891,7 +891,7 @@ function Btn({ children, onClick, bg="#111", color="#fff", outline=false, mb=8 }
 function NoteArea({ value, onChange, placeholder="Açıklama ekle..." }) {
   return (
     <div style={{ marginBottom:12 }}>
-      <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Açıklama (opsiyonel)</label>
+      <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:6 }}>Açıklama (opsiyonel)</label>
       <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={3}
         style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa", color:"#111" }} />
     </div>
@@ -920,7 +920,7 @@ function ProgressChart({ student }) {
   if (points.length < 2) {
     return (
       <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"14px", marginBottom:14 }}>
-        <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Gelişim Grafiği</p>
+        <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Gelişim Grafiği</p>
         <p style={{ margin:"8px 0 0", fontSize:13, color:"#94a3b8", fontWeight:700 }}>Grafik için en az 2 verimli ders kaydı gerekiyor.</p>
       </div>
     );
@@ -964,7 +964,7 @@ function ProgressChart({ student }) {
     <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10, marginBottom:8 }}>
         <div>
-          <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Gelişim Grafiği</p>
+          <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Gelişim Grafiği</p>
           <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontWeight:700 }}>Kendi ders verileri üzerinden</p>
         </div>
         <p style={{ margin:0, fontSize:13, fontWeight:800, color:trend==="Yükseliyor"?"#059669":trend==="Düşüyor"?"#be123c":"#475569" }}>{trend}</p>
@@ -1032,7 +1032,7 @@ function downloadSvgAsPng(svgId, filename) {
 }
 
 const INP = { width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fafafa", color:"#111" };
-const LBL = { display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:4, marginTop:14 };
+const LBL = { display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:4, marginTop:14 };
 
 function ActionSheet({ student, lessonId, onClose, onAction }) {
   const [step, setStep] = useState("main");
@@ -1060,7 +1060,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
       {step === "main" && <>
         {lesson && lesson.status !== "upcoming" ? (
           <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:12, padding:"10px 12px", marginBottom:12 }}>
-            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Mevcut durum</p>
+            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Mevcut durum</p>
             <StatusPill status={lesson.status} />
             <p style={{ margin:"8px 0 0", fontSize:12, color:"#64748b" }}>Yanlış işaretlendiyse buradan düzeltebilirsin.</p>
           </div>
@@ -1136,14 +1136,14 @@ function TelafiSheet({ record, studentName, onClose, onDone }) {
   return (
     <Sheet title="Telafi Dersi" subtitle={studentName} onClose={onClose}>
       <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
-        <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", textTransform:"uppercase", letterSpacing:1 }}>İptal Edilen Ders</p>
+        <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", letterSpacing:1 }}>İptal Edilen Ders</p>
         <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color:"#111" }}>{fmtDate(record.lessonDate)}</p>
         {record.note && <p style={{ margin:"4px 0 0", fontSize:13, color:"#475569", fontStyle:"italic" }}>{record.note}</p>}
       </div>
       <div style={{ background: expired?"#fee2e2":urgent?"#fffbeb":"#f0fdf4", border:`1px solid ${expired?"#fca5a5":urgent?"#fcd34d":"#bbf7d0"}`, borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div>
-            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Son Geçerlilik</p>
+            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Son Geçerlilik</p>
             <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color: expired?"#dc2626":urgent?"#d97706":"#166534" }}>{fmtMed(record.expiry)}</p>
           </div>
           <div style={{ background: expired?"#dc2626":urgent?"#d97706":"#16a34a", color:"#fff", borderRadius:20, padding:"6px 14px", fontWeight:800, fontSize:14 }}>
@@ -1334,17 +1334,17 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
       </button>
       {open ? (
         <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 12px", marginTop:8 }}>
-          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Ödenen dönem</p>
+          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Ödenen dönem</p>
           <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:700, color:"#111" }}>{info.periodLong || "Dönem bilgisi yok"}</p>
-          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Kapsam</p>
+          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Kapsam</p>
           <p style={{ margin:"0 0 8px", fontSize:13, color:"#374151" }}>{info.extraOnly ? (info.extra || "Ek ders") : info.lessonCount+" ders"+(info.extra ? " · "+info.extra : "")}</p>
           {info.delayText ? (
             <>
-              <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Alışkanlığı</p>
+              <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Ödeme Alışkanlığı</p>
               <p style={{ margin:"0 0 8px", fontSize:13, color:payment.gecikmeGunu>0?"#be123c":"#059669", fontWeight:700 }}>{info.delayText}</p>
             </>
           ) : null}
-          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>Program</p>
+          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Program</p>
           <p style={{ margin:0, fontSize:13, color:"#374151" }}>{info.program}</p>
           {editing ? (
             <div style={{ marginTop:10 }}>
@@ -1415,7 +1415,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
         </div>
         {startInfo ? (
           <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 14px", marginBottom:12 }}>
-            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Derse Başlama</p>
+            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#64748b", letterSpacing:1 }}>Derse Başlama</p>
             <p style={{ margin:"4px 0 0", fontSize:13, color:"#111", fontWeight:800 }}>{startInfo}</p>
           </div>
         ) : null}
@@ -1445,7 +1445,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div>
-                <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Tahmini Sonraki Ödeme</p>
+                <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Tahmini Sonraki Ödeme</p>
                 <p style={{ margin:"3px 0 0", fontSize:14, fontWeight:700, color:"#111" }}>{fmtMed(np)}</p>
               </div>
               <span style={{ fontSize:22 }}>💳</span>
@@ -1455,7 +1455,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
         <ProgressChart student={student} />
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1 }}>Ödeme Geçmişi</p>
+            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Ödeme Geçmişi</p>
             {[...student.odemeler].map((o,i)=>({o,i})).reverse().map(({o,i}) => (
               <PaymentHistoryItem key={i} student={student} payment={o} index={i} onPaymentEdit={(idx,changes)=>onPaymentEdit(student.id,idx,changes)} onPaymentDelete={(idx)=>onPaymentDelete(student.id,idx)} />
             ))}
@@ -1523,7 +1523,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
             {student.telafi_records.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Aktif telafi hakkı yok</p> : null}
             {active.length > 0 ? (
               <div style={{ marginBottom:16 }}>
-                <p style={{ fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Bekleyen</p>
+                <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Bekleyen</p>
                 {active.map(r => {
                   const d = daysLeft(r.expiry);
                   const exp = d !== null && d < 0;
@@ -1547,7 +1547,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
             ) : null}
             {done.length > 0 ? (
               <div>
-                <p style={{ fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Yapilmis</p>
+                <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Yapılmış</p>
                 {done.map(r => (
                   <div key={r.id} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginBottom:6 }}>
                     <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>{fmtDate(r.lessonDate)} dersi yapıldı</p>
@@ -1604,7 +1604,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
             </div>
           ) : null}
           <div style={{ background:student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
-            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:student.frozen?"#1d4ed8":"#6b7280", textTransform:"uppercase", letterSpacing:1 }}>Öğrenci Durumu</p>
+            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:student.frozen?"#1d4ed8":"#6b7280", letterSpacing:1 }}>Öğrenci Durumu</p>
             <p style={{ margin:"0 0 10px", fontSize:13, color:"#475569" }}>{student.frozen ? "Program dondurulmuş. Öğrenci geri başlayacağı zaman buradan aktif edebilirsin." : "Öğrenci aktif. Uzun süre ara verecekse programı dondurabilirsin."}</p>
             <button onClick={() => {
               onToggleFreeze(student.id, !student.frozen);
@@ -1691,7 +1691,7 @@ function msgDersHatirlatma(student) {
   const nextLesson = todayLesson || student.schedule.find(l => l.status === "upcoming");
   const info = currentPackageInfoForLesson(student, nextLesson);
   const status = packageStatusText(student, info);
-  let msg = "Günaydın :)\nBugünkü ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
+  let msg = "Günaydın :) Bugünkü ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
   if (status) msg += "\n\nMevcut dönem durumu:\n"+status;
   return msg;
 }
@@ -1701,7 +1701,7 @@ function packageLessonsText(student, info) {
   return (student.schedule || [])
     .filter(l => ids.has(l.id))
     .sort((a,b)=>new Date(a.date)-new Date(b.date))
-    .map((l,i) => (i+1)+". ders: "+fmtDate(l.date)+" "+lessonTime(student, l))
+    .map((l,i) => (i+1)+". Ders: "+fmtDate(l.date)+" "+lessonTime(student, l))
     .join("\n");
 }
 
@@ -1774,14 +1774,14 @@ function msgPaketOzeti(student) {
       msg += "Aktif süre:\n";
       completedWithStats.forEach((l, i) => {
         const active = parseInt(l.activeMinutes) || 0;
-        msg += (i+1)+". ders "+asciiBar(active, durationMax)+" "+active+" dk\n";
+        msg += (i+1)+". Ders "+asciiBar(active, durationMax)+" "+active+" dk\n";
       });
     }
     if (focusValues.some(Boolean)) {
       msg += "\nOdaklanma:\n";
       completedWithStats.forEach((l, i) => {
         const focus = parseInt(l.focusMinutes) || 0;
-        msg += (i+1)+". ders "+asciiBar(focus, durationMax)+" "+focus+" dk\n";
+        msg += (i+1)+". Ders "+asciiBar(focus, durationMax)+" "+focus+" dk\n";
       });
     }
     const activeTrend = activeValues.length >= 2 ? activeValues[activeValues.length-1] - activeValues[0] : 0;
@@ -2127,23 +2127,23 @@ function GelirRaporu({ students }) {
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
         <button onClick={()=>setAyOffset(o=>o-1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>‹</button>
         <div style={{ textAlign:"center" }}>
-          <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111", textTransform:"capitalize" }}>{ayAdi}</p>
+          <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111" }}>{ayAdi}</p>
           {ayOffset!==0 ? <button onClick={()=>setAyOffset(0)} style={{ background:"none", border:"none", fontSize:11, color:"#3b82f6", fontWeight:600, cursor:"pointer", padding:0, marginTop:2 }}>Bu aya dön</button> : null}
         </div>
         <button onClick={()=>setAyOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
       </div>
       <div style={{ background:"linear-gradient(135deg, #059669, #10b981)", borderRadius:18, padding:"20px", marginBottom:14, color:"#fff" }}>
-        <p style={{ margin:0, fontSize:12, opacity:0.85, fontWeight:600, letterSpacing:1, textTransform:"uppercase" }}>Toplam Tahsilat</p>
+        <p style={{ margin:0, fontSize:12, opacity:0.85, fontWeight:600, letterSpacing:1 }}>Toplam Tahsilat</p>
         <p style={{ margin:"6px 0 0", fontSize:34, fontWeight:800 }}>{toplamGelir.toLocaleString("tr-TR")} TL</p>
         <p style={{ margin:"4px 0 0", fontSize:13, opacity:0.85 }}>{ayÖdemeleri.length} ödeme alındı</p>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
         <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
-          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Paket Geliri</p>
+          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, letterSpacing:1 }}>Paket Geliri</p>
           <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#111" }}>{paketGeliri.toLocaleString("tr-TR")} TL</p>
         </div>
         <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
-          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Ek Ders Geliri</p>
+          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, letterSpacing:1 }}>Ek Ders Geliri</p>
           <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#5b21b6" }}>{ekGeliri.toLocaleString("tr-TR")} TL</p>
         </div>
       </div>
@@ -2868,9 +2868,9 @@ export default function App() {
     return (
       <div style={{ fontFamily:"sans-serif", background:"#111", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
         <div style={{ background:"#fff", borderRadius:20, padding:"40px 32px", width:"100%", maxWidth:360, boxShadow:"0 8px 40px rgba(0,0,0,.3)" }}>
-          <p style={{ fontSize:11, letterSpacing:3, color:"#999", textTransform:"uppercase", margin:"0 0 6px" }}>Sonsuz Sanat</p>
+          <p style={{ fontSize:11, letterSpacing:3, color:"#999", margin:"0 0 6px" }}>Sonsuz Sanat</p>
           <h1 style={{ fontSize:22, fontWeight:800, margin:"0 0 28px", color:"#111" }}>Öğrenci Yönetimi</h1>
-          <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Şifre</label>
+          <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:6 }}>Şifre</label>
           <input
             type="password"
             value={sifre}
@@ -2915,7 +2915,7 @@ export default function App() {
       <div style={{ background:"#111", color:"#fff", padding:"16px 20px 0" }}>
         <div style={{ maxWidth:600, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap", paddingBottom:12 }}>
           <div>
-            <p style={{ fontSize:10, letterSpacing:3, color:"#666", textTransform:"uppercase", margin:0 }}>Sonsuz Sanat</p>
+            <p style={{ fontSize:10, letterSpacing:3, color:"#666", margin:0 }}>Sonsuz Sanat</p>
             <h1 style={{ fontSize:20, fontWeight:800, margin:"2px 0 0", letterSpacing:-0.5 }}>Öğrenci Yönetimi</h1>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center", marginLeft:"auto" }}>
