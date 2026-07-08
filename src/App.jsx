@@ -88,6 +88,23 @@ function studentScheduleLabel(student) {
   return slotLabel(getStudentSlots(student));
 }
 
+function lessonDayLabel(lesson) {
+  if (lesson?.day) return lesson.day;
+  if (!lesson?.date) return "";
+  return new Date(lesson.date).toLocaleDateString("tr-TR", { weekday:"long" });
+}
+
+function lessonsScheduleLabel(lessons, fallbackStudent) {
+  const labels = [];
+  (lessons || []).forEach(lesson => {
+    const day = lessonDayLabel(lesson);
+    const time = lesson?.time || timeFromISO(lesson?.date);
+    const label = day && time ? day+" "+time : "";
+    if (label && !labels.includes(label)) labels.push(label);
+  });
+  return labels.length ? labels.join(" · ") : studentScheduleLabel(fallbackStudent);
+}
+
 function getLessonDuration(student, item) {
   const scheduleDuration = (student?.schedule || []).find(l => l.durationMinutes || l.duration_minutes);
   const n = parseInt(item?.durationMinutes || item?.duration_minutes || student?.lessonDuration || student?.lesson_duration || scheduleDuration?.durationMinutes || scheduleDuration?.duration_minutes || 45);
@@ -513,7 +530,7 @@ function paymentDisplayInfo(student, payment, index) {
   const periodShort = first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : storedPeriod;
   const periodLong = first && last ? fmtDate(first.date)+" - "+fmtDate(last.date) : storedPeriodLong;
   const lessonCount = lessons.length || effectiveCount || PAYMENT_PACK_SIZE;
-  const program = studentScheduleLabel(student);
+  const program = lessonsScheduleLabel(lessons, student);
   const expectedPackageAmount = (student.ucret || 0) * (lessonCount / PAYMENT_PACK_SIZE);
   const numericAmount = typeof payment.tutar === "number" ? payment.tutar : null;
   const amountToShow = numericAmount;
