@@ -689,6 +689,27 @@ function nextPayablePackageInfo(student) {
 }
 
 function lastUndoablePackageInfo(student) {
+  const sortedSchedule = [...(student.schedule || [])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const lastLesson = sortedSchedule[sortedSchedule.length - 1];
+  if (lastLesson?.packageId) {
+    const lessons = sortedSchedule.filter(l => l.packageId === lastLesson.packageId);
+    if (lessons.length && lessons.every(l => l.status === "upcoming")) {
+      const first = lessons[0];
+      const last = lessons[lessons.length - 1];
+      return {
+        packageId: lastLesson.packageId,
+        packageSize: lessons.length,
+        expectedPackageSize: parseInt(lastLesson.packageLessonCount || lessons.length || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE,
+        complete: true,
+        lessonIds: lessons.map(l=>l.id).filter(Boolean),
+        start: first.date,
+        end: last.date,
+        startKey: dateKey(first.date),
+        endKey: dateKey(last.date),
+        donem: fmtShort(first.date)+" - "+fmtShort(last.date),
+      };
+    }
+  }
   const infos = packageInfos(student);
   const last = infos[infos.length - 1];
   if (!last) return null;
