@@ -88,21 +88,9 @@ function studentScheduleLabel(student) {
   return slotLabel(getStudentSlots(student));
 }
 
-function lessonDayLabel(lesson) {
-  if (lesson?.day) return lesson.day;
-  if (!lesson?.date) return "";
-  return new Date(lesson.date).toLocaleDateString("tr-TR", { weekday:"long" });
-}
-
-function lessonsScheduleLabel(lessons, fallbackStudent) {
-  const labels = [];
-  (lessons || []).forEach(lesson => {
-    const day = lessonDayLabel(lesson);
-    const time = lesson?.time || timeFromISO(lesson?.date);
-    const label = day && time ? day+" "+time : "";
-    if (label && !labels.includes(label)) labels.push(label);
-  });
-  return labels.length ? labels.join(" · ") : studentScheduleLabel(fallbackStudent);
+function paymentProgramSnapshot(payment) {
+  if (!payment || payment.programSnapshotVersion !== 1) return "";
+  return payment.programSnapshot || "";
 }
 
 function getLessonDuration(student, item) {
@@ -530,7 +518,7 @@ function paymentDisplayInfo(student, payment, index) {
   const periodShort = first && last ? fmtShort(first.date)+" - "+fmtShort(last.date) : storedPeriod;
   const periodLong = first && last ? fmtDate(first.date)+" - "+fmtDate(last.date) : storedPeriodLong;
   const lessonCount = lessons.length || effectiveCount || PAYMENT_PACK_SIZE;
-  const program = lessonsScheduleLabel(lessons, student);
+  const program = paymentProgramSnapshot(payment);
   const expectedPackageAmount = (student.ucret || 0) * (lessonCount / PAYMENT_PACK_SIZE);
   const numericAmount = typeof payment.tutar === "number" ? payment.tutar : null;
   const amountToShow = numericAmount;
@@ -1361,8 +1349,12 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
               <p style={{ margin:"0 0 8px", fontSize:13, color:payment.gecikmeGunu>0?"#be123c":"#059669", fontWeight:700 }}>{info.delayText}</p>
             </>
           ) : null}
-          <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Program</p>
-          <p style={{ margin:0, fontSize:13, color:"#374151" }}>{info.program}</p>
+          {info.program ? (
+            <>
+              <p style={{ margin:"0 0 2px", fontSize:10, fontWeight:800, color:"#9ca3af", letterSpacing:1 }}>Program</p>
+              <p style={{ margin:0, fontSize:13, color:"#374151" }}>{info.program}</p>
+            </>
+          ) : null}
           {editing ? (
             <div style={{ marginTop:10 }}>
               <label style={{ ...LBL, marginTop:0 }}>Ödeme Tarihi</label>
@@ -2552,6 +2544,8 @@ export default function App() {
         packageLessonIds: packageInfo?.lessonIds || [],
         packageStart: packageInfo?.startKey,
         packageEnd: packageInfo?.endKey,
+        programSnapshot: studentScheduleLabel(s),
+        programSnapshotVersion: 1,
         odemeVade,
         gecikmeGunu,
         zamaninda: gecikmeGunu === 0,
