@@ -406,22 +406,20 @@ function paymentPackageInfo(student) {
 
 function packageInfos(student) {
   const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const packageSize = getPackageLessonCount(student);
   const infos = [];
-  const usedIds = new Set();
-  for (const lesson of sortedSchedule) {
-    if (!lesson.packageId || usedIds.has(lesson.packageId)) continue;
-    const lessons = sortedSchedule.filter(l => l.packageId === lesson.packageId);
+  for (let i = 0; i < sortedSchedule.length; i += packageSize) {
+    const lessons = sortedSchedule.slice(i, i + packageSize);
     if (!lessons.length) continue;
-    usedIds.add(lesson.packageId);
     const first = lessons[0];
     const last = lessons[lessons.length-1];
-    const expectedPackageSize = parseInt(first.packageLessonCount || lessons.length || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE;
+    const packageIds = [...new Set(lessons.map(l=>l.packageId).filter(Boolean))];
     infos.push({
       packageIndex: infos.length,
-      packageId: lesson.packageId,
-      packageSize: lessons.length || expectedPackageSize,
-      expectedPackageSize,
-      complete: lessons.length >= expectedPackageSize,
+      packageId: packageIds.length === 1 ? packageIds[0] : undefined,
+      packageSize: lessons.length || packageSize,
+      expectedPackageSize: packageSize,
+      complete: lessons.length >= packageSize,
       lessonIds: lessons.map(l=>l.id).filter(Boolean),
       start: first.date,
       end: last.date,
@@ -430,27 +428,7 @@ function packageInfos(student) {
       donem: fmtShort(first.date)+" - "+fmtShort(last.date),
     });
   }
-  const noPackageLessons = sortedSchedule.filter(l => !l.packageId);
-  const fallbackPackageSize = getPackageLessonCount(student);
-  for (let i = 0; i < noPackageLessons.length; i += fallbackPackageSize) {
-    const lessons = noPackageLessons.slice(i, i + fallbackPackageSize);
-    if (!lessons.length) continue;
-    const first = lessons[0];
-    const last = lessons[lessons.length-1];
-    infos.push({
-      packageIndex: infos.length,
-      packageSize: lessons.length || fallbackPackageSize,
-      expectedPackageSize: fallbackPackageSize,
-      complete: lessons.length >= fallbackPackageSize,
-      lessonIds: lessons.map(l=>l.id).filter(Boolean),
-      start: first.date,
-      end: last.date,
-      startKey: dateKey(first.date),
-      endKey: dateKey(last.date),
-      donem: fmtShort(first.date)+" - "+fmtShort(last.date),
-    });
-  }
-  return infos.sort((a,b)=>new Date(a.start)-new Date(b.start)).map((info, index)=>({...info, packageIndex:index}));
+  return infos;
 }
 
 function currentPaymentDueInfo(student) {
@@ -1887,9 +1865,8 @@ function MesajSheet({ student, onClose }) {
 function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
   const ekDersler = unpaidEkDersler(student);
   const ekToplam = ekDersler.reduce((sum,e)=>sum+(e.fee||ekDersFee(student)),0);
-  const lastPackageCount = [...(student.schedule || [])].sort((a,b)=>new Date(b.date)-new Date(a.date)).find(l=>l.packageLessonCount)?.packageLessonCount;
-  const initialCount = PACKAGE_LOAD_OPTIONS.includes(parseInt(lastPackageCount)) ? parseInt(lastPackageCount) : getPackageLessonCount(student);
-  const [paketDersSayisi, setPaketDersSayisi] = useState(PACKAGE_LOAD_OPTIONS.includes(initialCount) ? initialCount : PAYMENT_PACK_SIZE);
+  const initialCount = PACKAGE_LOAD_OPTIONS.includes(getPackageLessonCount(student)) ? getPackageLessonCount(student) : PAYMENT_PACK_SIZE;
+  const [paketDersSayisi, setPaketDersSayisi] = useState(initialCount);
   const paketTutar = (student.ucret || 0) * (paketDersSayisi / PAYMENT_PACK_SIZE);
   return (
     <Sheet title="Paket Yükle" subtitle={student.name} onClose={onClose}>
