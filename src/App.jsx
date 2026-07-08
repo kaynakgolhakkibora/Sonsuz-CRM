@@ -172,6 +172,7 @@ function daysBetweenDates(from, to) {
 function dateKey(iso) { if (!iso) return ""; return new Date(iso).toISOString().split("T")[0]; }
 function addMonths(iso, n) { const d = iso ? new Date(iso) : new Date(); d.setMonth(d.getMonth() + n); return d.toISOString(); }
 const PAYMENT_PACK_SIZE = 4;
+const PACKAGE_LOAD_OPTIONS = [4, 8, 12, 16];
 const PAID_LESSON_STATUSES = ["completed", "noshow", "lastminute"];
 const SCORE_STATUSES = ["completed", "telafi", "lastminute", "noshow"];
 
@@ -405,20 +406,22 @@ function paymentPackageInfo(student) {
 
 function packageInfos(student) {
   const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  const packageSize = getPackageLessonCount(student);
   const infos = [];
-  for (let i = 0; i < sortedSchedule.length; i += packageSize) {
-    const lessons = sortedSchedule.slice(i, i + packageSize);
+  const usedIds = new Set();
+  for (const lesson of sortedSchedule) {
+    if (!lesson.packageId || usedIds.has(lesson.packageId)) continue;
+    const lessons = sortedSchedule.filter(l => l.packageId === lesson.packageId);
     if (!lessons.length) continue;
+    usedIds.add(lesson.packageId);
     const first = lessons[0];
     const last = lessons[lessons.length-1];
-    const packageIds = [...new Set(lessons.map(l=>l.packageId).filter(Boolean))];
+    const expectedPackageSize = parseInt(first.packageLessonCount || lessons.length || PAYMENT_PACK_SIZE) || PAYMENT_PACK_SIZE;
     infos.push({
       packageIndex: infos.length,
-      packageId: packageIds.length === 1 ? packageIds[0] : undefined,
-      packageSize: lessons.length || packageSize,
-      expectedPackageSize: packageSize,
-      complete: lessons.length >= packageSize,
+      packageId: lesson.packageId,
+      packageSize: lessons.length || expectedPackageSize,
+      expectedPackageSize,
+      complete: lessons.length >= expectedPackageSize,
       lessonIds: lessons.map(l=>l.id).filter(Boolean),
       start: first.date,
       end: last.date,
@@ -427,7 +430,27 @@ function packageInfos(student) {
       donem: fmtShort(first.date)+" - "+fmtShort(last.date),
     });
   }
-  return infos;
+  const noPackageLessons = sortedSchedule.filter(l => !l.packageId);
+  const fallbackPackageSize = getPackageLessonCount(student);
+  for (let i = 0; i < noPackageLessons.length; i += fallbackPackageSize) {
+    const lessons = noPackageLessons.slice(i, i + fallbackPackageSize);
+    if (!lessons.length) continue;
+    const first = lessons[0];
+    const last = lessons[lessons.length-1];
+    infos.push({
+      packageIndex: infos.length,
+      packageSize: lessons.length || fallbackPackageSize,
+      expectedPackageSize: fallbackPackageSize,
+      complete: lessons.length >= fallbackPackageSize,
+      lessonIds: lessons.map(l=>l.id).filter(Boolean),
+      start: first.date,
+      end: last.date,
+      startKey: dateKey(first.date),
+      endKey: dateKey(last.date),
+      donem: fmtShort(first.date)+" - "+fmtShort(last.date),
+    });
+  }
+  return infos.sort((a,b)=>new Date(a.start)-new Date(b.start)).map((info, index)=>({...info, packageIndex:index}));
 }
 
 function currentPaymentDueInfo(student) {
@@ -1395,6 +1418,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
   const [showEkDers, setShowEkDers] = useState(false);
   const [showDuzenle, setShowDuzenle] = useState(false);
   const [showOdemeAl, setShowOdemeAl] = useState(false);
+  const [showPaketYukle, setShowPaketYukle] = useState(false);
   const [showZam, setShowZam] = useState(false);
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
@@ -1605,7 +1629,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
           <Btn bg="#10b981" onClick={() => setShowOdemeAl(true)}>Ödeme Al</Btn>
           <Btn bg="#f97316" onClick={() => setShowZam(true)}>Zam Yap</Btn>
           <Btn bg="#6366f1" onClick={() => setShowDuzenle(true)}>Öğrenciyi Düzenle</Btn>
-          <Btn bg="#111" onClick={() => { onRecharge(student.id, new Date().toISOString().split("T")[0]); onClose(); }}>Paket Yükle ({getPackageLessonCount(student)} Ders)</Btn>
+          <Btn bg="#111" onClick={() => setShowPaketYukle(true)}>Paket Yükle</Btn>
           {undoablePackage ? (
             <div style={{ background:"#fff1f2", border:"1px solid #fecdd3", borderRadius:12, padding:"10px 12px" }}>
               <p style={{ margin:"0 0 8px", fontSize:12, color:"#be123c", fontWeight:700 }}>Geri alınacak dersler: {undoablePackagePreview(student, undoablePackage)}</p>
@@ -1627,6 +1651,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
       {telafiSel ? <TelafiSheet record={telafiSel} studentName={student.name} onClose={() => setTelafiSel(null)} onDone={(id, note) => { onTelafiDone(student.id, id, note); setTelafiSel(null); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => { onMoveOne(student.id, lid, date, time); setShiftSel(null); }} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
+      {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
       {showDuzenle ? <DuzenleSheet student={student} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} /> : null}
@@ -1862,8 +1887,10 @@ function MesajSheet({ student, onClose }) {
 function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
   const ekDersler = unpaidEkDersler(student);
   const ekToplam = ekDersler.reduce((sum,e)=>sum+(e.fee||ekDersFee(student)),0);
-  const paketTutar = student.ucret || 0;
-  const paketDersSayisi = getPackageLessonCount(student);
+  const lastPackageCount = [...(student.schedule || [])].sort((a,b)=>new Date(b.date)-new Date(a.date)).find(l=>l.packageLessonCount)?.packageLessonCount;
+  const initialCount = PACKAGE_LOAD_OPTIONS.includes(parseInt(lastPackageCount)) ? parseInt(lastPackageCount) : getPackageLessonCount(student);
+  const [paketDersSayisi, setPaketDersSayisi] = useState(PACKAGE_LOAD_OPTIONS.includes(initialCount) ? initialCount : PAYMENT_PACK_SIZE);
+  const paketTutar = (student.ucret || 0) * (paketDersSayisi / PAYMENT_PACK_SIZE);
   return (
     <Sheet title="Paket Yükle" subtitle={student.name} onClose={onClose}>
       <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
@@ -1872,7 +1899,12 @@ function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
         {ekDersler.length > 0 ? <p style={{ margin:"6px 0 0", fontSize:13, color:"#5b21b6", fontWeight:700 }}>{ekDersler.length} ödenmemiş ek ders: {ekToplam.toLocaleString("tr-TR")} TL</p> : null}
         <p style={{ margin:"8px 0 0", fontSize:13, color:"#166534" }}>Ödeme uyarısı yeni periyodun ilk ders günü Bugünkü Ödemeler alanına düşer.</p>
       </div>
-      <Btn bg="#111" onClick={() => { onÖdemeAl(student.id); onClose(); }}>Paketi Yükle</Btn>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:12 }}>
+        {PACKAGE_LOAD_OPTIONS.map(count => (
+          <button key={count} onClick={() => setPaketDersSayisi(count)} style={{ background:paketDersSayisi===count?"#111":"#f3f4f6", color:paketDersSayisi===count?"#fff":"#374151", border:"none", borderRadius:10, padding:"10px 6px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>{count} Ders</button>
+        ))}
+      </div>
+      <Btn bg="#111" onClick={() => { onÖdemeAl(student.id, new Date().toISOString().split("T")[0], paketDersSayisi); onClose(); }}>{paketDersSayisi} Derslik Paketi Yükle</Btn>
       <Btn bg="#f97316" onClick={() => { onMesajGonder(student); onClose(); }}>Ödeme Hatırlatması Gönder</Btn>
       <Btn bg="#6b7280" onClick={onClose} outline>İptal</Btn>
     </Sheet>
@@ -2465,13 +2497,14 @@ export default function App() {
     pop("Öğrenci silindi");
   };
 
-  const handleRecharge = async (sid, odemeDate) => {
+  const handleRecharge = async (sid, odemeDate, selectedLessonCount) => {
     let lessonCount = PAYMENT_PACK_SIZE;
     const updated = students.map(s => {
       if (s.id!==sid) return s;
       const last = [...s.schedule].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
       const from = last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
-      lessonCount = getPackageLessonCount(s);
+      const parsedCount = parseInt(selectedLessonCount);
+      lessonCount = PACKAGE_LOAD_OPTIONS.includes(parsedCount) ? parsedCount : getPackageLessonCount(s);
       const newLessons = buildScheduleSlots(getStudentSlots(s), lessonCount, from, getLessonDuration(s));
       return {...s, frozen:false, schedule:[...s.schedule, ...newLessons]};
     });
@@ -3008,7 +3041,7 @@ export default function App() {
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
                         <button onClick={() => setMesajSt(s)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Özeti Aç</button>
                         {!sent ? <button onClick={() => handlePaketOzetiGonderildi(s.id)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Gönderildi</button> : null}
-                        <button onClick={() => handleRecharge(s.id, new Date().toISOString().split("T")[0])} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
+                        <button onClick={() => setÖdemeSt(s)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
                       </div>
                     </div>
                   );
