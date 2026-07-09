@@ -358,46 +358,6 @@ function getPackageLessonCount(student) {
   return Number.isFinite(n) && n > 0 ? n : PAYMENT_PACK_SIZE;
 }
 
-function getPreferredPackageLessonCount(student) {
-  const n = parseInt(student.preferredPackageLessonCount || student.preferred_package_lesson_count);
-  return PACKAGE_LOAD_OPTIONS.includes(n) ? n : getPackageLessonCount(student);
-}
-
-function customPackageInfos(student) {
-  const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  const seen = new Set();
-  const infos = [];
-  for (const lesson of sortedSchedule) {
-    if (!lesson.packageId || seen.has(lesson.packageId)) continue;
-    const expected = parseInt(lesson.packageLessonCount);
-    if (!PACKAGE_LOAD_OPTIONS.includes(expected) || expected <= PAYMENT_PACK_SIZE) continue;
-    const lessons = sortedSchedule.filter(l => l.packageId === lesson.packageId);
-    if (!lessons.length) continue;
-    seen.add(lesson.packageId);
-    const first = lessons[0];
-    const last = lessons[lessons.length-1];
-    infos.push({
-      packageIndex: null,
-      packageId: lesson.packageId,
-      packageSize: lessons.length,
-      expectedPackageSize: expected,
-      complete: lessons.length >= expected,
-      lessonIds: lessons.map(l=>l.id).filter(Boolean),
-      start: first.date,
-      end: last.date,
-      startKey: dateKey(first.date),
-      endKey: dateKey(last.date),
-      donem: fmtShort(first.date)+" - "+fmtShort(last.date),
-    });
-  }
-  return infos;
-}
-
-function regularPackageInfos(student) {
-  const customIds = new Set(customPackageInfos(student).flatMap(info => info.lessonIds || []));
-  return packageInfos(student).filter(info => !(info.lessonIds || []).some(id => customIds.has(id)));
-}
-
 function paymentPackageInfo(student) {
   const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const completed = (student.schedule||[])
@@ -474,7 +434,7 @@ function packageInfos(student) {
 function currentPaymentDueInfo(student) {
   if (student.frozen) return null;
   const today = midday();
-  return [...customPackageInfos(student), ...regularPackageInfos(student)].find(info =>
+  return packageInfos(student).find(info =>
     info.complete && midday(new Date(info.start)) <= today && !hasPaymentForPackage(student, info)
   ) || null;
 }
@@ -725,7 +685,7 @@ function hasPaymentForPackage(student, info) {
 
 function nextPayablePackageInfo(student) {
   if (student.frozen) return null;
-  return [...customPackageInfos(student), ...regularPackageInfos(student)].find(info => info.complete && !hasPaymentForPackage(student, info)) || null;
+  return packageInfos(student).find(info => info.complete && !hasPaymentForPackage(student, info)) || null;
 }
 
 function lastUndoablePackageInfo(student) {
@@ -781,7 +741,7 @@ function reminderKey(info) {
 
 function lastCompletedPackageInfo(student) {
   const schedule = student.schedule || [];
-  const infos = [...customPackageInfos(student), ...regularPackageInfos(student)].sort((a,b)=>new Date(a.start)-new Date(b.start));
+  const infos = packageInfos(student);
   return [...infos].reverse().find(info => {
     const ids = new Set(info.lessonIds || []);
     const lessons = schedule.filter(l => ids.has(l.id));
@@ -896,7 +856,7 @@ function trendText(values, label) {
 
 function currentPackageInfoForLesson(student, lesson) {
   if (!lesson) return currentPaymentDueInfo(student) || nextPayablePackageInfo(student) || lastCompletedPackageInfo(student);
-  return [...customPackageInfos(student), ...regularPackageInfos(student)].find(info => (info.lessonIds || []).includes(lesson.id)) || currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
+  return packageInfos(student).find(info => (info.lessonIds || []).includes(lesson.id)) || currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
 }
 
 function packageLessonStatusText(lesson) {
@@ -1273,7 +1233,6 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
     day: student.day,
     time: student.time,
     lessonDuration: getLessonDuration(student),
-    preferredPackageLessonCount: getPreferredPackageLessonCount(student),
     lessonSlots: getStudentSlots(student),
   });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
@@ -1307,10 +1266,6 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       <select style={INP} value={f.lessonDuration} onChange={e=>s("lessonDuration",parseInt(e.target.value)||45)}>
         <option value={45}>45 dakika</option>
         <option value={30}>30 dakika</option>
-      </select>
-      <label style={LBL}>Varsayılan Paket Ders Sayısı</label>
-      <select style={INP} value={f.preferredPackageLessonCount} onChange={e=>s("preferredPackageLessonCount",parseInt(e.target.value)||PAYMENT_PACK_SIZE)}>
-        {PACKAGE_LOAD_OPTIONS.map(count => <option key={count} value={count}>{count} ders</option>)}
       </select>
       <label style={LBL}>Ders Günleri</label>
       {f.lessonSlots.map((slot,i) => (
@@ -1455,7 +1410,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
   );
 }
 
-function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdemeAl, onZamYap, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdemeAl, onZamYap, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState("takvim");
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -1659,9 +1614,16 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
                       </div>
                     </div>
                     {e.note ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>{e.note}</p> : null}
-                    <div style={{ display:"grid", gridTemplateColumns:e.odendi?"1fr":"1fr 1fr", gap:8, marginTop:8 }}>
+                    <div style={{ display:"grid", gridTemplateColumns:e.odendi?"1fr 1fr":"1fr 1fr 1fr", gap:8, marginTop:8 }}>
                       {!e.odendi ? <button onClick={() => onEkDersOdeme(student.id, e.id, new Date().toISOString().split("T")[0])} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Ödeme Alındı</button> : null}
                       <button onClick={() => onEkDersDurum(student.id, e.id, e.status === "done" ? "planned" : "done")} style={{ background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"8px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>{e.status === "done" ? "Planlandı Yap" : "Yapıldı Yap"}</button>
+                      <button onClick={() => {
+                        if (e.odendi) {
+                          alert("Bu ek dersin ödemesi alınmış. Önce ödeme geçmişinden ilgili ödeme kaydını sil, sonra ek dersi silebilirsin.");
+                          return;
+                        }
+                        if (window.confirm("Bu ek ders silinsin mi?")) onEkDersSil(student.id, e.id);
+                      }} style={{ background:e.odendi?"#f3f4f6":"#fee2e2", color:e.odendi?"#9ca3af":"#991b1b", border:"none", borderRadius:10, padding:"8px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Sil</button>
                     </div>
                   </div>
                 ))
@@ -1931,7 +1893,7 @@ function MesajSheet({ student, onClose }) {
 function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
   const ekDersler = unpaidEkDersler(student);
   const ekToplam = ekDersler.reduce((sum,e)=>sum+(e.fee||ekDersFee(student)),0);
-  const initialCount = PACKAGE_LOAD_OPTIONS.includes(getPreferredPackageLessonCount(student)) ? getPreferredPackageLessonCount(student) : PAYMENT_PACK_SIZE;
+  const initialCount = PACKAGE_LOAD_OPTIONS.includes(getPackageLessonCount(student)) ? getPackageLessonCount(student) : PAYMENT_PACK_SIZE;
   const [paketDersSayisi, setPaketDersSayisi] = useState(initialCount);
   const paketTutar = (student.ucret || 0) * (paketDersSayisi / PAYMENT_PACK_SIZE);
   return (
@@ -2547,7 +2509,7 @@ export default function App() {
       const last = [...s.schedule].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
       const from = last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
       const parsedCount = parseInt(selectedLessonCount);
-      lessonCount = PACKAGE_LOAD_OPTIONS.includes(parsedCount) ? parsedCount : getPreferredPackageLessonCount(s);
+      lessonCount = PACKAGE_LOAD_OPTIONS.includes(parsedCount) ? parsedCount : getPackageLessonCount(s);
       const newLessons = buildScheduleSlots(getStudentSlots(s), lessonCount, from, getLessonDuration(s));
       return {...s, frozen:false, schedule:[...s.schedule, ...newLessons]};
     });
@@ -2577,7 +2539,7 @@ export default function App() {
     const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
     const newStudent = {
       id: uid(), name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"",
-      lesson_start_date: f.lesson_start_date || null, ucret: parseInt(f.ucret)||0, last_raise_date: f.last_raise_date || null, packageLessonCount, package_lesson_count: packageLessonCount, preferredPackageLessonCount: packageLessonCount, preferred_package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, lesson_duration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
+      lesson_start_date: f.lesson_start_date || null, ucret: parseInt(f.ucret)||0, last_raise_date: f.last_raise_date || null, packageLessonCount, package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, lesson_duration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
       no_show: 0, frozen: false, odemeler: [], telafi_records: [],
       schedule: buildScheduleSlots(slots, packageLessonCount, from, f.lessonDuration), ek_dersler: [],
     };
@@ -2826,8 +2788,6 @@ export default function App() {
         last_raise_date: f.last_raise_date || null,
         lessonDuration: duration,
         lesson_duration: duration,
-        preferredPackageLessonCount: PACKAGE_LOAD_OPTIONS.includes(parseInt(f.preferredPackageLessonCount)) ? parseInt(f.preferredPackageLessonCount) : getPreferredPackageLessonCount(s),
-        preferred_package_lesson_count: PACKAGE_LOAD_OPTIONS.includes(parseInt(f.preferredPackageLessonCount)) ? parseInt(f.preferredPackageLessonCount) : getPreferredPackageLessonCount(s),
         packageLessonCount: getPackageLessonCount(s),
         package_lesson_count: getPackageLessonCount(s),
         instrument: f.instrument,
@@ -2885,6 +2845,33 @@ export default function App() {
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
     pop("Ek ders ödemesi kaydedildi");
+  };
+
+  const handleEkDersSil = async (sid, ekId) => {
+    let blocked = false;
+    let removed = false;
+    const updated = students.map(s => {
+      if (s.id!==sid) return s;
+      const ek = (s.ek_dersler||[]).find(e=>e.id===ekId);
+      if (!ek) return s;
+      if (ek.odendi) {
+        blocked = true;
+        return s;
+      }
+      removed = true;
+      return { ...s, ek_dersler:(s.ek_dersler||[]).filter(e=>e.id!==ekId) };
+    });
+    if (blocked) {
+      pop("Ödenmiş ek ders silinemez. Önce ödeme kaydını sil.", 6000);
+      return;
+    }
+    if (!removed) {
+      pop("Silinecek ek ders bulunamadı", 5000);
+      return;
+    }
+    setStudents(updated);
+    await saveStudent(updated.find(s=>s.id===sid));
+    pop("Ek ders silindi");
   };
 
   const handleEkDersDurum = async (sid, ekId, status) => {
@@ -3203,7 +3190,7 @@ export default function App() {
       </div>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {showAdd ? <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} onClose={()=>setMesajSt(null)} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
