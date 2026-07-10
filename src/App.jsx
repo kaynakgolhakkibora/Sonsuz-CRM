@@ -918,7 +918,7 @@ function packageStatusText(student, info) {
     .filter(l => ids.has(l.id))
     .sort((a,b)=>new Date(a.date)-new Date(b.date));
   if (!lessons.length) return "";
-  return lessons.map((l,i) => (i+1)+". Ders: "+packageLessonStatusText(l)+" -").join("\n");
+  return lessons.map((l,i) => (i+1)+". Ders: "+packageLessonStatusText(l)+" - "+fmtShort(l.date)).join("\n");
 }
 
 function lessonReminderSentInfo(student, lesson) {
