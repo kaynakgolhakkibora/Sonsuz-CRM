@@ -358,6 +358,46 @@ function getPackageLessonCount(student) {
   return Number.isFinite(n) && n > 0 ? n : PAYMENT_PACK_SIZE;
 }
 
+function getPreferredPackageLessonCount(student) {
+  const n = parseInt(student.preferredPackageLessonCount || student.preferred_package_lesson_count);
+  return PACKAGE_LOAD_OPTIONS.includes(n) ? n : getPackageLessonCount(student);
+}
+
+function customPackageInfos(student) {
+  const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const seen = new Set();
+  const infos = [];
+  for (const lesson of sortedSchedule) {
+    if (!lesson.packageId || seen.has(lesson.packageId)) continue;
+    const expected = parseInt(lesson.packageLessonCount);
+    if (!PACKAGE_LOAD_OPTIONS.includes(expected) || expected <= PAYMENT_PACK_SIZE) continue;
+    const lessons = sortedSchedule.filter(l => l.packageId === lesson.packageId);
+    if (!lessons.length) continue;
+    seen.add(lesson.packageId);
+    const first = lessons[0];
+    const last = lessons[lessons.length-1];
+    infos.push({
+      packageIndex: null,
+      packageId: lesson.packageId,
+      packageSize: lessons.length,
+      expectedPackageSize: expected,
+      complete: lessons.length >= expected,
+      lessonIds: lessons.map(l=>l.id).filter(Boolean),
+      start: first.date,
+      end: last.date,
+      startKey: dateKey(first.date),
+      endKey: dateKey(last.date),
+      donem: fmtShort(first.date)+" - "+fmtShort(last.date),
+    });
+  }
+  return infos;
+}
+
+function regularPackageInfos(student) {
+  const customIds = new Set(customPackageInfos(student).flatMap(info => info.lessonIds || []));
+  return packageInfos(student).filter(info => !(info.lessonIds || []).some(id => customIds.has(id)));
+}
+
 function paymentPackageInfo(student) {
   const sortedSchedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const completed = (student.schedule||[])
@@ -434,7 +474,7 @@ function packageInfos(student) {
 function currentPaymentDueInfo(student) {
   if (student.frozen) return null;
   const today = midday();
-  return packageInfos(student).find(info =>
+  return [...customPackageInfos(student), ...regularPackageInfos(student)].find(info =>
     info.complete && midday(new Date(info.start)) <= today && !hasPaymentForPackage(student, info)
   ) || null;
 }
@@ -685,7 +725,7 @@ function hasPaymentForPackage(student, info) {
 
 function nextPayablePackageInfo(student) {
   if (student.frozen) return null;
-  return packageInfos(student).find(info => info.complete && !hasPaymentForPackage(student, info)) || null;
+  return [...customPackageInfos(student), ...regularPackageInfos(student)].find(info => info.complete && !hasPaymentForPackage(student, info)) || null;
 }
 
 function lastUndoablePackageInfo(student) {
@@ -741,7 +781,7 @@ function reminderKey(info) {
 
 function lastCompletedPackageInfo(student) {
   const schedule = student.schedule || [];
-  const infos = packageInfos(student);
+  const infos = [...customPackageInfos(student), ...regularPackageInfos(student)].sort((a,b)=>new Date(a.start)-new Date(b.start));
   return [...infos].reverse().find(info => {
     const ids = new Set(info.lessonIds || []);
     const lessons = schedule.filter(l => ids.has(l.id));
@@ -856,7 +896,7 @@ function trendText(values, label) {
 
 function currentPackageInfoForLesson(student, lesson) {
   if (!lesson) return currentPaymentDueInfo(student) || nextPayablePackageInfo(student) || lastCompletedPackageInfo(student);
-  return packageInfos(student).find(info => (info.lessonIds || []).includes(lesson.id)) || currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
+  return [...customPackageInfos(student), ...regularPackageInfos(student)].find(info => (info.lessonIds || []).includes(lesson.id)) || currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
 }
 
 function packageLessonStatusText(lesson) {
@@ -1233,6 +1273,7 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
     day: student.day,
     time: student.time,
     lessonDuration: getLessonDuration(student),
+    preferredPackageLessonCount: getPreferredPackageLessonCount(student),
     lessonSlots: getStudentSlots(student),
   });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
@@ -1266,6 +1307,10 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       <select style={INP} value={f.lessonDuration} onChange={e=>s("lessonDuration",parseInt(e.target.value)||45)}>
         <option value={45}>45 dakika</option>
         <option value={30}>30 dakika</option>
+      </select>
+      <label style={LBL}>Varsayılan Paket Ders Sayısı</label>
+      <select style={INP} value={f.preferredPackageLessonCount} onChange={e=>s("preferredPackageLessonCount",parseInt(e.target.value)||PAYMENT_PACK_SIZE)}>
+        {PACKAGE_LOAD_OPTIONS.map(count => <option key={count} value={count}>{count} ders</option>)}
       </select>
       <label style={LBL}>Ders Günleri</label>
       {f.lessonSlots.map((slot,i) => (
@@ -1893,7 +1938,7 @@ function MesajSheet({ student, onClose }) {
 function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
   const ekDersler = unpaidEkDersler(student);
   const ekToplam = ekDersler.reduce((sum,e)=>sum+(e.fee||ekDersFee(student)),0);
-  const initialCount = PACKAGE_LOAD_OPTIONS.includes(getPackageLessonCount(student)) ? getPackageLessonCount(student) : PAYMENT_PACK_SIZE;
+  const initialCount = PACKAGE_LOAD_OPTIONS.includes(getPreferredPackageLessonCount(student)) ? getPreferredPackageLessonCount(student) : PAYMENT_PACK_SIZE;
   const [paketDersSayisi, setPaketDersSayisi] = useState(initialCount);
   const paketTutar = (student.ucret || 0) * (paketDersSayisi / PAYMENT_PACK_SIZE);
   return (
@@ -2509,7 +2554,7 @@ export default function App() {
       const last = [...s.schedule].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
       const from = last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
       const parsedCount = parseInt(selectedLessonCount);
-      lessonCount = PACKAGE_LOAD_OPTIONS.includes(parsedCount) ? parsedCount : getPackageLessonCount(s);
+      lessonCount = PACKAGE_LOAD_OPTIONS.includes(parsedCount) ? parsedCount : getPreferredPackageLessonCount(s);
       const newLessons = buildScheduleSlots(getStudentSlots(s), lessonCount, from, getLessonDuration(s));
       return {...s, frozen:false, schedule:[...s.schedule, ...newLessons]};
     });
@@ -2539,7 +2584,7 @@ export default function App() {
     const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
     const newStudent = {
       id: uid(), name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"",
-      lesson_start_date: f.lesson_start_date || null, ucret: parseInt(f.ucret)||0, last_raise_date: f.last_raise_date || null, packageLessonCount, package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, lesson_duration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
+      lesson_start_date: f.lesson_start_date || null, ucret: parseInt(f.ucret)||0, last_raise_date: f.last_raise_date || null, packageLessonCount, package_lesson_count: packageLessonCount, preferredPackageLessonCount: packageLessonCount, preferred_package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, lesson_duration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
       no_show: 0, frozen: false, odemeler: [], telafi_records: [],
       schedule: buildScheduleSlots(slots, packageLessonCount, from, f.lessonDuration), ek_dersler: [],
     };
@@ -2788,6 +2833,8 @@ export default function App() {
         last_raise_date: f.last_raise_date || null,
         lessonDuration: duration,
         lesson_duration: duration,
+        preferredPackageLessonCount: PACKAGE_LOAD_OPTIONS.includes(parseInt(f.preferredPackageLessonCount)) ? parseInt(f.preferredPackageLessonCount) : getPreferredPackageLessonCount(s),
+        preferred_package_lesson_count: PACKAGE_LOAD_OPTIONS.includes(parseInt(f.preferredPackageLessonCount)) ? parseInt(f.preferredPackageLessonCount) : getPreferredPackageLessonCount(s),
         packageLessonCount: getPackageLessonCount(s),
         package_lesson_count: getPackageLessonCount(s),
         instrument: f.instrument,
