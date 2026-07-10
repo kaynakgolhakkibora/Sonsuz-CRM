@@ -880,8 +880,9 @@ function lessonStartInfo(student) {
 
 function asciiBar(value, max) {
   const safeMax = max > 0 ? max : 1;
-  const filled = clamp(Math.round((value / safeMax) * 10), 0, 10);
-  return "█".repeat(filled) + "░".repeat(10 - filled);
+  const total = clamp(Math.round(safeMax / 5), 1, 20);
+  const filled = clamp(Math.round((parseInt(value) || 0) / 5), 0, total);
+  return "█".repeat(filled) + "░".repeat(total - filled);
 }
 
 function trendText(values, label) {
@@ -892,6 +893,13 @@ function trendText(values, label) {
   if (last > first) return label + " " + fmtNumber(first, 1) + " dk'dan " + fmtNumber(last, 1) + " dk'ya çıkmış.";
   if (last < first) return label + " " + fmtNumber(first, 1) + " dk'dan " + fmtNumber(last, 1) + " dk'ya düşmüş.";
   return label + " " + fmtNumber(last, 1) + " dk seviyesinde dengeli ilerlemiş.";
+}
+
+function productiveWindowSummaryText(window) {
+  if (!window) return "";
+  return String(window).toLocaleLowerCase("tr-TR").includes("ders geneli")
+    ? "En verimli zaman çoğunlukla dersin genelinde dengeli görülmüş."
+    : "En verimli zaman çoğunlukla dersin " + window + " bölümünde görülmüş.";
 }
 
 function currentPackageInfoForLesson(student, lesson) {
@@ -1832,7 +1840,7 @@ function msgPaketOzeti(student) {
       if (l.activeMinutes || l.focusMinutes || l.productiveWindow || l.focusSection) {
         dersler += " ("+(l.activeMinutes||0)+" dk aktif";
         if (l.focusMinutes) dersler += ", "+l.focusMinutes+" dk odak";
-        if (l.productiveWindow) dersler += ", "+l.productiveWindow;
+        if (l.productiveWindow) dersler += ", "+l.productiveWindow+" en verimli bölüm";
         dersler += ")";
       }
       dersler += "\n";
@@ -1876,7 +1884,7 @@ function msgPaketOzeti(student) {
     else msg += "Bu ders döneminde aktif katılım dengeli ilerlemiş.\n";
     const focusTrend = trendText(focusValues, "Odaklanma süresi");
     if (focusTrend) msg += focusTrend + "\n";
-    if (verim.topWindow) msg += "En verimli zaman çoğunlukla dersin "+verim.topWindow.toLowerCase()+" bölümünde görülmüş.\n";
+    if (verim.topWindow) msg += productiveWindowSummaryText(verim.topWindow) + "\n";
   }
   if (aktifTelafi.length > 0) {
     msg += "\nTelafi Hakları ("+aktifTelafi.length+"):\n";
@@ -1899,7 +1907,7 @@ function msgPaketOzeti(student) {
   return msg;
 }
 
-function MesajSheet({ student, onClose }) {
+function MesajSheet({ student, onClose, initialKey = "" }) {
   const msgs = [
     { key:"ders", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
     { key:"ilkders", label:"İlk Ders - Ödeme Günü", text:msgIlkDersÖdeme(student) },
@@ -1910,6 +1918,7 @@ function MesajSheet({ student, onClose }) {
     { key:"odeme3", label:"Ödeme Hatırlatma (3.)", text:msgÖdemeHatirlatma3() },
     { key:"dondur", label:"Dondurma Uyarısı", text:msgDondurmaUyarisi() },
   ];
+  const visibleMsgs = initialKey ? msgs.filter(m => m.key === initialKey) : msgs;
   const send = (text) => {
     const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
     const encoded = encodeURIComponent(text);
@@ -1917,9 +1926,9 @@ function MesajSheet({ student, onClose }) {
     else navigator.clipboard.writeText(text);
   };
   return (
-    <Sheet title="Mesaj Şablonları" subtitle={student.name} onClose={onClose}>
+    <Sheet title={initialKey === "ozet" ? "Dönem Sonu Özeti" : "Mesaj Şablonları"} subtitle={student.name} onClose={onClose}>
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {msgs.map(m => (
+        {visibleMsgs.map(m => (
           <div key={m.key} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, overflow:"hidden" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #f0f0f0" }}>
               <span style={{ fontWeight:700, fontSize:14, color:"#111" }}>{m.label}</span>
@@ -2272,6 +2281,7 @@ export default function App() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [toast, setToast] = useState(null);
   const [mesajSt, setMesajSt] = useState(null);
+  const [mesajInitialKey, setMesajInitialKey] = useState("");
   const [odemeSt, setÖdemeSt] = useState(null);
   const [odemeKaydetModal, setÖdemeKaydetModal] = useState(null);
   const [odemeKaydetDate, setÖdemeKaydetDate] = useState(new Date().toISOString().split("T")[0]);
@@ -2280,6 +2290,11 @@ export default function App() {
   const [retryingOps, setRetryingOps] = useState({});
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
+
+  const openMesaj = (student, initialKey = "") => {
+    setMesajInitialKey(initialKey);
+    setMesajSt(student);
+  };
 
   const persistFailedOps = (items) => {
     setFailedOps(items);
@@ -3118,7 +3133,7 @@ export default function App() {
                         </p>
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                        <button onClick={() => setMesajSt(s)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Özeti Aç</button>
+                        <button onClick={() => openMesaj(s, "ozet")} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Özeti Aç</button>
                         {!sent ? <button onClick={() => handlePaketOzetiGonderildi(s.id)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Gönderildi</button> : null}
                         <button onClick={() => setÖdemeSt(s)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
                       </div>
@@ -3239,7 +3254,7 @@ export default function App() {
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
       {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {showAdd ? <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
-      {mesajSt ? <MesajSheet student={mesajSt} onClose={()=>setMesajSt(null)} /> : null}
+      {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
 
       {odemeKaydetModal ? (
