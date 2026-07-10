@@ -941,7 +941,7 @@ function isPaymentDue(student) {
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
 const FOCUS_SECTIONS = ["Teknik çalışma","Ritim","Nota okuma","Parça çalışması","Doğaçlama","Teori","Tekrar"];
-const PRODUCTIVE_WINDOWS = ["İlk 10 dk","İlk 15 dk","İlk 20 dk","İlk 30 dk","Orta 15 dk","Son 15 dk","Son 20 dk","Son 30 dk","Ders geneli dengeli"];
+const PRODUCTIVE_WINDOWS = ["İlk 10 dk","İlk 15 dk","İlk 20 dk","İlk 25 dk","İlk 30 dk","Son 30 dk","Son 25 dk","Son 20 dk","Son 15 dk","Son 10 dk","Ders geneli dengeli"];
 const TIMES = [];
 for (let h=10;h<=19;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
