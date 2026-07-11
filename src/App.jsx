@@ -257,6 +257,49 @@ function shouldShowExtraLessonOnCalendar(extra) {
   return (extra?.status || "planned") !== "cancelled";
 }
 
+function telafiPlannedAt(record) {
+  return record?.plannedAt || record?.planned_at || "";
+}
+
+function telafiDoneAt(record) {
+  return record?.doneAt || record?.done_at || telafiPlannedAt(record) || "";
+}
+
+function isValidDateValue(value) {
+  if (!value) return false;
+  return !isNaN(new Date(value).getTime());
+}
+
+function telafiDoneDateText(record) {
+  const value = telafiDoneAt(record);
+  if (!value) return "yapıldı";
+  if (!isValidDateValue(value)) return value;
+  return fmtDate(value) + (timeFromISO(value) ? " " + timeFromISO(value) : "");
+}
+
+function telafiDoneShortText(record) {
+  const value = telafiDoneAt(record);
+  if (!value) return "yapıldı";
+  return isValidDateValue(value) ? fmtShort(value) : value;
+}
+
+function telafiStatusLabel(record) {
+  if (record?.done) {
+    if (record?.doneStatus === "counted") return "Yapıldı sayıldı";
+    if (record?.doneStatus === "attended") return "Katıldı";
+    return "Yapıldı";
+  }
+  return telafiPlannedAt(record) ? "Planlandı" : "Bekliyor";
+}
+
+function telafiMetricText(record) {
+  const parts = [];
+  if (record?.activeMinutes) parts.push(record.activeMinutes + " dk aktif");
+  if (record?.focusMinutes) parts.push(record.focusMinutes + " dk odak");
+  if (record?.productiveWindow) parts.push(record.productiveWindow + " en verimli bölüm");
+  return parts.join(", ");
+}
+
 function calendarEventsFromStudents(students) {
   const events = [];
   students.forEach(student => {
@@ -299,6 +342,31 @@ function calendarEventsFromStudents(students) {
           "Ders tipi: " + ekDersTypeLabel(extra.type),
           extra.odendi ? "Ödeme: Alındı" : "Ödeme: Bekliyor",
           extra.note ? "Not: " + extra.note : "",
+        ].filter(Boolean).join("\n"),
+      });
+    });
+
+    (student.telafi_records || []).forEach(record => {
+      const plannedAt = telafiPlannedAt(record);
+      if (!plannedAt) return;
+      const start = new Date(plannedAt);
+      if (isNaN(start.getTime())) return;
+      const end = addMinutes(start, getLessonDuration(student, { durationMinutes: record.plannedDurationMinutes || record.planned_duration_minutes }));
+      events.push({
+        uid: "telafi-ders-" + student.id + "-" + (record.id || dateKey(plannedAt)) + "@sonsuz-sanat-crm",
+        start,
+        end,
+        summary: "Telafi Ders - " + student.name,
+        description: [
+          "Öğrenci: " + student.name,
+          student.instrument ? "Branş: " + student.instrument : "",
+          student.veli_adi ? "Veli: " + student.veli_adi : "",
+          student.phone ? "Telefon: " + student.phone : "",
+          "Durum: " + telafiStatusLabel(record),
+          record.lessonDate ? "Hangi dersin telafisi: " + fmtShort(record.lessonDate) : "",
+          record.note ? "İptal notu: " + record.note : "",
+          record.plannedNote ? "Plan notu: " + record.plannedNote : "",
+          record.doneNote ? "Yapıldı notu: " + record.doneNote : "",
         ].filter(Boolean).join("\n"),
       });
     });
@@ -1201,15 +1269,35 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
   );
 }
 
-function TelafiSheet({ record, studentName, onClose, onDone }) {
-  const [step, setStep] = useState("main");
-  const [note, setNote] = useState("");
+function TelafiSheet({ record, student, onClose, onSave }) {
+  const plannedAt = telafiPlannedAt(record);
+  const plannedDate = plannedAt ? dateKey(plannedAt) : new Date().toISOString().split("T")[0];
+  const plannedTime = plannedAt ? timeFromISO(plannedAt) : (student?.time || "10:00");
+  const [step, setStep] = useState(plannedAt || record.done ? "main" : "plan");
+  const [date, setDate] = useState(plannedDate);
+  const [time, setTime] = useState(plannedTime);
+  const [duration, setDuration] = useState(record.plannedDurationMinutes || getLessonDuration(student));
+  const [note, setNote] = useState(record.plannedNote || "");
+  const [doneNote, setDoneNote] = useState("");
+  const [activeMinutes, setActiveMinutes] = useState("");
+  const [focusMinutes, setFocusMinutes] = useState("");
+  const [productiveWindow, setProductiveWindow] = useState(PRODUCTIVE_WINDOWS[0]);
+  const [focusSection, setFocusSection] = useState(FOCUS_SECTIONS[0]);
   const days = daysLeft(record.expiry);
   const expired = days !== null && days < 0;
   const urgent = !expired && days !== null && days <= 7;
+  const savePlan = () => {
+    onSave(record.id, {
+      action: "plan",
+      plannedAt: `${date}T${time}:00`,
+      plannedDurationMinutes: parseInt(duration) || getLessonDuration(student),
+      plannedNote: note,
+    });
+    onClose();
+  };
 
   return (
-    <Sheet title="Telafi Dersi" subtitle={studentName} onClose={onClose}>
+    <Sheet title="Telafi Dersi" subtitle={student?.name} onClose={onClose}>
       <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
         <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", letterSpacing:1 }}>İptal Edilen Ders</p>
         <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color:"#111" }}>{fmtDate(record.lessonDate)}</p>
@@ -1226,19 +1314,82 @@ function TelafiSheet({ record, studentName, onClose, onDone }) {
           </div>
         </div>
       </div>
+      {plannedAt ? (
+        <div style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
+          <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#7e22ce", letterSpacing:1 }}>Planlanan Telafi</p>
+          <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:800, color:"#111" }}>{fmtDate(plannedAt)} · {timeFromISO(plannedAt)}</p>
+          <p style={{ margin:"4px 0 0", fontSize:12, color:"#64748b" }}>{record.plannedDurationMinutes || getLessonDuration(student)} dk</p>
+          {record.plannedNote ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>{record.plannedNote}</p> : null}
+        </div>
+      ) : null}
       {record.done
         ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px" }}>
             <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>Telafi Yapıldı</p>
-            {record.doneAt && <p style={{ margin:"4px 0 0", fontSize:13, color:"#4ade80" }}>{record.doneAt}</p>}
+            {telafiDoneAt(record) && <p style={{ margin:"4px 0 0", fontSize:13, color:"#16a34a" }}>{telafiDoneDateText(record)}</p>}
+            {telafiMetricText(record) ? <p style={{ margin:"4px 0 0", fontSize:13, color:"#166534" }}>{telafiMetricText(record)}</p> : null}
+            {record.doneNote ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>{record.doneNote}</p> : null}
           </div>
-        : step === "main"
-          ? <Btn bg="#10b981" onClick={() => setStep("done")}>Telafi Yapıldı İşaretle</Btn>
-          : <>
-              <p style={{ fontSize:13, color:"#666", marginBottom:8 }}>Tarih ve saati yaz:</p>
-              <NoteArea value={note} onChange={setNote} placeholder="Örn: 22 Mayıs yapıldı" />
-              <Btn bg="#10b981" onClick={() => { onDone(record.id, note || fmtDate(new Date().toISOString())); onClose(); }}>Kaydet</Btn>
-              <Btn bg="#111" outline onClick={() => setStep("main")}>Geri</Btn>
+        : step === "plan"
+          ? <>
+              <label style={{ ...LBL, marginTop:0 }}>Telafi Tarihi</label>
+              <input style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+              <label style={LBL}>Telafi Saati</label>
+              <select style={INP} value={time} onChange={e=>setTime(e.target.value)}>
+                {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <label style={LBL}>Ders Süresi</label>
+              <input style={INP} type="number" min={15} step={5} value={duration} onChange={e=>setDuration(e.target.value)} />
+              <label style={LBL}>Plan Notu</label>
+              <NoteArea value={note} onChange={setNote} placeholder="Örn: Bu hafta uygunluk oluştu" />
+              <Btn bg="#10b981" onClick={savePlan}>Telafiyi Planla</Btn>
+              {plannedAt ? <Btn bg="#111" outline onClick={() => setStep("main")}>Geri</Btn> : null}
             </>
+          : step === "attended"
+            ? <>
+                <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Telafi dersinin verim bilgilerini gir.</p>
+                <label style={{ ...LBL, marginTop:0 }}>Aktif Ders Süresi (dk)</label>
+                <input style={INP} type="number" min={0} max={duration} value={activeMinutes} onChange={e=>setActiveMinutes(e.target.value)} placeholder="Örn. 35" />
+                <label style={LBL}>En Uzun Odaklanma (dk)</label>
+                <input style={INP} type="number" min={0} max={duration} value={focusMinutes} onChange={e=>setFocusMinutes(e.target.value)} placeholder="Örn. 12" />
+                <label style={LBL}>En Verimli Zaman</label>
+                <select style={INP} value={productiveWindow} onChange={e=>setProductiveWindow(e.target.value)}>
+                  {PRODUCTIVE_WINDOWS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <label style={LBL}>Dersin Güçlü Bölümü</label>
+                <select style={INP} value={focusSection} onChange={e=>setFocusSection(e.target.value)}>
+                  {FOCUS_SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <label style={LBL}>Öğretmen Notu</label>
+                <NoteArea value={doneNote} onChange={setDoneNote} placeholder="Kısa not" />
+                <Btn bg="#10b981" onClick={() => {
+                  onSave(record.id, {
+                    action: "attended",
+                    doneAt: plannedAt || `${date}T${time}:00`,
+                    doneNote,
+                    activeMinutes: parseInt(activeMinutes) || 0,
+                    focusMinutes: parseInt(focusMinutes) || 0,
+                    productiveWindow,
+                    focusSection,
+                  });
+                  onClose();
+                }}>Katılımı Kaydet</Btn>
+                <Btn bg="#111" outline onClick={() => setStep("main")}>Geri</Btn>
+              </>
+            : step === "counted"
+              ? <>
+                  <p style={{ fontSize:13, color:"#666", marginBottom:8 }}>Neden yapıldı sayılıyor?</p>
+                  <NoteArea value={doneNote} onChange={setDoneNote} placeholder="Açıklama" />
+                  <Btn bg="#f97316" onClick={() => {
+                    onSave(record.id, { action: "counted", doneAt: plannedAt || `${date}T${time}:00`, doneNote });
+                    onClose();
+                  }}>Kaydet</Btn>
+                  <Btn bg="#111" outline onClick={() => setStep("main")}>Geri</Btn>
+                </>
+              : <>
+                  <Btn bg="#10b981" onClick={() => setStep("attended")}>Katıldı</Btn>
+                  <Btn bg="#f97316" onClick={() => setStep("counted")}>Yapıldı Say</Btn>
+                  <Btn bg="#6366f1" onClick={() => setStep("plan")}>Planı Düzenle</Btn>
+                </>
       }
     </Sheet>
   );
@@ -1475,8 +1626,9 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
-  const active = student.telafi_records.filter(r=>!r.done);
-  const done = student.telafi_records.filter(r=>r.done);
+  const telafiRecords = student.telafi_records || [];
+  const active = telafiRecords.filter(r=>!r.done);
+  const done = telafiRecords.filter(r=>r.done);
   const ekDersler = student.ek_dersler || [];
   const odenmemisEk = unpaidEkDersler(student);
   const undoablePackage = lastUndoablePackageInfo(student);
@@ -1560,6 +1712,22 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
 
         {tab === "takvim" && (() => {
           const LessonCard = ({ l }) => {
+            if (l.kind === "telafi") {
+              const record = l.record;
+              return (
+                <div key={l.id} style={{ background:record.done?"#f0fdf4":"#f0f9ff", border:"1.5px solid "+(record.done?"#bbf7d0":"#7dd3fc"), borderRadius:10, padding:"10px 12px", marginBottom:6 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                    <div style={{ cursor:"pointer", flex:1 }} onClick={() => setTelafiSel(record)}>
+                      <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#0f172a" }}>{fmtDate(l.date)} · Telafi</p>
+                      <p style={{ margin:"2px 0 0", fontSize:12, color:"#0369a1" }}>{timeFromISO(l.date)} · {record.done ? "yapıldı" : "planlandı"}</p>
+                      <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b" }}>{fmtShort(record.lessonDate)} dersinin telafisi</p>
+                    </div>
+                    <StatusPill status="telafi" />
+                  </div>
+                  {record.plannedNote ? <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 10px", marginTop:6 }}><p style={{ margin:0, fontSize:12, color:"#475569", fontStyle:"italic" }}>{record.plannedNote}</p></div> : null}
+                </div>
+              );
+            }
             const clickable = true;
             return (
               <div key={l.id} style={{ background:clickable?"#f9fafb":"#fff", border:clickable?"1.5px solid #d1d5db":"1px solid #f3f4f6", borderRadius:10, padding:"10px 12px", marginBottom:6 }}>
@@ -1582,7 +1750,18 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
           const güncelGecmisSayisi = gecmisDersler.length % 4;
           const güncelGecmis = güncelGecmisSayisi > 0 ? gecmisDersler.slice(-güncelGecmisSayisi) : [];
           const eskiPaketler = güncelGecmisSayisi > 0 ? gecmisDersler.slice(0, -güncelGecmisSayisi) : gecmisDersler;
-          const güncel = [...güncelGecmis, ...upcomingDersler];
+          const currentScheduleItems = [...güncelGecmis, ...upcomingDersler];
+          const currentStart = currentScheduleItems.length ? Math.min(...currentScheduleItems.map(l => new Date(l.date).getTime())) : null;
+          const currentEnd = currentScheduleItems.length ? Math.max(...currentScheduleItems.map(l => new Date(l.date).getTime())) : null;
+          const plannedTelafiler = telafiRecords
+            .filter(r => telafiPlannedAt(r))
+            .filter(r => {
+              const t = new Date(telafiPlannedAt(r)).getTime();
+              if (!Number.isFinite(t) || currentStart === null || currentEnd === null) return true;
+              return !r.done || (t >= currentStart && t <= currentEnd);
+            })
+            .map(r => ({ id:"telafi-"+r.id, kind:"telafi", date:telafiPlannedAt(r), record:r }));
+          const güncel = [...currentScheduleItems, ...plannedTelafiler].sort((a,b)=>new Date(a.date)-new Date(b.date));
           return (
             <div>
               {eskiPaketler.length > 0 ? (
@@ -1605,7 +1784,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
 
         {tab === "telafi" ? (
           <div>
-            {student.telafi_records.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Aktif telafi hakkı yok</p> : null}
+            {telafiRecords.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Aktif telafi hakkı yok</p> : null}
             {active.length > 0 ? (
               <div style={{ marginBottom:16 }}>
                 <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Bekleyen</p>
@@ -1619,6 +1798,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
                         <div>
                           <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#111" }}>{fmtDate(r.lessonDate)} dersi</p>
                           {r.note ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontStyle:"italic" }}>{r.note}</p> : null}
+                          {telafiPlannedAt(r) ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Plan: {fmtDate(telafiPlannedAt(r))} · {timeFromISO(telafiPlannedAt(r))}</p> : null}
                           <p style={{ margin:"4px 0 0", fontSize:12, color:"#888" }}>Son geçerlilik: <strong style={{ color: exp?"#dc2626":urg?"#d97706":"#0369a1" }}>{fmtMed(r.expiry)}</strong></p>
                         </div>
                         <div style={{ background:exp?"#dc2626":urg?"#d97706":"#0ea5e9", color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:800, flexShrink:0, marginLeft:8 }}>
@@ -1634,9 +1814,10 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
               <div>
                 <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Yapılmış</p>
                 {done.map(r => (
-                  <div key={r.id} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginBottom:6 }}>
+                  <div key={r.id} onClick={() => setTelafiSel(r)} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginBottom:6, cursor:"pointer" }}>
                     <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>{fmtDate(r.lessonDate)} dersi yapıldı</p>
-                    {r.doneAt ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#4ade80" }}>{r.doneAt}</p> : null}
+                    {telafiDoneAt(r) ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#16a34a" }}>{telafiDoneDateText(r)}</p> : null}
+                    {telafiMetricText(r) ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#166534" }}>{telafiMetricText(r)}</p> : null}
                   </div>
                 ))}
               </div>
@@ -1707,7 +1888,7 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
           <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name+" silinsin mi?")){ onDelete(student.id); onClose(); } }}>Öğrenciyi Sil</Btn>
         </div>
       </Sheet>
-      {telafiSel ? <TelafiSheet record={telafiSel} studentName={student.name} onClose={() => setTelafiSel(null)} onDone={(id, note) => { onTelafiDone(student.id, id, note); setTelafiSel(null); }} /> : null}
+      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { onTelafiDone(student.id, id, payload); setTelafiSel(null); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => { onMoveOne(student.id, lid, date, time); setShiftSel(null); }} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
@@ -1892,7 +2073,14 @@ function msgPaketOzeti(student) {
   }
   if (yapilanTelafi.length > 0) {
     msg += "\nYapılan Telafiler:\n";
-    yapilanTelafi.forEach(r => { msg += "- "+fmtShort(r.lessonDate)+" dersi - "+(r.doneAt||"yapıldı")+"\n"; });
+    yapilanTelafi.forEach(r => {
+      const doneLabel = telafiDoneShortText(r);
+      msg += "- "+fmtShort(r.lessonDate)+" dersi telafisi: "+doneLabel+" - "+telafiStatusLabel(r)+"\n";
+      const metric = telafiMetricText(r);
+      if (metric) msg += "  "+metric+"\n";
+      if (r.doneNote) msg += "  Not: "+r.doneNote+"\n";
+      else if (r.plannedNote) msg += "  Not: "+r.plannedNote+"\n";
+    });
   }
   const bekleyenEkDersler = unpaidEkDersler(student);
   if (bekleyenEkDersler.length > 0) {
@@ -2511,13 +2699,45 @@ export default function App() {
     pop(frozen ? "Program donduruldu" : "Program tekrar aktif edildi");
   };
 
-  const handleTelafiDone = async (sid, tid, note) => {
+  const handleTelafiDone = async (sid, tid, payload = {}) => {
+    const action = payload.action || "attended";
     const updated = students.map(s => s.id!==sid ? s : {
-      ...s, telafi_records: s.telafi_records.map(r => r.id!==tid ? r : {...r, done:true, doneAt:note||fmtDate(new Date().toISOString())})
+      ...s,
+      telafi_records: (s.telafi_records || []).map(r => {
+        if (r.id !== tid) return r;
+        if (action === "plan") {
+          return {
+            ...r,
+            plannedAt: payload.plannedAt,
+            plannedDurationMinutes: payload.plannedDurationMinutes,
+            plannedNote: payload.plannedNote || "",
+          };
+        }
+        if (action === "counted") {
+          return {
+            ...r,
+            done:true,
+            doneStatus:"counted",
+            doneAt:payload.doneAt || telafiPlannedAt(r) || new Date().toISOString(),
+            doneNote:payload.doneNote || "",
+          };
+        }
+        return {
+          ...r,
+          done:true,
+          doneStatus:"attended",
+          doneAt:payload.doneAt || telafiPlannedAt(r) || new Date().toISOString(),
+          doneNote:payload.doneNote || "",
+          activeMinutes:payload.activeMinutes || 0,
+          focusMinutes:payload.focusMinutes || 0,
+          productiveWindow:payload.productiveWindow || "",
+          focusSection:payload.focusSection || "",
+        };
+      })
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
-    pop("Telafi yapıldı");
+    pop(action === "plan" ? "Telafi planlandı" : "Telafi yapıldı");
   };
 
   const handleShift = async (sid, fromLid, days) => {
