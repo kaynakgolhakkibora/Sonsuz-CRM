@@ -1023,6 +1023,32 @@ function StatusPill({ status }) {
   return <Pill label={s.label} bg={s.bg} color={s.color} />;
 }
 
+const CARD = { background:"#fff", border:"1px solid #e8eaee", borderRadius:14, boxShadow:"0 8px 24px rgba(15,23,42,.06)" };
+const SECTION = { ...CARD, padding:"12px 14px", marginBottom:14 };
+
+function TonePill({ children, tone="neutral" }) {
+  const map = {
+    neutral:{ bg:"#f3f4f6", color:"#374151" },
+    good:{ bg:"#dcfce7", color:"#166534" },
+    info:{ bg:"#dbeafe", color:"#1d4ed8" },
+    warn:{ bg:"#ffedd5", color:"#c2410c" },
+    danger:{ bg:"#fee2e2", color:"#991b1b" },
+    special:{ bg:"#ede9fe", color:"#5b21b6" },
+  };
+  const s = map[tone] || map.neutral;
+  return <span style={{ display:"inline-flex", alignItems:"center", minHeight:22, padding:"3px 8px", borderRadius:999, background:s.bg, color:s.color, fontSize:11, fontWeight:800, lineHeight:1, whiteSpace:"nowrap" }}>{children}</span>;
+}
+
+function MiniMetric({ label, value, tone="neutral" }) {
+  const colorMap = { neutral:"#111827", good:"#047857", info:"#1d4ed8", warn:"#d97706", danger:"#dc2626", special:"#6d28d9" };
+  return (
+    <div style={{ background:"#f8fafc", border:"1px solid #eef2f7", borderRadius:12, padding:"10px 8px", textAlign:"center" }}>
+      <p style={{ margin:0, fontSize:21, lineHeight:1, fontWeight:900, color:colorMap[tone] || colorMap.neutral }}>{value}</p>
+      <p style={{ margin:"5px 0 0", fontSize:10, color:"#64748b", fontWeight:800 }}>{label}</p>
+    </div>
+  );
+}
+
 function Btn({ children, onClick, bg="#111", color="#fff", outline=false, mb=8 }) {
   return (
     <button onClick={onClick} style={{ width:"100%", background:outline?"transparent":bg, color:outline?bg:color, border:outline?`2px solid ${bg}`:"none", borderRadius:14, padding:"13px 16px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit", marginBottom:mb, display:"block" }}>
@@ -1044,8 +1070,8 @@ function NoteArea({ value, onChange, placeholder="Açıklama ekle..." }) {
 function Sheet({ title, subtitle, onClose, children }) {
   return (
     <div style={{ position:"fixed", inset:0, zIndex:50, display:"flex", alignItems:"flex-end", justifyContent:"center", background:"rgba(0,0,0,0.5)" }}>
-      <div style={{ background:"#fff", width:"100%", maxWidth:480, borderRadius:"20px 20px 0 0", boxShadow:"0 -4px 30px rgba(0,0,0,.15)", overflow:"hidden" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 20px", borderBottom:"1px solid #f0f0f0" }}>
+      <div style={{ background:"#fff", width:"100%", maxWidth:520, borderRadius:"22px 22px 0 0", boxShadow:"0 -14px 42px rgba(15,23,42,.22)", overflow:"hidden" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 20px", borderBottom:"1px solid #eef2f7", background:"#fbfcfe" }}>
           <div>
             <span style={{ fontWeight:700, fontSize:16, color:"#111", display:"block" }}>{title}</span>
             {subtitle && <span style={{ fontSize:12, color:"#888" }}>{subtitle}</span>}
@@ -1640,49 +1666,38 @@ function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLesson
   return (
     <>
       <Sheet title={student.name} onClose={onClose}>
-        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
-          <Pill label={student.instrument} bg="#f3f4f6" color="#374151" />
-          <Pill label={studentScheduleLabel(student)} bg="#f3f4f6" color="#374151" />
-          <Pill label={lessonDurationLabel(student)} bg="#f3f4f6" color="#374151" />
-          {student.veli_adi ? <Pill label={"Veli: "+student.veli_adi} bg="#fef9c3" color="#854d0e" /> : null}
-          {student.frozen ? <Pill label="Dondurulmuş" bg="#dbeafe" color="#1d4ed8" /> : null}
-          {isRaiseDue(student) ? <Pill label="Zam zamanı" bg="#fff7ed" color="#c2410c" /> : null}
-          {ekDersler.length > 0 ? <Pill label={"+"+ekDersler.length+" ek ders"} bg="#ede9fe" color="#5b21b6" /> : null}
-          {odenmemisEk.length > 0 ? <Pill label={odenmemisEk.length+" ödenmemiş ek"} bg="#ffedd5" color="#c2410c" /> : null}
-        </div>
-        {startInfo ? (
-          <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 14px", marginBottom:12 }}>
-            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#64748b", letterSpacing:1 }}>Derse Başlama</p>
-            <p style={{ margin:"4px 0 0", fontSize:13, color:"#111", fontWeight:800 }}>{startInfo}</p>
+        <div style={SECTION}>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+            <TonePill>{student.instrument}</TonePill>
+            <TonePill>{studentScheduleLabel(student)}</TonePill>
+            <TonePill>{lessonDurationLabel(student)}</TonePill>
+            {student.veli_adi ? <TonePill tone="warn">Veli: {student.veli_adi}</TonePill> : null}
+            {student.frozen ? <TonePill tone="info">Dondurulmuş</TonePill> : null}
+            {isRaiseDue(student) ? <TonePill tone="warn">Zam zamanı</TonePill> : null}
+            {ekDersler.length > 0 ? <TonePill tone="special">+{ekDersler.length} ek ders</TonePill> : null}
+            {odenmemisEk.length > 0 ? <TonePill tone="warn">{odenmemisEk.length} ödenmemiş ek</TonePill> : null}
           </div>
-        ) : null}
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 }}>
-          {[
-            { label:"Kalan Ders", val:bal, bg:"#f9fafb", color:"#111" },
-            { label:"Aktif Telafi", val:active.length, bg: active.length>4?"#fee2e2":active.length===4?"#fffbeb":"#eff6ff", color: active.length>4?"#dc2626":active.length===4?"#d97706":"#2563eb" },
-            { label:"No-Show", val:student.no_show, bg:"#fff1f2", color:"#e11d48" },
-          ].map(s => (
-            <div key={s.label} style={{ background:s.bg, borderRadius:12, padding:"12px 8px", textAlign:"center" }}>
-              <p style={{ fontSize:24, fontWeight:800, color:s.color, margin:0 }}>{s.val}</p>
-              <p style={{ fontSize:10, color:"#888", margin:"2px 0 0", fontWeight:600 }}>{s.label}</p>
+          {startInfo ? (
+            <div style={{ background:"#f8fafc", border:"1px solid #eef2f7", borderRadius:12, padding:"9px 11px" }}>
+              <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Derse Başlama</p>
+              <p style={{ margin:"3px 0 0", fontSize:13, color:"#111", fontWeight:800 }}>{startInfo}</p>
             </div>
-          ))}
+          ) : null}
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:8 }}>
+          <MiniMetric label="Kalan Ders" value={bal} />
+          <MiniMetric label="Aktif Telafi" value={active.length} tone={active.length>4?"danger":active.length===4?"warn":"info"} />
+          <MiniMetric label="No-Show" value={student.no_show} tone={student.no_show>0?"danger":"neutral"} />
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
-          <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 8px", textAlign:"center" }}>
-            <p style={{ fontSize:24, fontWeight:800, color:"#047857", margin:0 }}>{scoreLabel(attStats?.score)}</p>
-            <p style={{ fontSize:10, color:"#166534", margin:"2px 0 0", fontWeight:700 }}>Devam Skoru</p>
-          </div>
-          <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:12, padding:"12px 8px", textAlign:"center" }}>
-            <p style={{ fontSize:24, fontWeight:800, color:"#1d4ed8", margin:0 }}>{scoreLabel(payStats?.score)}</p>
-            <p style={{ fontSize:10, color:"#1e40af", margin:"2px 0 0", fontWeight:700 }}>Ödeme Skoru</p>
-          </div>
+          <MiniMetric label="Devam Skoru" value={scoreLabel(attStats?.score)} tone="good" />
+          <MiniMetric label="Ödeme Skoru" value={scoreLabel(payStats?.score)} tone={payStats?.avgDelay>0?"warn":"info"} />
         </div>
         {np ? (
-          <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
+          <div style={SECTION}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div>
-                <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Tahmini Sonraki Ödeme</p>
+                <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Tahmini Sonraki Ödeme</p>
                 <p style={{ margin:"3px 0 0", fontSize:14, fontWeight:700, color:"#111" }}>{fmtMed(np)}</p>
               </div>
               <span style={{ fontSize:22 }}>💳</span>
@@ -3269,9 +3284,9 @@ export default function App() {
   }
 
   return (
-    <div style={{ fontFamily:"sans-serif", background:"#f4f4f0", minHeight:"100vh" }}>
-      <div style={{ background:"#111", color:"#fff", padding:"16px 20px 0" }}>
-        <div style={{ maxWidth:600, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap", paddingBottom:12 }}>
+    <div style={{ fontFamily:"sans-serif", background:"#f6f7f4", minHeight:"100vh" }}>
+      <div style={{ background:"#101010", color:"#fff", padding:"16px 20px 0", boxShadow:"0 10px 28px rgba(0,0,0,.12)" }}>
+        <div style={{ maxWidth:720, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap", paddingBottom:12 }}>
           <div>
             <p style={{ fontSize:10, letterSpacing:3, color:"#666", margin:0 }}>Sonsuz Sanat</p>
             <h1 style={{ fontSize:20, fontWeight:800, margin:"2px 0 0", letterSpacing:-0.5 }}>Öğrenci Yönetimi</h1>
@@ -3282,7 +3297,7 @@ export default function App() {
             <button onClick={()=>setShowAdd(true)} style={{ background:"#fff", color:"#111", border:"none", borderRadius:12, padding:"9px 18px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>+ Ekle</button>
           </div>
         </div>
-        <div style={{ maxWidth:600, margin:"0 auto", display:"flex", gap:4 }}>
+        <div style={{ maxWidth:720, margin:"0 auto", display:"flex", gap:4 }}>
           {[{key:"bugün",label:"Bugün"},{key:"liste",label:"Liste"},{key:"takvim",label:"Takvim"},{key:"gelir",label:"Gelir"}].map(t=>(
             <button key={t.key} onClick={()=>setMainTab(t.key)} style={{ flex:1, background:mainTab===t.key?"#fff":"transparent", color:mainTab===t.key?"#111":"#888", border:"none", borderRadius:"10px 10px 0 0", padding:"10px 0", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
               {t.label}
@@ -3291,7 +3306,7 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ maxWidth:600, margin:"0 auto", padding:"14px 14px 80px" }}>
+      <div style={{ maxWidth:720, margin:"0 auto", padding:"16px 14px 80px" }}>
         {failedOps.length > 0 ? (
           <div style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:800, color:"#991b1b" }}>{failedOps.length} işlem kaydedilemedi</p>
@@ -3422,28 +3437,30 @@ export default function App() {
                 const att = attendanceStats(s);
                 const ekCount = (s.ek_dersler||[]).length;
                 const unpaidEkCount = unpaidEkDersler(s).length;
+                const stripe = s.frozen ? "#3b82f6" : warn ? "#f59e0b" : payDue ? "#fb923c" : "#10b981";
                 return (
-                  <div key={s.id} style={{ background:s.frozen?"#f0f9ff":"#fff", borderRadius:16, padding:"14px 16px", boxShadow:"0 1px 4px rgba(0,0,0,.07)", border:warn?"1.5px solid #fcd34d":payDue?"1.5px solid #fb923c":s.frozen?"1.5px solid #bfdbfe":"1.5px solid transparent" }}>
+                  <div key={s.id} style={{ ...CARD, position:"relative", overflow:"hidden", background:s.frozen?"#f8fbff":"#fff", padding:"14px 16px 14px 20px", border:warn?"1.5px solid #fcd34d":payDue?"1.5px solid #fb923c":s.frozen?"1.5px solid #bfdbfe":"1px solid #e8eaee" }}>
+                    <div style={{ position:"absolute", left:0, top:0, bottom:0, width:5, background:stripe }} />
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                       <div style={{ flex:1, cursor:"pointer" }} onClick={()=>setDetailSt(s)}>
                         <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
                           <p style={{ fontWeight:700, fontSize:15, margin:0, color:"#111" }}>{s.name}</p>
-                          {s.frozen ? <Pill label="Donuk" bg="#dbeafe" color="#1d4ed8" /> : null}
-                          {warn ? <Pill label="5/6 Telafi" bg="#fef3c7" color="#92400e" /> : null}
-                          {payDue ? <Pill label="Ödeme" bg="#ffedd5" color="#c2410c" /> : null}
-                          {isRaiseDue(s) ? <Pill label="Zam" bg="#fff7ed" color="#c2410c" /> : null}
-                          {ekCount>0 ? <Pill label={"+"+ekCount+" ek"} bg="#ede9fe" color="#5b21b6" /> : null}
-                          {unpaidEkCount>0 ? <Pill label={unpaidEkCount+" ek ödenmedi"} bg="#ffedd5" color="#c2410c" /> : null}
+                          {s.frozen ? <TonePill tone="info">Donuk</TonePill> : null}
+                          {warn ? <TonePill tone="warn">5/6 Telafi</TonePill> : null}
+                          {payDue ? <TonePill tone="warn">Ödeme</TonePill> : null}
+                          {isRaiseDue(s) ? <TonePill tone="warn">Zam</TonePill> : null}
+                          {ekCount>0 ? <TonePill tone="special">+{ekCount} ek</TonePill> : null}
+                          {unpaidEkCount>0 ? <TonePill tone="warn">{unpaidEkCount} ek ödenmedi</TonePill> : null}
                         </div>
-                        <p style={{ fontSize:12, color:"#999", margin:"3px 0 2px", fontWeight:500 }}>
+                        <p style={{ fontSize:12, color:"#64748b", margin:"4px 0 3px", fontWeight:700 }}>
                           {s.instrument} · {studentScheduleLabel(s)} · {lessonDurationLabel(s)}
                           {s.ucret ? <span style={{ marginLeft:8, color:"#059669", fontWeight:700 }}>{s.ucret.toLocaleString("tr-TR")} TL</span> : null}
                         </p>
                         {s.veli_adi ? <p style={{ fontSize:11, color:"#888", margin:"0 0 4px" }}>Veli: {s.veli_adi}</p> : null}
                         {nextL ? <p style={{ fontSize:12, color:"#0369a1", fontWeight:600, margin:"0 0 6px", background:"#f0f9ff", display:"inline-block", borderRadius:6, padding:"2px 8px" }}>{fmtDate(nextL.date)}</p> : null}
-                        <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-                          <span style={{ fontSize:12, color:"#444" }}><strong>{bal}</strong> ders kaldı</span>
-                          {np ? <span style={{ fontSize:12, color:"#6b7280" }}><strong>{fmtShort(np)}</strong> odeme</span> : null}
+                        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:4 }}>
+                          <TonePill>{bal} ders kaldı</TonePill>
+                          {np ? <TonePill tone={payDue?"warn":"neutral"}>{fmtShort(np)} ödeme</TonePill> : null}
                           {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{done}/{total}</strong> <strong>{pct}%</strong> devam</span>; })()}
                         </div>
                         {ac>0 ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>4?"#d97706":"#2563eb" }}><strong>{ac}/6</strong> aktif telafi</span></div> : null}
@@ -3453,9 +3470,11 @@ export default function App() {
                         </div> : null}
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
-                      <button onClick={()=>s.frozen ? setDetailSt(s) : setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", marginLeft:10, flexShrink:0, fontFamily:"inherit" }}>{s.frozen ? "Devam" : "İşlem"}</button>
-                      {payDue ? <button onClick={()=>setÖdemeKaydetModal(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:700, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💳</button> : null}
-                      <button onClick={()=>setMesajSt(s)} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer", marginLeft:6, flexShrink:0 }}>💬</button>
+                      <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:10, flexShrink:0 }}>
+                        <button onClick={()=>s.frozen ? setDetailSt(s) : setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>{s.frozen ? "Devam" : "İşlem"}</button>
+                        {payDue ? <button onClick={()=>setÖdemeKaydetModal(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:800, cursor:"pointer", flexShrink:0 }}>💳</button> : null}
+                        <button onClick={()=>setMesajSt(s)} style={{ background:"#ecfdf5", color:"#166534", border:"1px solid #bbf7d0", borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer", flexShrink:0 }}>💬</button>
+                      </div>
                     </div>
                   </div>
                 );
