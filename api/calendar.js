@@ -57,6 +57,24 @@ function shouldShowExtraLessonOnCalendar(extra) {
   return (extra?.status || "planned") !== "cancelled";
 }
 
+function fmtShort(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("tr-TR", { day:"numeric", month:"short" });
+}
+
+function telafiPlannedAt(record) {
+  return record?.plannedAt || record?.planned_at || "";
+}
+
+function telafiStatusLabel(record) {
+  if (record?.done) {
+    if (record?.doneStatus === "counted") return "Yapıldı sayıldı";
+    if (record?.doneStatus === "attended") return "Katıldı";
+    return "Yapıldı";
+  }
+  return telafiPlannedAt(record) ? "Planlandı" : "Bekliyor";
+}
+
 function ekDersStatusLabel(status) {
   const m = { planned:"Planlandı", done:"Yapıldı", cancelled:"İptal" };
   return m[status] || "Planlandı";
@@ -135,6 +153,31 @@ function calendarEventsFromStudents(students) {
           "Ders tipi: " + ekDersTypeLabel(extra.type),
           extra.odendi ? "Ödeme: Alındı" : "Ödeme: Bekliyor",
           extra.note ? "Not: " + extra.note : "",
+        ].filter(Boolean).join("\n"),
+      });
+    });
+
+    (student.telafi_records || []).forEach(record => {
+      const plannedAt = telafiPlannedAt(record);
+      if (!plannedAt) return;
+      const start = new Date(plannedAt);
+      if (isNaN(start.getTime())) return;
+      const end = addMinutes(start, getLessonDuration(student, { durationMinutes: record.plannedDurationMinutes || record.planned_duration_minutes }));
+      events.push({
+        uid: "telafi-ders-" + student.id + "-" + (record.id || dateKey(plannedAt)) + "@sonsuz-sanat-crm",
+        start,
+        end,
+        summary: "Telafi Ders - " + student.name,
+        description: [
+          "Öğrenci: " + student.name,
+          student.instrument ? "Branş: " + student.instrument : "",
+          student.veli_adi ? "Veli: " + student.veli_adi : "",
+          student.phone ? "Telefon: " + student.phone : "",
+          "Durum: " + telafiStatusLabel(record),
+          record.lessonDate ? "Hangi dersin telafisi: " + fmtShort(record.lessonDate) : "",
+          record.note ? "İptal notu: " + record.note : "",
+          record.plannedNote ? "Plan notu: " + record.plannedNote : "",
+          record.doneNote ? "Yapıldı notu: " + record.doneNote : "",
         ].filter(Boolean).join("\n"),
       });
     });
