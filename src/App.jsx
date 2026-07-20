@@ -1054,7 +1054,7 @@ const MIZAN_UI_CSS = `
   .crm-loading{min-height:100vh;display:grid;place-items:center;background:var(--crm-paper);text-align:center}.crm-loading-mark{width:50px;height:50px;margin:0 auto 14px;display:grid;place-items:center;border-radius:17px 17px 17px 5px;background:var(--crm-purple);color:#fff;font-size:24px;box-shadow:0 10px 28px rgba(91,66,214,.22)}
   .crm-sheet-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:20px;background:rgba(29,27,36,.52);backdrop-filter:blur(6px)}.crm-sheet{width:min(100%,560px);max-height:calc(100vh - 40px);overflow:hidden;background:#fff;border-radius:22px;box-shadow:0 25px 90px rgba(0,0,0,.22)}.crm-sheet-head{display:flex;justify-content:space-between;align-items:center;padding:20px 23px;border-bottom:1px solid var(--crm-border);background:#fff}.crm-sheet-head strong{display:block;font-size:18px;letter-spacing:-.025em}.crm-sheet-head span{display:block;margin-top:3px;color:#96909b;font-size:12px}.crm-sheet-close{width:34px;height:34px;border:0;border-radius:50%;background:#f4f1ee;color:#746e78;font-size:20px;cursor:pointer}.crm-sheet-body{padding:20px 23px 28px;max-height:calc(100vh - 124px);overflow-y:auto}
   @media(max-width:980px){.crm-content{padding-left:26px;padding-right:26px}.crm-sidebar{width:220px}.crm-content{margin-left:220px}}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(4,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:9px;font-weight:700;padding:5px 1px}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-page [style*="grid-template-columns: repeat(5"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(5"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(4,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:9px;font-weight:700;padding:5px 1px}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-page [style*="grid-template-columns: repeat(6"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -3266,11 +3266,11 @@ export default function App() {
     return true;
   });
 
-  const stats = { total:students.length, active:students.filter(s=>!s.frozen).length, frozen:students.filter(s=>s.frozen).length, odeme:todayPayments.length, zam:raiseDueList.length };
+  const stats = { total:students.length, active:students.filter(s=>!s.frozen).length, frozen:students.filter(s=>s.frozen).length, telafi:students.filter(s=>s.telafi_records.some(r=>!r.done)).length, odeme:todayPayments.length, zam:raiseDueList.length };
   const telafiWarnList = students.filter(s => s.telafi_records.filter(r=>!r.done).length===5 && !s.frozen);
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
-    { key:"liste", label:"Öğrenciler", icon:"♙", badge:stats.total },
+    { key:"liste", label:"Öğrenciler", icon:"♙", badge:stats.active },
     { key:"takvim", label:"Takvim", icon:"□" },
     { key:"gelir", label:"Gelir", icon:"↗" },
   ];
@@ -3468,27 +3468,23 @@ export default function App() {
                 {raiseDueList.slice(0,5).map(s=>(<p key={s.id} style={{ margin:"4px 0 0", fontSize:13, color:"#9a3412" }}>· {s.name}</p>))}
               </div>
             ) : null}
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8, marginBottom:14 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8, marginBottom:14 }}>
               {[
-                { label:"Toplam", val:stats.total, bg:"#fff", color:"#111" },
-                { label:"Aktif", val:stats.active, bg:"#ecfdf5", color:"#059669" },
-                { label:"Donuk", val:stats.frozen, bg:"#eff6ff", color:"#3b82f6" },
-                { label:"Ödeme", val:stats.odeme, bg:stats.odeme>0?"#fff7ed":"#f9fafb", color:stats.odeme>0?"#ea580c":"#999" },
-                { label:"Zam", val:stats.zam, bg:stats.zam>0?"#fff7ed":"#f9fafb", color:stats.zam>0?"#ea580c":"#999" },
+                { key:"all", label:"Toplam", val:stats.total, bg:"#fff", color:"#111" },
+                { key:"active", label:"Aktif", val:stats.active, bg:"#ecfdf5", color:"#059669" },
+                { key:"frozen", label:"Donuk", val:stats.frozen, bg:"#eff6ff", color:"#3b82f6" },
+                { key:"telafi", label:"Telafi", val:stats.telafi, bg:stats.telafi>0?"#faf5ff":"#f9fafb", color:stats.telafi>0?"#9333ea":"#999" },
+                { key:"odeme", label:"Ödeme", val:stats.odeme, bg:stats.odeme>0?"#fff7ed":"#f9fafb", color:stats.odeme>0?"#ea580c":"#999" },
+                { key:"zam", label:"Zam", val:stats.zam, bg:stats.zam>0?"#fff7ed":"#f9fafb", color:stats.zam>0?"#ea580c":"#999" },
               ].map(s=>(
-                <div key={s.label} onClick={()=>{ if(s.label==="Ödeme") setFilter("odeme"); if(s.label==="Zam") setFilter("zam"); }} style={{ background:s.bg, borderRadius:12, padding:"12px 6px", textAlign:"center", boxShadow:"0 1px 3px rgba(0,0,0,.05)", cursor:["Ödeme","Zam"].includes(s.label)?"pointer":"default" }}>
+                <button type="button" key={s.key} onClick={()=>setFilter(s.key)} style={{ background:s.bg, border:filter===s.key?`2px solid ${s.color}`:"2px solid transparent", borderRadius:12, padding:"10px 6px", textAlign:"center", boxShadow:"0 1px 3px rgba(0,0,0,.05)", cursor:"pointer", fontFamily:"inherit" }}>
                   <p style={{ fontSize:22, fontWeight:800, color:s.color, margin:0 }}>{s.val}</p>
                   <p style={{ fontSize:10, color:"#999", margin:"2px 0 0", fontWeight:600 }}>{s.label}</p>
-                </div>
+                </button>
               ))}
             </div>
             <div style={{ marginBottom:12 }}>
               <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Öğrenci ara..." style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:12, padding:"11px 14px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#111" }} />
-            </div>
-            <div style={{ display:"flex", gap:6, marginBottom:14, overflowX:"auto", paddingBottom:2 }}>
-              {[{key:"all",label:"Tümü"},{key:"active",label:"Aktif"},{key:"frozen",label:"Dondurulmuş"},{key:"telafi",label:"Telafi"},{key:"odeme",label:"Ödeme"},{key:"zam",label:"Zam"}].map(f=>(
-                <button key={f.key} onClick={()=>setFilter(f.key)} style={{ flexShrink:0, background:filter===f.key?"#111":"#fff", color:filter===f.key?"#fff":"#555", border:"none", borderRadius:20, padding:"7px 14px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>{f.label}</button>
-              ))}
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {filtered.map(s => {
