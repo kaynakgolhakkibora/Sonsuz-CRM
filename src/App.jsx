@@ -1023,8 +1023,40 @@ function StatusPill({ status }) {
   return <Pill label={s.label} bg={s.bg} color={s.color} />;
 }
 
-const CARD = { background:"#fff", border:"1px solid #e8eaee", borderRadius:14, boxShadow:"0 8px 24px rgba(15,23,42,.06)" };
-const SECTION = { ...CARD, padding:"12px 14px", marginBottom:14 };
+const CARD = { background:"#fff", border:"1px solid #e8e4de", borderRadius:18, boxShadow:"0 8px 28px rgba(38,30,48,.055)" };
+const SECTION = { ...CARD, padding:"16px 18px", marginBottom:14 };
+
+const MIZAN_UI_CSS = `
+  :root{--crm-ink:#211e28;--crm-muted:#77717d;--crm-purple:#5b42d6;--crm-purple-dark:#4933ba;--crm-paper:#f6f4ef;--crm-card:#fff;--crm-border:#e8e4de;--crm-green:#1c9b70;--crm-red:#dc5d51}
+  *{box-sizing:border-box}html,body,#root{margin:0;min-height:100%;background:var(--crm-paper)}
+  body{color:var(--crm-ink);font-family:Inter,"Avenir Next",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  button,input,select,textarea{font:inherit}button{color:inherit}
+  .crm-app{min-height:100vh;background:var(--crm-paper);color:var(--crm-ink)}
+  .crm-sidebar{position:fixed;inset:0 auto 0 0;width:245px;padding:30px 20px 22px;background:#fff;border-right:1px solid var(--crm-border);display:flex;flex-direction:column;z-index:30}
+  .crm-brand{display:flex;align-items:center;gap:11px;padding:0 10px 32px}
+  .crm-brand-mark{width:38px;height:38px;display:grid;place-items:center;background:var(--crm-purple);color:#fff;border-radius:13px 13px 13px 4px;font-size:19px;font-weight:900;box-shadow:0 8px 20px rgba(91,66,214,.22)}
+  .crm-brand-copy strong{display:block;font-size:19px;letter-spacing:-.04em}.crm-brand-copy span{display:block;margin-top:2px;color:#9d96a4;font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
+  .crm-nav-label{margin:3px 13px 12px;color:#aaa4af;font-size:10px;font-weight:800;letter-spacing:.13em}
+  .crm-nav{display:flex;flex-direction:column;gap:4px}
+  .crm-nav-btn{width:100%;border:0;background:transparent;display:flex;align-items:center;gap:12px;padding:12px 13px;border-radius:11px;color:#6e6975;font-weight:700;text-align:left;cursor:pointer;transition:.2s}
+  .crm-nav-btn:hover,.crm-nav-btn.active{background:#eeeafd;color:var(--crm-purple)}
+  .crm-nav-icon{width:22px;text-align:center;font-size:18px}.crm-nav-badge{margin-left:auto;min-width:20px;padding:3px 6px;border-radius:20px;background:#f2effb;color:var(--crm-purple);font-size:10px;text-align:center}
+  .crm-sidebar-bottom{margin-top:auto}.crm-tip{margin:0 3px 18px;padding:15px;background:#f6f2e7;border-radius:14px;color:#7b7466;font-size:11px;line-height:1.5}.crm-tip strong{display:block;margin-bottom:4px;color:#5d5547;font-size:12px}
+  .crm-side-action{width:100%;border:1px solid var(--crm-border);background:#fff;border-radius:11px;padding:10px 12px;margin-top:7px;text-align:left;font-size:11px;font-weight:750;cursor:pointer}.crm-side-action:hover{border-color:#c7bfd6;color:var(--crm-purple)}
+  .crm-content{margin-left:245px;padding:38px clamp(28px,5vw,76px) 76px;max-width:1530px}
+  .crm-topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px}
+  .crm-eyebrow{margin:0 0 8px;color:#9d96a4;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
+  .crm-title{margin:0;font-size:clamp(29px,3vw,39px);font-weight:780;letter-spacing:-.045em}.crm-subtitle{margin:7px 0 0;color:var(--crm-muted);font-size:14px}
+  .crm-header-actions{display:flex;gap:10px;padding-top:10px}.crm-primary,.crm-secondary{border:0;border-radius:12px;padding:12px 17px;font-weight:800;cursor:pointer;transition:.2s;white-space:nowrap}.crm-primary{background:var(--crm-purple);color:#fff;box-shadow:0 7px 20px rgba(91,66,214,.18)}.crm-primary:hover{background:var(--crm-purple-dark);transform:translateY(-1px)}.crm-secondary{background:#fff;border:1px solid var(--crm-border)}.crm-secondary:hover{border-color:#c7bfd6;color:var(--crm-purple)}
+  .crm-page{max-width:1120px}.crm-page>div>div,.crm-page>div>div>div{transition:border-color .2s,box-shadow .2s}
+  .crm-mobile-nav{display:none}
+  .crm-login{min-height:100vh;display:grid;grid-template-columns:.82fr 1.18fr;background:#fbfaf7}.crm-login-brand{padding:clamp(42px,8vw,120px);display:flex;flex-direction:column;justify-content:center;background:var(--crm-purple);color:#fff;position:relative;overflow:hidden}.crm-login-brand:after{content:"";position:absolute;width:420px;height:420px;border:82px solid rgba(255,255,255,.045);border-radius:50%;right:-220px;bottom:-190px}.crm-login-brand .crm-brand-mark{background:#fff;color:var(--crm-purple);width:52px;height:52px;font-size:25px}.crm-login-brand h1{margin:20px 0 8px;font-size:42px;letter-spacing:-.05em}.crm-login-brand p{max-width:330px;color:rgba(255,255,255,.72);line-height:1.6}.crm-login-panel{display:grid;place-items:center;padding:28px}.crm-login-card{width:min(100%,430px)}.crm-login-card .crm-eyebrow{color:var(--crm-purple)}.crm-login-card h2{margin:0 0 8px;font-size:31px;letter-spacing:-.04em}.crm-login-card>p{margin:0 0 28px;color:var(--crm-muted);font-size:13px}.crm-login-card label{display:block;margin:0 0 7px;color:#756f7a;font-size:11px;font-weight:800}.crm-login-card input{width:100%;border:1px solid #ded9d3;background:#fff;border-radius:11px;padding:13px 14px;outline:none;color:var(--crm-ink)}.crm-login-card input:focus{border-color:var(--crm-purple);box-shadow:0 0 0 3px #eeeafd}.crm-login-card button{width:100%;margin-top:15px;border:0;border-radius:12px;padding:13px;background:var(--crm-purple);color:#fff;font-weight:800;cursor:pointer}
+  .crm-loading{min-height:100vh;display:grid;place-items:center;background:var(--crm-paper);text-align:center}.crm-loading-mark{width:50px;height:50px;margin:0 auto 14px;display:grid;place-items:center;border-radius:17px 17px 17px 5px;background:var(--crm-purple);color:#fff;font-size:24px;box-shadow:0 10px 28px rgba(91,66,214,.22)}
+  .crm-sheet-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:20px;background:rgba(29,27,36,.52);backdrop-filter:blur(6px)}.crm-sheet{width:min(100%,560px);max-height:calc(100vh - 40px);overflow:hidden;background:#fff;border-radius:22px;box-shadow:0 25px 90px rgba(0,0,0,.22)}.crm-sheet-head{display:flex;justify-content:space-between;align-items:center;padding:20px 23px;border-bottom:1px solid var(--crm-border);background:#fff}.crm-sheet-head strong{display:block;font-size:18px;letter-spacing:-.025em}.crm-sheet-head span{display:block;margin-top:3px;color:#96909b;font-size:12px}.crm-sheet-close{width:34px;height:34px;border:0;border-radius:50%;background:#f4f1ee;color:#746e78;font-size:20px;cursor:pointer}.crm-sheet-body{padding:20px 23px 28px;max-height:calc(100vh - 124px);overflow-y:auto}
+  @media(max-width:980px){.crm-content{padding-left:26px;padding-right:26px}.crm-sidebar{width:220px}.crm-content{margin-left:220px}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(4,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:9px;font-weight:700;padding:5px 1px}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-page [style*="grid-template-columns: repeat(5"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(5"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
+`;
 
 function TonePill({ children, tone="neutral" }) {
   const map = {
@@ -1069,16 +1101,16 @@ function NoteArea({ value, onChange, placeholder="Açıklama ekle..." }) {
 
 function Sheet({ title, subtitle, onClose, children }) {
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:50, display:"flex", alignItems:"flex-end", justifyContent:"center", background:"rgba(0,0,0,0.5)" }}>
-      <div style={{ background:"#fff", width:"100%", maxWidth:520, borderRadius:"22px 22px 0 0", boxShadow:"0 -14px 42px rgba(15,23,42,.22)", overflow:"hidden" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 20px", borderBottom:"1px solid #eef2f7", background:"#fbfcfe" }}>
+    <div className="crm-sheet-backdrop">
+      <div className="crm-sheet">
+        <div className="crm-sheet-head">
           <div>
-            <span style={{ fontWeight:700, fontSize:16, color:"#111", display:"block" }}>{title}</span>
-            {subtitle && <span style={{ fontSize:12, color:"#888" }}>{subtitle}</span>}
+            <strong>{title}</strong>
+            {subtitle && <span>{subtitle}</span>}
           </div>
-          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:22, color:"#aaa", cursor:"pointer", lineHeight:1 }}>x</button>
+          <button className="crm-sheet-close" onClick={onClose} aria-label="Kapat">×</button>
         </div>
-        <div style={{ padding:"16px 20px 28px", maxHeight:"74vh", overflowY:"auto" }}>{children}</div>
+        <div className="crm-sheet-body">{children}</div>
       </div>
     </div>
   );
@@ -1200,8 +1232,8 @@ function downloadSvgAsPng(svgId, filename) {
   img.src = url;
 }
 
-const INP = { width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fafafa", color:"#111" };
-const LBL = { display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:4, marginTop:14 };
+const INP = { width:"100%", border:"1px solid #ded9d3", borderRadius:11, padding:"12px 13px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#211e28" };
+const LBL = { display:"block", fontSize:11, fontWeight:750, color:"#756f7a", letterSpacing:.3, marginBottom:6, marginTop:15 };
 
 function ActionSheet({ student, lessonId, onClose, onAction }) {
   const [step, setStep] = useState("main");
@@ -3236,14 +3268,35 @@ export default function App() {
 
   const stats = { total:students.length, active:students.filter(s=>!s.frozen).length, frozen:students.filter(s=>s.frozen).length, odeme:todayPayments.length, zam:raiseDueList.length };
   const telafiWarnList = students.filter(s => s.telafi_records.filter(r=>!r.done).length===5 && !s.frozen);
+  const mainNav = [
+    { key:"bugün", label:"Bugün", icon:"◫" },
+    { key:"liste", label:"Öğrenciler", icon:"♙", badge:stats.total },
+    { key:"takvim", label:"Takvim", icon:"□" },
+    { key:"gelir", label:"Gelir", icon:"↗" },
+  ];
+  const viewMeta = {
+    bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
+    liste:{ eyebrow:"Öğrenci Yönetimi", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
+    takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
+    gelir:{ eyebrow:"Finansal Görünüm", title:"Gelir raporu", subtitle:"Tahsilatlarını aylık olarak takip et." },
+  }[mainTab];
 
   if (!giris) {
     return (
-      <div style={{ fontFamily:"sans-serif", background:"#111", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
-        <div style={{ background:"#fff", borderRadius:20, padding:"40px 32px", width:"100%", maxWidth:360, boxShadow:"0 8px 40px rgba(0,0,0,.3)" }}>
-          <p style={{ fontSize:11, letterSpacing:3, color:"#999", margin:"0 0 6px" }}>Sonsuz Sanat</p>
-          <h1 style={{ fontSize:22, fontWeight:800, margin:"0 0 28px", color:"#111" }}>Öğrenci Yönetimi</h1>
-          <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:6 }}>Şifre</label>
+      <>
+      <style>{MIZAN_UI_CSS}</style>
+      <div className="crm-login">
+        <section className="crm-login-brand">
+          <div className="crm-brand-mark">S</div>
+          <h1>Sonsuz CRM</h1>
+          <p>Öğrenciler, dersler, ödemeler ve gelişim takibi için sakin ve düzenli çalışma alanın.</p>
+        </section>
+        <section className="crm-login-panel">
+        <div className="crm-login-card">
+          <p className="crm-eyebrow">Sonsuz Sanat</p>
+          <h2>Tekrar hoş geldin</h2>
+          <p>Öğrenci yönetimine devam etmek için şifreni gir.</p>
+          <label>Şifre</label>
           <input
             type="password"
             value={sifre}
@@ -3255,58 +3308,71 @@ export default function App() {
               }
             }}
             placeholder="Şifrenizi girin"
-            style={{ width:"100%", border:sifreHata?"1.5px solid #ef4444":"1.5px solid #e5e7eb", borderRadius:10, padding:"12px 14px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", marginBottom:sifreHata?6:16 }}
+            style={sifreHata ? {borderColor:"#dc5d51"} : undefined}
           />
-          {sifreHata && <p style={{ color:"#ef4444", fontSize:12, fontWeight:600, marginBottom:12 }}>Şifre hatalı</p>}
+          {sifreHata && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"7px 0 0" }}>Şifre hatalı</p>}
           <button
             onClick={() => {
               if (sifre === SIFRE) { sessionStorage.setItem("crm_auth","ok"); setGiris(true); }
               else setSifreHata(true);
             }}
-            style={{ width:"100%", background:"#111", color:"#fff", border:"none", borderRadius:12, padding:"13px", fontWeight:700, fontSize:15, cursor:"pointer", fontFamily:"inherit" }}
           >
-            Giriş
+            CRM'e Gir
           </button>
         </div>
+        </section>
       </div>
+      </>
     );
   }
 
   if (loading) {
     return (
-      <div style={{ fontFamily:"sans-serif", background:"#f4f4f0", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
-        <div style={{ textAlign:"center" }}>
-          <p style={{ fontSize:32 }}>🎵</p>
-          <p style={{ fontWeight:700, color:"#666" }}>Yükleniyor...</p>
+      <>
+      <style>{MIZAN_UI_CSS}</style>
+      <div className="crm-loading">
+        <div>
+          <div className="crm-loading-mark">S</div>
+          <p style={{ fontWeight:750, color:"#77717d" }}>Çalışma alanın hazırlanıyor...</p>
         </div>
       </div>
+      </>
     );
   }
 
   return (
-    <div style={{ fontFamily:"sans-serif", background:"#f6f7f4", minHeight:"100vh" }}>
-      <div style={{ background:"#101010", color:"#fff", padding:"16px 20px 0", boxShadow:"0 10px 28px rgba(0,0,0,.12)" }}>
-        <div style={{ maxWidth:720, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap", paddingBottom:12 }}>
-          <div>
-            <p style={{ fontSize:10, letterSpacing:3, color:"#666", margin:0 }}>Sonsuz Sanat</p>
-            <h1 style={{ fontSize:20, fontWeight:800, margin:"2px 0 0", letterSpacing:-0.5 }}>Öğrenci Yönetimi</h1>
-          </div>
-          <div style={{ display:"flex", gap:8, alignItems:"center", marginLeft:"auto" }}>
-            <button onClick={handleCalendarLinkCopy} style={{ background:"#dbeafe", color:"#1d4ed8", border:"none", borderRadius:12, padding:"9px 12px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>Takvim Linki</button>
-            <button onClick={handleGoogleCalendarExport} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:12, padding:"9px 12px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>Google'a Aktar</button>
-            <button onClick={()=>setShowAdd(true)} style={{ background:"#fff", color:"#111", border:"none", borderRadius:12, padding:"9px 18px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>+ Ekle</button>
-          </div>
+    <>
+    <style>{MIZAN_UI_CSS}</style>
+    <div className="crm-app">
+      <aside className="crm-sidebar">
+        <div className="crm-brand">
+          <div className="crm-brand-mark">S</div>
+          <div className="crm-brand-copy"><strong>Sonsuz CRM</strong><span>Öğrenci Yönetimi</span></div>
         </div>
-        <div style={{ maxWidth:720, margin:"0 auto", display:"flex", gap:4 }}>
-          {[{key:"bugün",label:"Bugün"},{key:"liste",label:"Liste"},{key:"takvim",label:"Takvim"},{key:"gelir",label:"Gelir"}].map(t=>(
-            <button key={t.key} onClick={()=>setMainTab(t.key)} style={{ flex:1, background:mainTab===t.key?"#fff":"transparent", color:mainTab===t.key?"#111":"#888", border:"none", borderRadius:"10px 10px 0 0", padding:"10px 0", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
-              {t.label}
+        <p className="crm-nav-label">MENÜ</p>
+        <nav className="crm-nav">
+          {mainNav.map(t=>(
+            <button key={t.key} className={`crm-nav-btn ${mainTab===t.key?"active":""}`} onClick={()=>setMainTab(t.key)}>
+              <span className="crm-nav-icon">{t.icon}</span><span>{t.label}</span>{t.badge !== undefined ? <span className="crm-nav-badge">{t.badge}</span> : null}
             </button>
           ))}
+        </nav>
+        <div className="crm-sidebar-bottom">
+          <div className="crm-tip"><strong>Bugünün özeti</strong>{stats.active} aktif öğrenci · {stats.odeme} ödeme bekliyor · {telafiWarnList.length} telafi uyarısı.</div>
+          <button className="crm-side-action" onClick={handleCalendarLinkCopy}>⌁ Takvim linkini kopyala</button>
+          <button className="crm-side-action" onClick={handleGoogleCalendarExport}>⇧ Google Takvim'e aktar</button>
         </div>
-      </div>
+      </aside>
 
-      <div style={{ maxWidth:720, margin:"0 auto", padding:"16px 14px 80px" }}>
+      <main className="crm-content">
+        <header className="crm-topbar">
+          <div><p className="crm-eyebrow">{viewMeta.eyebrow}</p><h1 className="crm-title">{viewMeta.title}</h1><p className="crm-subtitle">{viewMeta.subtitle}</p></div>
+          <div className="crm-header-actions">
+            <button className="crm-secondary" onClick={handleCalendarLinkCopy}>Takvim linki</button>
+            <button className="crm-primary" onClick={()=>setShowAdd(true)}>＋ Öğrenci ekle</button>
+          </div>
+        </header>
+        <section className="crm-page">
         {failedOps.length > 0 ? (
           <div style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:800, color:"#991b1b" }}>{failedOps.length} işlem kaydedilemedi</p>
@@ -3488,7 +3554,16 @@ export default function App() {
             </div>
           </div>
         ) : null}
-      </div>
+        </section>
+      </main>
+
+      <nav className="crm-mobile-nav">
+        {mainNav.map(t=>(
+          <button key={t.key} className={mainTab===t.key?"active":""} onClick={()=>setMainTab(t.key)}>
+            <span>{t.icon}</span>{t.label}
+          </button>
+        ))}
+      </nav>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
       {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
@@ -3513,5 +3588,6 @@ export default function App() {
         </div>
       ) : null}
     </div>
+    </>
   );
 }
