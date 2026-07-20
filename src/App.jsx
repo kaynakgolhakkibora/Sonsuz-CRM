@@ -1032,7 +1032,7 @@ const MIZAN_UI_CSS = `
   body{color:var(--crm-ink);font-family:Inter,"Avenir Next",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
   button,input,select,textarea{font:inherit}button{color:inherit}
   .crm-app{min-height:100vh;background:var(--crm-paper);color:var(--crm-ink)}
-  .crm-sidebar{position:fixed;inset:0 auto 0 0;width:245px;padding:30px 20px 22px;background:#fff;border-right:1px solid var(--crm-border);display:flex;flex-direction:column;z-index:30}
+  .crm-sidebar{position:fixed;inset:0 auto 0 0;width:245px;padding:30px 20px 22px;background:#fff;display:flex;flex-direction:column;z-index:30}
   .crm-brand{display:flex;align-items:center;gap:11px;padding:0 10px 32px}
   .crm-brand-mark{width:38px;height:38px;display:grid;place-items:center;background:var(--crm-purple);color:#fff;border-radius:13px 13px 13px 4px;font-size:19px;font-weight:900;box-shadow:0 8px 20px rgba(91,66,214,.22)}
   .crm-brand-copy strong{display:block;font-size:19px;letter-spacing:-.04em}.crm-brand-copy span{display:block;margin-top:2px;color:#9d96a4;font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
@@ -3347,7 +3347,7 @@ export default function App() {
       <aside className="crm-sidebar">
         <div className="crm-brand">
           <div className="crm-brand-mark">S</div>
-          <div className="crm-brand-copy"><strong>Sonsuz CRM</strong><span>Öğrenci Yönetimi</span></div>
+          <div className="crm-brand-copy"><strong>Bodrum Sonsuz Sanat</strong><span>ÖĞRENCİ YÖNETİMİ</span></div>
         </div>
         <p className="crm-nav-label">MENÜ</p>
         <nav className="crm-nav">
@@ -3368,7 +3368,6 @@ export default function App() {
         <header className="crm-topbar">
           <div><p className="crm-eyebrow">{viewMeta.eyebrow}</p><h1 className="crm-title">{viewMeta.title}</h1><p className="crm-subtitle">{viewMeta.subtitle}</p></div>
           <div className="crm-header-actions">
-            <button className="crm-secondary" onClick={handleCalendarLinkCopy}>Takvim linki</button>
             <button className="crm-primary" onClick={()=>setShowAdd(true)}>＋ Öğrenci ekle</button>
           </div>
         </header>
