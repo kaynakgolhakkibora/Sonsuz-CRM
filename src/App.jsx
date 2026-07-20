@@ -3276,7 +3276,7 @@ export default function App() {
   ];
   const viewMeta = {
     bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
-    liste:{ eyebrow:"Öğrenci Yönetimi", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
+    liste:{ eyebrow:"ÖĞRENCİ YÖNETİMİ", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
     takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
     gelir:{ eyebrow:"Finansal Görünüm", title:"Gelir raporu", subtitle:"Tahsilatlarını aylık olarak takip et." },
   }[mainTab];
@@ -3347,7 +3347,7 @@ export default function App() {
       <aside className="crm-sidebar">
         <div className="crm-brand">
           <div className="crm-brand-mark">S</div>
-          <div className="crm-brand-copy"><strong>Bodrum Sonsuz Sanat</strong><span>ÖĞRENCİ YÖNETİMİ</span></div>
+          <div className="crm-brand-copy"><strong>Sonsuz Sanat</strong><span>ÖĞRENCİ YÖNETİMİ</span></div>
         </div>
         <p className="crm-nav-label">MENÜ</p>
         <nav className="crm-nav">
