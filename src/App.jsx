@@ -1031,7 +1031,7 @@ const MIZAN_UI_CSS = `
   *{box-sizing:border-box}html,body,#root{margin:0;min-height:100%;background:var(--crm-paper)}
   body{color:var(--crm-ink);font-family:Inter,"Avenir Next",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
   button,input,select,textarea{font:inherit}button{color:inherit}
-  .crm-app{min-height:100vh;background:var(--crm-paper);color:var(--crm-ink)}
+  .crm-app{min-height:100vh;background:#fff;color:var(--crm-ink)}
   .crm-sidebar{position:fixed;inset:0 auto 0 0;width:245px;padding:30px 20px 22px;background:#fff;display:flex;flex-direction:column;z-index:30}
   .crm-brand{display:flex;align-items:center;gap:11px;padding:0 10px 32px}
   .crm-brand-mark{width:38px;height:38px;display:grid;place-items:center;background:var(--crm-purple);color:#fff;border-radius:13px 13px 13px 4px;font-size:19px;font-weight:900;box-shadow:0 8px 20px rgba(91,66,214,.22)}
@@ -1043,7 +1043,7 @@ const MIZAN_UI_CSS = `
   .crm-nav-icon{width:22px;text-align:center;font-size:18px}.crm-nav-badge{margin-left:auto;min-width:20px;padding:3px 6px;border-radius:20px;background:#f2effb;color:var(--crm-purple);font-size:10px;text-align:center}
   .crm-sidebar-bottom{margin-top:auto}.crm-tip{margin:0 3px 18px;padding:15px;background:#f6f2e7;border-radius:14px;color:#7b7466;font-size:11px;line-height:1.5}.crm-tip strong{display:block;margin-bottom:4px;color:#5d5547;font-size:12px}
   .crm-side-action{width:100%;border:1px solid var(--crm-border);background:#fff;border-radius:11px;padding:10px 12px;margin-top:7px;text-align:left;font-size:11px;font-weight:750;cursor:pointer}.crm-side-action:hover{border-color:#c7bfd6;color:var(--crm-purple)}
-  .crm-content{margin-left:245px;padding:38px clamp(28px,5vw,76px) 76px;max-width:1530px}
+  .crm-content{min-height:100vh;margin-left:245px;padding:38px clamp(28px,5vw,76px) 76px;max-width:1530px;background:var(--crm-paper)}
   .crm-topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px}
   .crm-eyebrow{margin:0 0 8px;color:#9d96a4;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
   .crm-title{margin:0;font-size:clamp(29px,3vw,39px);font-weight:780;letter-spacing:-.045em}.crm-subtitle{margin:7px 0 0;color:var(--crm-muted);font-size:14px}
