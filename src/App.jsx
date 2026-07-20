@@ -1028,11 +1028,11 @@ const SECTION = { ...CARD, padding:"16px 18px", marginBottom:14 };
 
 const MIZAN_UI_CSS = `
   :root{--crm-ink:#211e28;--crm-muted:#77717d;--crm-purple:#5b42d6;--crm-purple-dark:#4933ba;--crm-paper:#f6f4ef;--crm-card:#fff;--crm-border:#e8e4de;--crm-green:#1c9b70;--crm-red:#dc5d51}
-  *{box-sizing:border-box}html,body,#root{margin:0;min-height:100%;background:var(--crm-paper)}
+  *{box-sizing:border-box}html,body,#root{margin:0;min-height:100%}html,body{background:#fff}#root{background:#fff;border:0!important;border-right:0!important;outline:0!important;box-shadow:none!important}
   body{color:var(--crm-ink);font-family:Inter,"Avenir Next",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
   button,input,select,textarea{font:inherit}button{color:inherit}
   .crm-app{min-height:100vh;background:#fff;color:var(--crm-ink)}
-  .crm-sidebar{position:fixed;inset:0 auto 0 0;width:245px;padding:30px 20px 22px;background:#fff;display:flex;flex-direction:column;z-index:30}
+  .crm-sidebar{position:fixed;inset:0 auto 0 0;width:245px;padding:30px 20px 22px;background:#fff;border-right:1px solid var(--crm-border);display:flex;flex-direction:column;z-index:30}
   .crm-brand{display:flex;align-items:center;gap:11px;padding:0 10px 32px}
   .crm-brand-mark{width:38px;height:38px;display:grid;place-items:center;background:var(--crm-purple);color:#fff;border-radius:13px 13px 13px 4px;font-size:19px;font-weight:900;box-shadow:0 8px 20px rgba(91,66,214,.22)}
   .crm-brand-copy strong{display:block;font-size:19px;letter-spacing:-.04em}.crm-brand-copy span{display:block;margin-top:2px;color:#9d96a4;font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
