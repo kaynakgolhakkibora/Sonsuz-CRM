@@ -2517,6 +2517,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [mesajSt, setMesajSt] = useState(null);
   const [mesajInitialKey, setMesajInitialKey] = useState("");
+  const [summaryOpeningId, setSummaryOpeningId] = useState(null);
   const [odemeSt, setÖdemeSt] = useState(null);
   const [odemeKaydetModal, setÖdemeKaydetModal] = useState(null);
   const [odemeKaydetDate, setÖdemeKaydetDate] = useState(new Date().toISOString().split("T")[0]);
@@ -3032,29 +3033,42 @@ export default function App() {
     pop("Ödeme kaydı silindi");
   };
 
-  const handlePaketOzetiGonderildi = async (sid) => {
-    const updated = students.map(s => {
-      if (s.id!==sid) return s;
-      const info = lastCompletedPackageInfo(s);
-      const key = packageSummaryKey(info);
-      if (!info || !key) return s;
-      const logs = (s.package_summary_logs || []).filter(log => log.packageKey !== key);
-      return {
-        ...s,
-        package_summary_logs: [
-          ...logs,
-          {
-            packageKey:key,
-            sentAt:new Date().toISOString().split("T")[0],
-            packageStart:info.startKey,
-            packageEnd:info.endKey,
-          }
-        ]
-      };
-    });
-    setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
-    pop("Paket özeti gönderildi işaretlendi");
+  const handlePaketOzetiAc = async (sid) => {
+    if (summaryOpeningId) return;
+    const student = students.find(s => s.id === sid);
+    if (!student) {
+      pop("Öğrenci kaydı bulunamadı", 5000);
+      return;
+    }
+    const info = lastCompletedPackageInfo(student);
+    const key = packageSummaryKey(info);
+    if (!info || !key) {
+      pop("Paket özeti kaydı oluşturulamadı", 5000);
+      return;
+    }
+    const logs = (student.package_summary_logs || []).filter(log => log.packageKey !== key);
+    const updatedStudent = {
+      ...student,
+      package_summary_logs: [
+        ...logs,
+        {
+          packageKey:key,
+          sentAt:new Date().toISOString().split("T")[0],
+          packageStart:info.startKey,
+          packageEnd:info.endKey,
+        }
+      ]
+    };
+    setSummaryOpeningId(sid);
+    try {
+      const savedStudent = await saveStudent(updatedStudent);
+      openMesaj(savedStudent, "ozet");
+      pop("Paket özeti gönderildi işaretlendi");
+    } catch {
+      // saveStudent kayıt doğrulanamadığında öğrencileri veritabanından yeniden yükler.
+    } finally {
+      setSummaryOpeningId(null);
+    }
   };
 
   const handleDuzenle = async (sid, f) => {
@@ -3433,8 +3447,7 @@ export default function App() {
                         </p>
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                        <button onClick={() => openMesaj(s, "ozet")} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Özeti Aç</button>
-                        {!sent ? <button onClick={() => handlePaketOzetiGonderildi(s.id)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Gönderildi</button> : null}
+                        <button disabled={summaryOpeningId===s.id} onClick={() => handlePaketOzetiAc(s.id)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Özeti Aç</button>
                         <button onClick={() => setÖdemeSt(s)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
                       </div>
                     </div>
