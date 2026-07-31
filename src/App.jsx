@@ -2338,7 +2338,7 @@ function BugünDersleri({ students, onWA, onReminderToggle, onStudentClick }) {
         const sent = lessonReminderSentInfo(student, lesson);
         return (
         <div key={lesson.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #e0f2fe" }}>
-          <div onClick={() => onStudentClick(student)} style={{ cursor:"pointer", flex:1 }}>
+          <div onClick={() => onStudentClick(student)} style={{ cursor:"pointer" }}>
             <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
             <p style={{ margin:"2px 0 0", fontSize:12, color:"#0369a1" }}>{lessonTime(student, lesson)} · {student.instrument}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent ? "Hatırlatma gönderildi" : "Hatırlatma bekliyor"}</p>
@@ -2386,7 +2386,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
             const info = ödemeInfo(s);
             return (
             <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fed7aa" }}>
-              <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer", flex:1 }}>
+              <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer" }}>
                 <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                 <p style={{ margin:"2px 0 0", fontSize:12, color:"#9a3412" }}>{info?.donem || "Yeni dönem"} · {s.instrument} · {studentScheduleLabel(s)}</p>
               </div>
@@ -2407,7 +2407,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
             const geciken = info ? paymentOverdueDays(info.start) : 0;
             return (
               <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fecdd3" }}>
-                <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer", flex:1 }}>
+                <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer" }}>
                   <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                   <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}><strong>{geciken} gün</strong> gecikti</p>
                 </div>
@@ -3425,7 +3425,7 @@ export default function App() {
                   const sent = summarySentInfo(s, info);
                   return (
                     <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
-                      <div onClick={() => setDetailSt(s)} style={{ cursor:"pointer", flex:1 }}>
+                      <div onClick={() => setDetailSt(s)} style={{ cursor:"pointer" }}>
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                         <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Dönem tamamlandı{info?.donem ? " · "+info.donem : ""}</p>
                         <p style={{ margin:"2px 0 0", fontSize:12, color:sent?"#059669":"#c2410c", fontWeight:700 }}>
