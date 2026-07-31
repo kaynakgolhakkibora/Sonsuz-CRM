@@ -2321,7 +2321,7 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
   );
 }
 
-function BugünDersleri({ students, onWA, onReminderToggle, onStudentClick }) {
+function BugünDersleri({ students, onWA, onReminderToggle }) {
   const todayLessons = [];
   students.forEach(s => {
     if (s.frozen) return;
@@ -2338,7 +2338,7 @@ function BugünDersleri({ students, onWA, onReminderToggle, onStudentClick }) {
         const sent = lessonReminderSentInfo(student, lesson);
         return (
         <div key={lesson.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #e0f2fe" }}>
-          <div onClick={() => onStudentClick(student)} style={{ cursor:"pointer", flex:1 }}>
+          <div>
             <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
             <p style={{ margin:"2px 0 0", fontSize:12, color:"#0369a1" }}>{lessonTime(student, lesson)} · {student.instrument}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent ? "Hatırlatma gönderildi" : "Hatırlatma bekliyor"}</p>
@@ -2355,7 +2355,7 @@ function BugünDersleri({ students, onWA, onReminderToggle, onStudentClick }) {
   );
 }
 
-function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
+function BugünÖdemeleri({ students, onÖdemeAl, onMesaj }) {
   const todayMid = midday();
   const [odemeModal, setÖdemeModal] = useState(null);
   const [odemeDate, setÖdemeDate] = useState(new Date().toISOString().split("T")[0]);
@@ -2386,7 +2386,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
             const info = ödemeInfo(s);
             return (
             <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fed7aa" }}>
-              <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer", flex:1 }}>
+              <div>
                 <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                 <p style={{ margin:"2px 0 0", fontSize:12, color:"#9a3412" }}>{info?.donem || "Yeni dönem"} · {s.instrument} · {studentScheduleLabel(s)}</p>
               </div>
@@ -2407,7 +2407,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
             const geciken = info ? paymentOverdueDays(info.start) : 0;
             return (
               <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fecdd3" }}>
-                <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer", flex:1 }}>
+                <div>
                   <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                   <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}><strong>{geciken} gün</strong> gecikti</p>
                 </div>
@@ -3407,7 +3407,7 @@ export default function App() {
                   {dogumGünleri.map(s => {
                     const yaş = new Date().getFullYear() - new Date(s.dogum_tarihi).getFullYear();
                     return (
-                      <div key={s.id} onClick={() => setDetailSt(s)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", cursor:"pointer" }}>
+                      <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0" }}>
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                         <span style={{ fontSize:13, color:"#86198f", fontWeight:600 }}>{yaş} yaş</span>
                       </div>
@@ -3416,7 +3416,7 @@ export default function App() {
                 </div>
               );
             })()}
-            <BugünDersleri students={students} onWA={handleWADers} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} />
+            <BugünDersleri students={students} onWA={handleWADers} onReminderToggle={handleReminderToggle} />
             {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <div style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#7e22ce" }}>Paketi Biten Öğrenciler</p>
@@ -3425,7 +3425,7 @@ export default function App() {
                   const sent = summarySentInfo(s, info);
                   return (
                     <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
-                      <div onClick={() => setDetailSt(s)} style={{ cursor:"pointer", flex:1 }}>
+                      <div>
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                         <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Dönem tamamlandı{info?.donem ? " · "+info.donem : ""}</p>
                         <p style={{ margin:"2px 0 0", fontSize:12, color:sent?"#059669":"#c2410c", fontWeight:700 }}>
@@ -3442,7 +3442,7 @@ export default function App() {
                 })}
               </div>
             ) : null}
-            <BugünÖdemeleri students={students} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
+            <BugünÖdemeleri students={students} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} />
             {students.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isÖdemeBekleyen(s)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
