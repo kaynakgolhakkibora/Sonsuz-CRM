@@ -1672,8 +1672,8 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
   );
 }
 
-function DetailSheet({ student, onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdemeAl, onZamYap, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
-  const [tab, setTab] = useState("takvim");
+function DetailSheet({ student, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdemeAl, onZamYap, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+  const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
   const [showEkDers, setShowEkDers] = useState(false);
@@ -2355,6 +2355,47 @@ function BugünDersleri({ students, onWA, onReminderToggle, onStudentClick }) {
   );
 }
 
+function BekleyenTelafiler({ students, onStudentClick }) {
+  const telafiler = [];
+  students.forEach(student => {
+    (student.telafi_records || []).forEach(record => {
+      if (!record.done) telafiler.push({ student, record });
+    });
+  });
+  telafiler.sort((a,b) => {
+    const parsedA = a.record.expiry ? new Date(a.record.expiry).getTime() : NaN;
+    const parsedB = b.record.expiry ? new Date(b.record.expiry).getTime() : NaN;
+    const aTime = Number.isFinite(parsedA) ? parsedA : Number.MAX_SAFE_INTEGER;
+    const bTime = Number.isFinite(parsedB) ? parsedB : Number.MAX_SAFE_INTEGER;
+    return aTime - bTime || a.student.name.localeCompare(b.student.name, "tr");
+  });
+  if (telafiler.length === 0) return null;
+  return (
+    <div style={{ background:"#eff6ff", border:"1.5px solid #93c5fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+      <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#1d4ed8" }}>Bekleyen Telafiler ({telafiler.length})</p>
+      {telafiler.map(({student, record}, index) => {
+        const kalan = daysLeft(record.expiry);
+        const doldu = kalan !== null && kalan < 0;
+        const acil = !doldu && kalan !== null && kalan <= 7;
+        const renk = doldu ? "#dc2626" : acil ? "#d97706" : "#0284c7";
+        return (
+          <div key={student.id+"-"+record.id} onClick={() => onStudentClick(student)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"9px 0", borderBottom:index<telafiler.length-1?"1px solid #dbeafe":"none", cursor:"pointer" }}>
+            <div>
+              <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
+              <p style={{ margin:"2px 0 0", fontSize:12, color:"#475569" }}>{fmtShort(record.lessonDate)} dersinin telafisi</p>
+              {telafiPlannedAt(record) ? <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Plan: {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p> : null}
+            </div>
+            <div style={{ textAlign:"right", flexShrink:0 }}>
+              <p style={{ margin:"0 0 4px", fontSize:11, color:"#64748b" }}>{record.expiry ? fmtMed(record.expiry) : "Süre belirtilmedi"}</p>
+              <span style={{ display:"inline-block", background:renk, color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:800 }}>{doldu ? "Doldu" : kalan === null ? "Süre yok" : kalan+" gün"}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
   const todayMid = midday();
   const [odemeModal, setÖdemeModal] = useState(null);
@@ -2510,6 +2551,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [actionModal, setActionModal] = useState(null);
   const [detailSt, setDetailSt] = useState(null);
+  const [detailInitialTab, setDetailInitialTab] = useState("takvim");
   const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState("all");
   const [mainTab, setMainTab] = useState("bugün");
@@ -3431,6 +3473,7 @@ export default function App() {
               );
             })()}
             <BugünDersleri students={students} onWA={handleWADers} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} />
+            <BekleyenTelafiler students={students} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
             {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <div style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#7e22ce" }}>Paketi Biten Öğrenciler</p>
@@ -3456,7 +3499,7 @@ export default function App() {
               </div>
             ) : null}
             <BugünÖdemeleri students={students} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {students.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isÖdemeBekleyen(s)) ? (
+            {students.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isÖdemeBekleyen(s)) && !students.some(s=>(s.telafi_records||[]).some(r=>!r.done)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -3574,7 +3617,7 @@ export default function App() {
       </nav>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} onClose={()=>setDetailSt(null)} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {showAdd ? <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
