@@ -6,6 +6,8 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
 const MAX_SAVE_RETRIES = 3;
+const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
+const LIFECYCLE_TRACKING_START = "2026-08-01";
 
 const DAY_IDX = { "Pazartesi":1, "Sali":2, "Carsamba":3, "Persembe":4, "Cuma":5, "Cumartesi":6, "Pazar":0 };
 const TR_DAYS_MAP = { "Pazartesi":"Pazartesi", "Salı":"Sali", "Çarşamba":"Carsamba", "Perşembe":"Persembe", "Cuma":"Cuma", "Cumartesi":"Cumartesi", "Pazar":"Pazar" };
@@ -171,6 +173,31 @@ function daysBetweenDates(from, to) {
 }
 function dateKey(iso) { if (!iso) return ""; return new Date(iso).toISOString().split("T")[0]; }
 function addMonths(iso, n) { const d = iso ? new Date(iso) : new Date(); d.setMonth(d.getMonth() + n); return d.toISOString(); }
+function studentTeacherName(student) { return student?.teacher_name || student?.teacherName || DEFAULT_TEACHER_NAME; }
+function isStudentLeft(student) { return !!(student?.left_at || student?.leftAt); }
+function teacherForDate(student, iso, item = null) {
+  const direct = item?.teacherName || item?.teacher_name;
+  if (direct) return direct;
+  const target = dateKey(iso);
+  const history = [...(student?.teacher_history || [])]
+    .filter(entry => entry?.teacherName && entry?.from && dateKey(entry.from) <= target)
+    .sort((a,b) => dateKey(a.from).localeCompare(dateKey(b.from)));
+  return history.length ? history[history.length-1].teacherName : studentTeacherName(student);
+}
+function withStatusEvent(student, type, at = new Date().toISOString()) {
+  return {
+    ...student,
+    status_history: [
+      ...(student.status_history || []),
+      { id:uid(), type, at }
+    ]
+  };
+}
+function inMonth(iso, monthDate) {
+  if (!iso) return false;
+  const d = new Date(iso);
+  return !isNaN(d.getTime()) && d.getFullYear() === monthDate.getFullYear() && d.getMonth() === monthDate.getMonth();
+}
 const PAYMENT_PACK_SIZE = 4;
 const PACKAGE_LOAD_OPTIONS = [4, 8, 12, 16];
 const PAID_LESSON_STATUSES = ["completed", "noshow", "lastminute"];
@@ -1054,7 +1081,7 @@ const MIZAN_UI_CSS = `
   .crm-loading{min-height:100vh;display:grid;place-items:center;background:var(--crm-paper);text-align:center}.crm-loading-mark{width:50px;height:50px;margin:0 auto 14px;display:grid;place-items:center;border-radius:17px 17px 17px 5px;background:var(--crm-purple);color:#fff;font-size:24px;box-shadow:0 10px 28px rgba(91,66,214,.22)}
   .crm-sheet-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:20px;background:rgba(29,27,36,.52);backdrop-filter:blur(6px)}.crm-sheet{width:min(100%,560px);max-height:calc(100vh - 40px);overflow:hidden;background:#fff;border-radius:22px;box-shadow:0 25px 90px rgba(0,0,0,.22)}.crm-sheet-head{display:flex;justify-content:space-between;align-items:center;padding:20px 23px;border-bottom:1px solid var(--crm-border);background:#fff}.crm-sheet-head strong{display:block;font-size:18px;letter-spacing:-.025em}.crm-sheet-head span{display:block;margin-top:3px;color:#96909b;font-size:12px}.crm-sheet-close{width:34px;height:34px;border:0;border-radius:50%;background:#f4f1ee;color:#746e78;font-size:20px;cursor:pointer}.crm-sheet-body{padding:20px 23px 28px;max-height:calc(100vh - 124px);overflow-y:auto}
   @media(max-width:980px){.crm-content{padding-left:26px;padding-right:26px}.crm-sidebar{width:220px}.crm-content{margin-left:220px}}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(4,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:9px;font-weight:700;padding:5px 1px}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-page [style*="grid-template-columns: repeat(6"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:9px;font-weight:700;padding:5px 1px}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -1477,9 +1504,12 @@ function ShiftSheet({ lesson, student, onClose, onShift, onMoveOne }) {
   );
 }
 
-function DuzenleSheet({ student, onClose, onDuzenle }) {
+function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
+  const currentTeacherId = student.teacher_id || teachers.find(t => t.name === studentTeacherName(student))?.id || "";
   const [f, setF] = useState({
     name: student.name,
+    teacher_id: currentTeacherId,
+    teacher_change_date: new Date().toISOString().split("T")[0],
     phone: student.phone || "",
     veli_adi: student.veli_adi || "",
     dogum_tarihi: student.dogum_tarihi || "",
@@ -1504,6 +1534,15 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
     <Sheet title="Öğrenciyi Düzenle" subtitle={student.name} onClose={onClose}>
       <label style={LBL}>Ad Soyad</label>
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} />
+      <label style={LBL}>Öğretmen</label>
+      <select style={INP} value={f.teacher_id} onChange={e=>s("teacher_id",e.target.value)}>
+        <option value="">Öğretmen seçin</option>
+        {teachers.filter(t => t.active || t.id === currentTeacherId).map(t=><option key={t.id} value={t.id}>{t.name}{t.active ? "" : " (pasif)"}</option>)}
+      </select>
+      {f.teacher_id !== currentTeacherId ? <>
+        <label style={LBL}>Öğretmen Değişiklik Tarihi</label>
+        <input style={INP} type="date" value={f.teacher_change_date} onChange={e=>s("teacher_change_date",e.target.value)} />
+      </> : null}
       <label style={LBL}>Veli Adı</label>
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
       <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
@@ -1539,7 +1578,7 @@ function DuzenleSheet({ student, onClose, onDuzenle }) {
       ))}
       <button onClick={addSlot} style={{ width:"100%", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", marginTop:2 }}>+ Ders günü ekle</button>
       <div style={{ marginTop:16 }}>
-        <Btn bg="#111" onClick={() => { if(f.name.trim()){ onDuzenle(student.id, f); onClose(); } }}>Kaydet</Btn>
+        <Btn bg="#111" onClick={() => { if(f.name.trim() && f.teacher_id){ onDuzenle(student.id, f); onClose(); } }}>Kaydet</Btn>
         <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
       </div>
     </Sheet>
@@ -1672,7 +1711,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
   );
 }
 
-function DetailSheet({ student, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdemeAl, onZamYap, onDelete, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -1694,6 +1733,7 @@ function DetailSheet({ student, initialTab="takvim", onClose, onRecharge, onUndo
   const attStats = attendanceStats(student);
   const currentOrLastInfo = currentPaymentDueInfo(student) || nextPayablePackageInfo(student) || lastCompletedPackageInfo(student);
   const startInfo = lessonStartInfo(student);
+  const left = isStudentLeft(student);
 
   return (
     <>
@@ -1701,10 +1741,11 @@ function DetailSheet({ student, initialTab="takvim", onClose, onRecharge, onUndo
         <div style={SECTION}>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
             <TonePill>{student.instrument}</TonePill>
+            <TonePill tone="special">Öğretmen: {studentTeacherName(student)}</TonePill>
             <TonePill>{studentScheduleLabel(student)}</TonePill>
             <TonePill>{lessonDurationLabel(student)}</TonePill>
             {student.veli_adi ? <TonePill tone="warn">Veli: {student.veli_adi}</TonePill> : null}
-            {student.frozen ? <TonePill tone="info">Dondurulmuş</TonePill> : null}
+            {left ? <TonePill tone="danger">Ayrılan</TonePill> : student.frozen ? <TonePill tone="info">Dondurulmuş</TonePill> : null}
             {isRaiseDue(student) ? <TonePill tone="warn">Zam zamanı</TonePill> : null}
             {ekDersler.length > 0 ? <TonePill tone="special">+{ekDersler.length} ek ders</TonePill> : null}
             {odenmemisEk.length > 0 ? <TonePill tone="warn">{odenmemisEk.length} ödenmemiş ek</TonePill> : null}
@@ -1923,16 +1964,17 @@ function DetailSheet({ student, initialTab="takvim", onClose, onRecharge, onUndo
               <Btn bg="#ef4444" onClick={() => { if(window.confirm("Son yüklenen paket geri alınsın mı?")) { onUndoLastPackage(student.id); onClose(); } }}>Son Paketi Geri Al</Btn>
             </div>
           ) : null}
-          <div style={{ background:student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
-            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:student.frozen?"#1d4ed8":"#6b7280", letterSpacing:1 }}>Öğrenci Durumu</p>
-            <p style={{ margin:"0 0 10px", fontSize:13, color:"#475569" }}>{student.frozen ? "Program dondurulmuş. Öğrenci geri başlayacağı zaman buradan aktif edebilirsin." : "Öğrenci aktif. Uzun süre ara verecekse programı dondurabilirsin."}</p>
+          <div style={{ background:left?"#fff1f2":student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(left?"#fecdd3":student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
+            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:left?"#be123c":student.frozen?"#1d4ed8":"#6b7280", letterSpacing:1 }}>Öğrenci Durumu</p>
+            <p style={{ margin:"0 0 10px", fontSize:13, color:"#475569" }}>{left ? "Öğrenci ayrılmış. Tüm geçmiş ders ve ödeme kayıtları korunuyor." : student.frozen ? "Program dondurulmuş. Öğrenci geri başlayacağı zaman buradan aktif edebilirsin." : "Öğrenci aktif. Uzun süre ara verecekse programı dondurabilirsin."}</p>
             <button onClick={() => {
-              onToggleFreeze(student.id, !student.frozen);
-            }} style={{ width:"100%", background:student.frozen?"#2563eb":"#f59e0b", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>
-              {student.frozen ? "Programı Devam Ettir" : "Programı Dondur"}
+              onToggleFreeze(student.id, left ? false : !student.frozen);
+            }} style={{ width:"100%", background:left||student.frozen?"#2563eb":"#f59e0b", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>
+              {left ? "Öğrenciyi Yeniden Aktif Et" : student.frozen ? "Programı Devam Ettir" : "Programı Dondur"}
             </button>
+            {!left ? <button onClick={() => { if(window.confirm(student.name+" ayrılan öğrenci olarak kaydedilsin mi? Geçmiş kayıtlar korunacaktır.")) onStudentLeft(student.id); }} style={{ width:"100%", marginTop:8, background:"#be123c", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Öğrenci Ayrıldı</button> : null}
           </div>
-          <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name+" silinsin mi?")){ onDelete(student.id); onClose(); } }}>Öğrenciyi Sil</Btn>
+          <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name+" kalıcı olarak silinsin mi? Bu işlem yalnızca hatalı veya mükerrer kayıtlar için kullanılmalıdır.")){ onDelete(student.id); onClose(); } }}>Kalıcı Sil</Btn>
         </div>
       </Sheet>
       {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { onTelafiDone(student.id, id, payload); setTelafiSel(null); }} /> : null}
@@ -1941,14 +1983,15 @@ function DetailSheet({ student, initialTab="takvim", onClose, onRecharge, onUndo
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
-      {showDuzenle ? <DuzenleSheet student={student} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} /> : null}
+      {showDuzenle ? <DuzenleSheet student={student} teachers={teachers} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} /> : null}
     </>
   );
 }
 
-function AddSheet({ onClose, onAdd }) {
+function AddSheet({ teachers, onClose, onAdd }) {
   const todayISO = new Date().toISOString().split("T")[0];
-  const [f, setF] = useState({ name:"", phone:"", veli_adi:"", dogum_tarihi:"", lesson_start_date:"", instrument:"Davul", lessonDuration:45, lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"", last_raise_date:"" });
+  const firstTeacher = teachers.find(t => t.active);
+  const [f, setF] = useState({ name:"", teacher_id:firstTeacher?.id || "", phone:"", veli_adi:"", dogum_tarihi:"", lesson_start_date:todayISO, instrument:"Davul", lessonDuration:45, lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"", last_raise_date:"" });
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const setSlot = (i,k,v) => setF(p=>({
     ...p,
@@ -1967,6 +2010,11 @@ function AddSheet({ onClose, onAdd }) {
     <Sheet title="Yeni Öğrenci" onClose={onClose}>
       <label style={LBL}>Ad Soyad</label>
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Öğrenci adı" />
+      <label style={LBL}>Öğretmen</label>
+      <select style={INP} value={f.teacher_id} onChange={e=>s("teacher_id",e.target.value)}>
+        <option value="">Öğretmen seçin</option>
+        {teachers.filter(t => t.active).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
       <label style={LBL}>Veli Adı</label>
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
       <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
@@ -2002,7 +2050,7 @@ function AddSheet({ onClose, onAdd }) {
       <label style={LBL}>İlk Ders Tarihi</label>
       <input style={INP} type="date" value={f.firstDate} onChange={e=>s("firstDate",e.target.value)} />
       {f.name && previewDates() ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginTop:12, fontSize:12, color:"#166534" }}><strong>Planlanacak dersler:</strong><br />{previewDates()}</div> : null}
-      <div style={{ marginTop:16 }}><Btn bg="#111" onClick={() => { if(f.name.trim()){ onAdd(f); onClose(); } }}>Kaydet</Btn></div>
+      <div style={{ marginTop:16 }}><Btn bg="#111" onClick={() => { if(f.name.trim() && f.teacher_id && f.lesson_start_date){ onAdd(f); onClose(); } }}>Kaydet</Btn></div>
     </Sheet>
   );
 }
@@ -2271,10 +2319,13 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
   const SC = { upcoming:"#3b82f6", completed:"#10b981", telafi:"#8b5cf6", lastminute:"#f97316", noshow:"#ef4444" };
   const lessonsOn = (d) => {
     const res = [];
-    students.forEach(s => s.schedule.forEach(l => {
+    students.forEach(s => {
+      if (isStudentLeft(s)) return;
+      s.schedule.forEach(l => {
       const ld = midday(new Date(l.date));
       if (ld.getTime() === d.getTime()) res.push({s,l});
-    }));
+      });
+    });
     return res.sort((a,b)=>lessonTime(a.s, a.l).localeCompare(lessonTime(b.s, b.l)));
   };
   return (
@@ -2358,6 +2409,7 @@ function BugünDersleri({ students, onWA, onReminderToggle, onStudentClick }) {
 function BekleyenTelafiler({ students, onStudentClick }) {
   const telafiler = [];
   students.forEach(student => {
+    if (isStudentLeft(student)) return;
     (student.telafi_records || []).forEach(record => {
       if (!record.done) telafiler.push({ student, record });
     });
@@ -2478,6 +2530,115 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
   );
 }
 
+function AylikOzet({ students, teachers, onTeacherAdd, onTeacherToggle }) {
+  const [ayOffset, setAyOffset] = useState(0);
+  const [yeniOgretmen, setYeniOgretmen] = useState("");
+  const simdi = new Date();
+  const hedefAy = new Date(simdi.getFullYear(), simdi.getMonth() + ayOffset, 1);
+  const ayAdi = hedefAy.toLocaleDateString("tr-TR", { month:"long", year:"numeric" });
+  const yapilanDersler = [];
+  const ayOdemeleri = [];
+  const donduranIds = new Set();
+  const ayrilanIds = new Set();
+
+  students.forEach(student => {
+    (student.schedule || []).forEach(lesson => {
+      if (lesson.status === "completed" && inMonth(lesson.date, hedefAy)) {
+        yapilanDersler.push({ type:"Normal", teacher:teacherForDate(student, lesson.date, lesson), student:student.name });
+      }
+    });
+    (student.telafi_records || []).forEach(record => {
+      const doneAt = telafiDoneAt(record);
+      if (record.done && record.doneStatus !== "counted" && doneAt && inMonth(doneAt, hedefAy)) {
+        yapilanDersler.push({ type:"Telafi", teacher:teacherForDate(student, doneAt, record), student:student.name });
+      }
+    });
+    (student.ek_dersler || []).forEach(extra => {
+      if (extra.status === "done" && inMonth(extra.date, hedefAy)) {
+        yapilanDersler.push({ type:"Ek Ders", teacher:teacherForDate(student, extra.date, extra), student:student.name });
+      }
+    });
+    (student.odemeler || []).forEach(payment => {
+      if (!inMonth(payment.tarih, hedefAy)) return;
+      const tutar = typeof payment.tutar === "number" ? payment.tutar : (student.ucret || 0);
+      ayOdemeleri.push({ ...payment, tutar, student:student.name });
+    });
+    (student.status_history || []).forEach(event => {
+      if (!inMonth(event.at, hedefAy)) return;
+      if (event.type === "frozen") donduranIds.add(student.id);
+      if (event.type === "left") ayrilanIds.add(student.id);
+    });
+  });
+
+  const yeniKayitlar = students.filter(student => inMonth(student.lesson_start_date || student.lessonStartDate, hedefAy));
+  const toplamGelir = ayOdemeleri.reduce((sum,payment)=>sum+(payment.tutar||0),0);
+  const normalCount = yapilanDersler.filter(x=>x.type==="Normal").length;
+  const telafiCount = yapilanDersler.filter(x=>x.type==="Telafi").length;
+  const ekCount = yapilanDersler.filter(x=>x.type==="Ek Ders").length;
+  const teacherCounts = yapilanDersler.reduce((acc, lesson) => {
+    const name = lesson.teacher || "Öğretmen belirtilmemiş";
+    acc[name] = (acc[name] || 0) + 1;
+    return acc;
+  }, {});
+  const teacherRows = Object.entries(teacherCounts).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],"tr"));
+  const trackingStart = new Date(LIFECYCLE_TRACKING_START+"T00:00:00");
+  const lifecycleKnown = hedefAy.getTime() >= new Date(trackingStart.getFullYear(), trackingStart.getMonth(), 1).getTime();
+  const submitTeacher = async () => {
+    const name = yeniOgretmen.trim();
+    if (!name) return;
+    const saved = await onTeacherAdd(name);
+    if (saved) setYeniOgretmen("");
+  };
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+        <button onClick={()=>setAyOffset(o=>o-1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>‹</button>
+        <div style={{ textAlign:"center" }}>
+          <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111" }}>{ayAdi}</p>
+          {ayOffset!==0 ? <button onClick={()=>setAyOffset(0)} style={{ background:"none", border:"none", fontSize:11, color:"#3b82f6", fontWeight:600, cursor:"pointer", padding:0, marginTop:2 }}>Bu aya dön</button> : null}
+        </div>
+        <button onClick={()=>setAyOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))", gap:8, marginBottom:14 }}>
+        <MiniMetric label="Yapılan Ders" value={yapilanDersler.length} tone="info" />
+        <MiniMetric label="Tahsilat" value={toplamGelir.toLocaleString("tr-TR")+" TL"} tone="good" />
+        <MiniMetric label="Yeni Kayıt" value={yeniKayitlar.length} tone="special" />
+        <MiniMetric label="Donduran" value={lifecycleKnown ? donduranIds.size : "—"} tone="warn" />
+        <MiniMetric label="Ayrılan" value={lifecycleKnown ? ayrilanIds.size : "—"} tone="danger" />
+      </div>
+
+      {!lifecycleKnown ? <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:12, padding:"10px 12px", marginBottom:14 }}><p style={{ margin:0, fontSize:12, color:"#92400e", fontWeight:700 }}>Dondurma ve ayrılma tarihçesi Ağustos 2026 itibarıyla kesin tutulur; önceki aylar tahmin edilmez.</p></div> : null}
+
+      <div style={{ ...SECTION, padding:"15px 16px" }}>
+        <p style={{ margin:"0 0 10px", fontSize:13, fontWeight:800, color:"#111" }}>Ders Dağılımı</p>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
+          <TonePill>{normalCount} normal</TonePill><TonePill tone="info">{telafiCount} telafi</TonePill><TonePill tone="special">{ekCount} ek ders</TonePill>
+        </div>
+        {teacherRows.length === 0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Bu ay yapılmış ders yok.</p> : teacherRows.map(([name,count]) => {
+          const pct = yapilanDersler.length ? Math.round(count / yapilanDersler.length * 100) : 0;
+          return <div key={name} style={{ marginBottom:10 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", gap:12, marginBottom:4 }}><strong style={{ fontSize:13 }}>{name}</strong><span style={{ fontSize:12, color:"#475569", fontWeight:700 }}>{count} ders · %{pct}</span></div>
+            <div style={{ height:7, borderRadius:10, background:"#ede9fe", overflow:"hidden" }}><div style={{ width:pct+"%", height:"100%", background:"#6d28d9", borderRadius:10 }} /></div>
+          </div>;
+        })}
+      </div>
+
+      <div style={{ ...SECTION, padding:"15px 16px" }}>
+        <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:800, color:"#111" }}>Yeni Kayıtlar</p>
+        {yeniKayitlar.length === 0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Bu ay yeni kayıt yok.</p> : yeniKayitlar.map(student=><div key={student.id} style={{ display:"flex", justifyContent:"space-between", gap:10, padding:"7px 0", borderBottom:"1px solid #f1f5f9" }}><strong style={{ fontSize:13 }}>{student.name}</strong><span style={{ fontSize:12, color:"#64748b" }}>{fmtMed(student.lesson_start_date || student.lessonStartDate)} · {studentTeacherName(student)}</span></div>)}
+      </div>
+
+      <div style={{ ...SECTION, padding:"15px 16px" }}>
+        <p style={{ margin:"0 0 10px", fontSize:13, fontWeight:800, color:"#111" }}>Öğretmenler</p>
+        {teachers.map(teacher=><div key={teacher.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f1f5f9" }}><div><strong style={{ fontSize:13 }}>{teacher.name}</strong><span style={{ marginLeft:7, fontSize:11, color:teacher.active?"#059669":"#94a3b8", fontWeight:700 }}>{teacher.active?"Aktif":"Pasif"}</span></div><button onClick={()=>onTeacherToggle(teacher)} style={{ border:"none", borderRadius:8, padding:"6px 9px", background:teacher.active?"#fee2e2":"#dcfce7", color:teacher.active?"#991b1b":"#166534", fontSize:11, fontWeight:800, cursor:"pointer" }}>{teacher.active?"Pasife Al":"Aktif Et"}</button></div>)}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8, marginTop:12 }}><input style={INP} value={yeniOgretmen} onChange={e=>setYeniOgretmen(e.target.value)} placeholder="Yeni öğretmen adı" /><button onClick={submitTeacher} style={{ border:"none", borderRadius:10, padding:"0 14px", background:"#111", color:"#fff", fontWeight:800, cursor:"pointer" }}>Ekle</button></div>
+      </div>
+    </div>
+  );
+}
+
 function GelirRaporu({ students }) {
   const [ayOffset, setAyOffset] = useState(0);
   const simdi = new Date();
@@ -2548,6 +2709,7 @@ export default function App() {
   const [sifreHata, setSifreHata] = useState(false);
   const SIFRE = "sonsuz2024";
   const [students, setStudents] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionModal, setActionModal] = useState(null);
   const [detailSt, setDetailSt] = useState(null);
@@ -2601,7 +2763,16 @@ export default function App() {
     setLoading(false);
   };
 
-  useEffect(() => { loadStudents(); document.title = "Sonsuz Sanat CRM"; }, []);
+  const loadTeachers = async () => {
+    const { data, error } = await supabase.from("teachers").select("*").order("name");
+    if (!error && data) setTeachers(data);
+    if (error) {
+      console.error("Öğretmen listesi yükleme hatası:", error);
+      pop("Öğretmen listesi yüklenemedi. v58 Supabase SQL dosyasını kontrol edin.", 8000);
+    }
+  };
+
+  useEffect(() => { loadStudents(); loadTeachers(); document.title = "Sonsuz Sanat CRM"; }, []);
 
   const studentPayload = (student, recordVersion, writeId) => {
     const slots = getStudentSlots(student);
@@ -2612,6 +2783,9 @@ export default function App() {
       veli_adi: student.veli_adi || "",
       dogum_tarihi: student.dogum_tarihi || "",
       lesson_start_date: student.lesson_start_date || student.lessonStartDate || null,
+      teacher_id: student.teacher_id || null,
+      teacher_name: studentTeacherName(student),
+      teacher_history: student.teacher_history || [],
       ucret: student.ucret || 0,
       last_raise_date: student.last_raise_date || null,
       package_lesson_count: getPackageLessonCount(student),
@@ -2628,6 +2802,8 @@ export default function App() {
       ek_dersler: student.ek_dersler || [],
       package_summary_logs: student.package_summary_logs || [],
       lesson_reminder_logs: student.lesson_reminder_logs || [],
+      status_history: student.status_history || [],
+      left_at: student.left_at || null,
       record_version: recordVersion,
       last_write_id: writeId,
       last_saved_at: new Date().toISOString(),
@@ -2738,7 +2914,8 @@ export default function App() {
           const ac = recs.filter(r=>!r.done).length;
           const frozen = ac>=6 ? true : s.frozen;
           msg = ac>=6 ? "6. telafi - program donduruldu" : ac===5 ? "5. telafi uyarisi" : "Telafi oluşturuldu";
-          return {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(s.schedule, lid, "telafi", note)};
+          const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(s.schedule, lid, "telafi", note)};
+          return frozen && !s.frozen ? withStatusEvent(next, "frozen") : next;
         }
         case "lm-telafi": {
           const rec = mkTelafi(s, lid, note||"Son dakika iptali");
@@ -2746,7 +2923,8 @@ export default function App() {
           const ac = recs.filter(r=>!r.done).length;
           const frozen = ac>=6 ? true : s.frozen;
           msg = ac>=6 ? "6. telafi - program donduruldu" : "Son dakika + telafi kaydedildi";
-          return {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(s.schedule, lid, "lastminute", note||"Son dakika iptali")};
+          const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(s.schedule, lid, "lastminute", note||"Son dakika iptali")};
+          return frozen && !s.frozen ? withStatusEvent(next, "frozen") : next;
         }
         case "lm-notelafi": msg = "Son dakika iptali"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "lastminute", note||"Son dakika iptali")};
         case "noshow": msg = "No-show kaydedildi"; return {...s, no_show:Math.max(0, s.no_show + (oldLesson?.status === "noshow" ? 0 : 1)), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "noshow", note||"Habersiz gelmedi")};
@@ -2783,10 +2961,22 @@ export default function App() {
   };
 
   const handleToggleFreeze = async (sid, frozen) => {
-    const updated = students.map(s => s.id!==sid ? s : { ...s, frozen });
+    const updated = students.map(s => {
+      if (s.id!==sid) return s;
+      const next = { ...s, frozen, left_at:frozen ? (s.left_at || null) : null };
+      return withStatusEvent(next, frozen ? "frozen" : "active");
+    });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
     pop(frozen ? "Program donduruldu" : "Program tekrar aktif edildi");
+  };
+
+  const handleStudentLeft = async (sid) => {
+    const leftAt = new Date().toISOString().split("T")[0];
+    const updated = students.map(s => s.id!==sid ? s : withStatusEvent({ ...s, frozen:true, left_at:leftAt }, "left", leftAt));
+    setStudents(updated);
+    await saveStudent(updated.find(s=>s.id===sid));
+    pop("Öğrenci ayrılan olarak kaydedildi");
   };
 
   const handleTelafiDone = async (sid, tid, payload = {}) => {
@@ -2881,7 +3071,8 @@ export default function App() {
       const parsedCount = parseInt(selectedLessonCount);
       lessonCount = PACKAGE_LOAD_OPTIONS.includes(parsedCount) ? parsedCount : getPreferredPackageLessonCount(s);
       const newLessons = buildScheduleSlots(getStudentSlots(s), lessonCount, from, getLessonDuration(s));
-      return {...s, frozen:false, schedule:[...s.schedule, ...newLessons]};
+      const next = {...s, frozen:false, left_at:null, schedule:[...s.schedule, ...newLessons]};
+      return (s.frozen || isStudentLeft(s)) ? withStatusEvent(next, "active") : next;
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
@@ -2907,10 +3098,13 @@ export default function App() {
     const from = new Date((f.firstDate||new Date().toISOString().split("T")[0])+"T12:00:00");
     const slots = normalizeSlots(f.lessonSlots);
     const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
+    const teacher = teachers.find(t => t.id === f.teacher_id);
+    if (!teacher) { pop("Öğretmen seçilmeden öğrenci eklenemez", 5000); return; }
+    const teacherFrom = f.lesson_start_date || dateKey(from);
     const newStudent = {
       id: uid(), name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"",
-      lesson_start_date: f.lesson_start_date || null, ucret: parseInt(f.ucret)||0, last_raise_date: f.last_raise_date || null, packageLessonCount, package_lesson_count: packageLessonCount, preferredPackageLessonCount: packageLessonCount, preferred_package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, lesson_duration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
-      no_show: 0, frozen: false, odemeler: [], telafi_records: [],
+      lesson_start_date: f.lesson_start_date || null, teacher_id:teacher.id, teacher_name:teacher.name, teacher_history:[{ teacherId:teacher.id, teacherName:teacher.name, from:teacherFrom }], ucret: parseInt(f.ucret)||0, last_raise_date: f.last_raise_date || null, packageLessonCount, package_lesson_count: packageLessonCount, preferredPackageLessonCount: packageLessonCount, preferred_package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, lesson_duration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
+      no_show: 0, frozen: false, left_at:null, status_history:[], odemeler: [], telafi_records: [],
       schedule: buildScheduleSlots(slots, packageLessonCount, from, f.lessonDuration), ek_dersler: [],
     };
     setStudents(p=>[...p, newStudent]);
@@ -3116,6 +3310,8 @@ export default function App() {
   const handleDuzenle = async (sid, f) => {
     const slots = normalizeSlots(f.lessonSlots, f.day, f.time);
     const duration = parseInt(f.lessonDuration)||45;
+    const selectedTeacher = teachers.find(t => t.id === f.teacher_id);
+    if (!selectedTeacher) { pop("Geçerli bir öğretmen seçin", 5000); return; }
     const updated = students.map(s => {
       if (s.id!==sid) return s;
       const schedule = s.schedule || [];
@@ -3163,6 +3359,14 @@ export default function App() {
       return {
         ...s,
         name: f.name,
+        teacher_id: selectedTeacher.id,
+        teacher_name: selectedTeacher.name,
+        teacher_history: (s.teacher_id || teachers.find(t => t.name === studentTeacherName(s))?.id) === selectedTeacher.id
+          ? (s.teacher_history || [])
+          : [
+              ...(s.teacher_history || []).filter(entry => dateKey(entry.from) !== (f.teacher_change_date || new Date().toISOString().split("T")[0])),
+              { teacherId:selectedTeacher.id, teacherName:selectedTeacher.name, from:f.teacher_change_date || new Date().toISOString().split("T")[0] }
+            ].sort((a,b)=>dateKey(a.from).localeCompare(dateKey(b.from))),
         phone: f.phone,
         veli_adi: f.veli_adi||"",
         dogum_tarihi: f.dogum_tarihi||"",
@@ -3306,6 +3510,41 @@ export default function App() {
     }
   };
 
+  const handleTeacherAdd = async (name) => {
+    const cleanName = name.trim();
+    if (!cleanName) return false;
+    if (teachers.some(t => t.name.toLocaleLowerCase("tr-TR") === cleanName.toLocaleLowerCase("tr-TR"))) {
+      pop("Bu öğretmen zaten kayıtlı", 5000);
+      return false;
+    }
+    const { data, error } = await supabase.from("teachers").insert({ name:cleanName, active:true }).select("*").single();
+    if (error || !data?.id) {
+      console.error("Öğretmen ekleme hatası:", error);
+      pop("Öğretmen kaydedilemedi", 6000);
+      return false;
+    }
+    setTeachers(prev => [...prev, data].sort((a,b)=>a.name.localeCompare(b.name,"tr")));
+    pop("Öğretmen eklendi");
+    return true;
+  };
+
+  const handleTeacherToggle = async (teacher) => {
+    if (teacher.active && teachers.filter(t=>t.active).length <= 1) {
+      pop("En az bir aktif öğretmen kalmalıdır", 5000);
+      return;
+    }
+    const nextActive = !teacher.active;
+    const { data, error } = await supabase.from("teachers").update({ active:nextActive }).eq("id",teacher.id).select("*").single();
+    if (error || !data?.id || data.active !== nextActive) {
+      console.error("Öğretmen durumu güncelleme hatası:", error);
+      pop("Öğretmen durumu kaydedilemedi", 6000);
+      await loadTeachers();
+      return;
+    }
+    setTeachers(prev => prev.map(t=>t.id===data.id?data:t));
+    pop(nextActive ? "Öğretmen aktif edildi" : "Öğretmen pasife alındı");
+  };
+
   const isÖdemeBekleyen = (s) => {
     return isPaymentDue(s);
   };
@@ -3315,26 +3554,29 @@ export default function App() {
   const filtered = students.filter(s => {
     if (search.trim() && !s.name.toLowerCase().includes(search.toLowerCase().trim())) return false;
     if (filter==="active") return !s.frozen;
-    if (filter==="frozen") return s.frozen;
+    if (filter==="frozen") return s.frozen && !isStudentLeft(s);
+    if (filter==="left") return isStudentLeft(s);
     if (filter==="telafi") return s.telafi_records.some(r=>!r.done);
     if (filter==="odeme") return isÖdemeBekleyen(s);
     if (filter==="zam") return isRaiseDue(s);
     return true;
   });
 
-  const stats = { total:students.length, active:students.filter(s=>!s.frozen).length, frozen:students.filter(s=>s.frozen).length, telafi:students.filter(s=>s.telafi_records.some(r=>!r.done)).length, odeme:todayPayments.length, zam:raiseDueList.length };
+  const stats = { total:students.length, active:students.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:students.filter(s=>s.frozen && !isStudentLeft(s)).length, left:students.filter(isStudentLeft).length, telafi:students.filter(s=>s.telafi_records.some(r=>!r.done)).length, odeme:todayPayments.length, zam:raiseDueList.length };
   const telafiWarnList = students.filter(s => s.telafi_records.filter(r=>!r.done).length===5 && !s.frozen);
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:"♙", badge:stats.active },
     { key:"takvim", label:"Takvim", icon:"□" },
     { key:"gelir", label:"Gelir", icon:"↗" },
+    { key:"ozet", label:"Özet", icon:"◎" },
   ];
   const viewMeta = {
     bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
     liste:{ eyebrow:"ÖĞRENCİ YÖNETİMİ", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
     takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
     gelir:{ eyebrow:"Finansal Görünüm", title:"Gelir raporu", subtitle:"Tahsilatlarını aylık olarak takip et." },
+    ozet:{ eyebrow:"AYLIK YÖNETİM", title:"Kurum özeti", subtitle:"Ders, gelir, kayıt, öğrenci durumu ve öğretmen dağılımını ay ay izle." },
   }[mainTab];
 
   if (!giris) {
@@ -3452,6 +3694,7 @@ export default function App() {
               const bugün = new Date();
               const bugünMD = (bugün.getMonth()+1)+"-"+bugün.getDate();
               const dogumGünleri = students.filter(s => {
+                if (isStudentLeft(s)) return false;
                 if (!s.dogum_tarihi) return false;
                 const d = new Date(s.dogum_tarihi);
                 return (d.getMonth()+1)+"-"+d.getDate() === bugünMD;
@@ -3499,7 +3742,7 @@ export default function App() {
               </div>
             ) : null}
             <BugünÖdemeleri students={students} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {students.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isÖdemeBekleyen(s)) && !students.some(s=>(s.telafi_records||[]).some(r=>!r.done)) ? (
+            {students.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isÖdemeBekleyen(s)) && !students.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(r=>!r.done)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -3510,6 +3753,7 @@ export default function App() {
 
         {mainTab === "takvim" ? <WeekCal students={students} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} /> : null}
         {mainTab === "gelir" ? <GelirRaporu students={students} /> : null}
+        {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
         {mainTab === "liste" ? (
           <div>
             {telafiWarnList.length > 0 ? (
@@ -3524,11 +3768,12 @@ export default function App() {
                 {raiseDueList.slice(0,5).map(s=>(<p key={s.id} style={{ margin:"4px 0 0", fontSize:13, color:"#9a3412" }}>· {s.name}</p>))}
               </div>
             ) : null}
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8, marginBottom:14 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8, marginBottom:14 }}>
               {[
                 { key:"all", label:"Toplam", val:stats.total, bg:"#fff", color:"#111" },
                 { key:"active", label:"Aktif", val:stats.active, bg:"#ecfdf5", color:"#059669" },
                 { key:"frozen", label:"Donuk", val:stats.frozen, bg:"#eff6ff", color:"#3b82f6" },
+                { key:"left", label:"Ayrılan", val:stats.left, bg:stats.left>0?"#fff1f2":"#f9fafb", color:stats.left>0?"#be123c":"#999" },
                 { key:"telafi", label:"Telafi", val:stats.telafi, bg:stats.telafi>0?"#faf5ff":"#f9fafb", color:stats.telafi>0?"#9333ea":"#999" },
                 { key:"odeme", label:"Ödeme", val:stats.odeme, bg:stats.odeme>0?"#fff7ed":"#f9fafb", color:stats.odeme>0?"#ea580c":"#999" },
                 { key:"zam", label:"Zam", val:stats.zam, bg:stats.zam>0?"#fff7ed":"#f9fafb", color:stats.zam>0?"#ea580c":"#999" },
@@ -3544,6 +3789,7 @@ export default function App() {
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {filtered.map(s => {
+                const left = isStudentLeft(s);
                 const bal = calcBalance(s.schedule);
                 const np = calcNextPayment(s.schedule);
                 const ac = s.telafi_records.filter(r=>!r.done).length;
@@ -3554,15 +3800,15 @@ export default function App() {
                 const att = attendanceStats(s);
                 const ekCount = (s.ek_dersler||[]).length;
                 const unpaidEkCount = unpaidEkDersler(s).length;
-                const stripe = s.frozen ? "#3b82f6" : warn ? "#f59e0b" : payDue ? "#fb923c" : "#10b981";
+                const stripe = left ? "#be123c" : s.frozen ? "#3b82f6" : warn ? "#f59e0b" : payDue ? "#fb923c" : "#10b981";
                 return (
-                  <div key={s.id} style={{ ...CARD, position:"relative", overflow:"hidden", background:s.frozen?"#f8fbff":"#fff", padding:"14px 16px 14px 20px", border:warn?"1.5px solid #fcd34d":payDue?"1.5px solid #fb923c":s.frozen?"1.5px solid #bfdbfe":"1px solid #e8eaee" }}>
+                  <div key={s.id} style={{ ...CARD, position:"relative", overflow:"hidden", background:left?"#fff7f7":s.frozen?"#f8fbff":"#fff", padding:"14px 16px 14px 20px", border:left?"1.5px solid #fecdd3":warn?"1.5px solid #fcd34d":payDue?"1.5px solid #fb923c":s.frozen?"1.5px solid #bfdbfe":"1px solid #e8eaee" }}>
                     <div style={{ position:"absolute", left:0, top:0, bottom:0, width:5, background:stripe }} />
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                       <div style={{ flex:1, cursor:"pointer" }} onClick={()=>setDetailSt(s)}>
                         <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
                           <p style={{ fontWeight:700, fontSize:15, margin:0, color:"#111" }}>{s.name}</p>
-                          {s.frozen ? <TonePill tone="info">Donuk</TonePill> : null}
+                          {left ? <TonePill tone="danger">Ayrılan</TonePill> : s.frozen ? <TonePill tone="info">Donuk</TonePill> : null}
                           {warn ? <TonePill tone="warn">5/6 Telafi</TonePill> : null}
                           {payDue ? <TonePill tone="warn">Ödeme</TonePill> : null}
                           {isRaiseDue(s) ? <TonePill tone="warn">Zam</TonePill> : null}
@@ -3570,7 +3816,7 @@ export default function App() {
                           {unpaidEkCount>0 ? <TonePill tone="warn">{unpaidEkCount} ek ödenmedi</TonePill> : null}
                         </div>
                         <p style={{ fontSize:12, color:"#64748b", margin:"4px 0 3px", fontWeight:700 }}>
-                          {s.instrument} · {studentScheduleLabel(s)} · {lessonDurationLabel(s)}
+                          {s.instrument} · {studentScheduleLabel(s)} · {lessonDurationLabel(s)} · Öğretmen: {studentTeacherName(s)}
                           {s.ucret ? <span style={{ marginLeft:8, color:"#059669", fontWeight:700 }}>{s.ucret.toLocaleString("tr-TR")} TL</span> : null}
                         </p>
                         {s.veli_adi ? <p style={{ fontSize:11, color:"#888", margin:"0 0 4px" }}>Veli: {s.veli_adi}</p> : null}
@@ -3588,7 +3834,7 @@ export default function App() {
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
                       <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:10, flexShrink:0 }}>
-                        <button onClick={()=>s.frozen ? setDetailSt(s) : setActionModal({student:s,lessonId:null})} style={{ background:s.frozen?"#e0f2fe":"#111", color:s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>{s.frozen ? "Devam" : "İşlem"}</button>
+                        <button onClick={()=>s.frozen ? setDetailSt(s) : setActionModal({student:s,lessonId:null})} style={{ background:left?"#ffe4e6":s.frozen?"#e0f2fe":"#111", color:left?"#be123c":s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>{left ? "Görüntüle" : s.frozen ? "Devam" : "İşlem"}</button>
                         {payDue ? <button onClick={()=>setÖdemeKaydetModal(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:800, cursor:"pointer", flexShrink:0 }}>💳</button> : null}
                         <button onClick={()=>setMesajSt(s)} style={{ background:"#ecfdf5", color:"#166534", border:"1px solid #bbf7d0", borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer", flexShrink:0 }}>💬</button>
                       </div>
@@ -3617,8 +3863,8 @@ export default function App() {
       </nav>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
-      {showAdd ? <AddSheet onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
 
