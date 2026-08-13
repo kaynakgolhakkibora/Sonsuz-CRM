@@ -1401,6 +1401,42 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
   );
 }
 
+function ResumeProgramSheet({ student, onClose, onResume }) {
+  const today = localDateKey();
+  const [startDate, setStartDate] = useState(today);
+  const [saving, setSaving] = useState(false);
+  const upcomingCount = (student.schedule || []).filter(lesson => lesson.status === "upcoming").length;
+  const preview = startDate && upcomingCount
+    ? buildScheduleSlots(getStudentSlots(student), upcomingCount, new Date(startDate+"T12:00:00"), getLessonDuration(student))
+    : [];
+  const firstLesson = preview[0];
+  const submit = async () => {
+    if (!startDate || saving) return;
+    setSaving(true);
+    try {
+      const saved = await onResume(startDate);
+      if (saved !== false) onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Sheet title="Programı Devam Ettir" subtitle={student.name} onClose={onClose}>
+      <p style={{ margin:"0 0 14px", fontSize:13, color:"#475569", lineHeight:1.55 }}>Öğrencinin yeniden derse başlayabileceği tarihi seçin. Bekleyen dersler sabit programındaki ilk uygun gün ve saatten itibaren yeniden sıralanır.</p>
+      <label style={{ ...LBL, marginTop:0 }}>Derse Başlayabileceği Tarih</label>
+      <input style={INP} type="date" min={today} value={startDate} onChange={event=>setStartDate(event.target.value)} />
+      <div style={{ margin:"12px 0 16px", padding:"11px 12px", borderRadius:11, background:"#eff6ff", border:"1px solid #bfdbfe" }}>
+        {firstLesson ? <>
+          <p style={{ margin:0, fontSize:12, color:"#1e3a8a", fontWeight:800 }}>İlk ders: {fmtDate(firstLesson.date)} · {firstLesson.time}</p>
+          <p style={{ margin:"4px 0 0", fontSize:11, color:"#475569" }}>{upcomingCount} bekleyen ders yeni tarihlere taşınacak. Geçmiş dersler değişmeyecek.</p>
+        </> : <p style={{ margin:0, fontSize:12, color:"#475569" }}>Bekleyen ders bulunmuyor; öğrenci yalnızca aktif duruma alınacak.</p>}
+      </div>
+      <button disabled={saving || !startDate} onClick={submit} style={{ width:"100%", display:"block", marginBottom:8, border:"none", borderRadius:14, padding:"13px 16px", background:"#2563eb", color:"#fff", fontWeight:700, fontSize:14, cursor:saving?"wait":"pointer", opacity:saving?.7:1, fontFamily:"inherit" }}>{saving ? "Kaydediliyor..." : "Programı Devam Ettir"}</button>
+      <Btn bg="#111" outline onClick={onClose}>Vazgeç</Btn>
+    </Sheet>
+  );
+}
+
 function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
   const plannedAt = telafiPlannedAt(record);
   const plannedDate = plannedAt ? dateKey(plannedAt) : new Date().toISOString().split("T")[0];
@@ -1768,6 +1804,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
   const [showOdemeAl, setShowOdemeAl] = useState(false);
   const [showPaketYukle, setShowPaketYukle] = useState(false);
   const [showZam, setShowZam] = useState(false);
+  const [showResumeProgram, setShowResumeProgram] = useState(false);
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
@@ -2016,7 +2053,8 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
             <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:left?"#be123c":student.frozen?"#1d4ed8":"#6b7280", letterSpacing:1 }}>Öğrenci Durumu</p>
             <p style={{ margin:"0 0 10px", fontSize:13, color:"#475569" }}>{left ? "Öğrenci ayrılmış. Tüm geçmiş ders ve ödeme kayıtları korunuyor." : student.frozen ? "Program dondurulmuş. Öğrenci geri başlayacağı zaman buradan aktif edebilirsin." : "Öğrenci aktif. Uzun süre ara verecekse programı dondurabilirsin."}</p>
             <button onClick={() => {
-              onToggleFreeze(student.id, left ? false : !student.frozen);
+              if (student.frozen && !left) setShowResumeProgram(true);
+              else onToggleFreeze(student.id, left ? false : true);
             }} style={{ width:"100%", background:left||student.frozen?"#2563eb":"#f59e0b", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>
               {left ? "Öğrenciyi Yeniden Aktif Et" : student.frozen ? "Programı Devam Ettir" : "Programı Dondur"}
             </button>
@@ -2030,6 +2068,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
       {showOdemeAl ? <OdemeAlSheet student={student} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
+      {showResumeProgram ? <ResumeProgramSheet student={student} onClose={() => setShowResumeProgram(false)} onResume={(startDate) => onToggleFreeze(student.id, false, startDate)} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
       {showDuzenle ? <DuzenleSheet student={student} teachers={teachers} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} /> : null}
     </>
@@ -3178,15 +3217,33 @@ export default function App() {
     }
   };
 
-  const handleToggleFreeze = async (sid, frozen) => {
+  const handleToggleFreeze = async (sid, frozen, resumeDate=null) => {
+    const resumeStart = resumeDate ? new Date(resumeDate+"T12:00:00") : null;
+    if (!frozen && resumeDate && (!/^\d{4}-\d{2}-\d{2}$/.test(resumeDate) || isNaN(resumeStart.getTime()) || midday(resumeStart) < midday())) {
+      pop("Geçerli bir başlangıç tarihi seçin", 5000);
+      return false;
+    }
     const updated = students.map(s => {
       if (s.id!==sid) return s;
-      const next = { ...s, frozen, left_at:frozen ? (s.left_at || null) : null };
+      let nextSchedule = s.schedule || [];
+      if (!frozen && resumeDate) {
+        const upcomingLessons = [...nextSchedule].filter(lesson=>lesson.status==="upcoming").sort((a,b)=>new Date(a.date)-new Date(b.date));
+        const fixedLessons = nextSchedule.filter(lesson=>lesson.status!=="upcoming");
+        const plannedDates = buildScheduleSlots(getStudentSlots(s), upcomingLessons.length, resumeStart, getLessonDuration(s));
+        const movedUpcoming = upcomingLessons.map((lesson,index) => {
+          const planned = plannedDates[index];
+          return planned ? { ...lesson, date:planned.date, day:planned.day, time:planned.time } : lesson;
+        });
+        nextSchedule = [...fixedLessons, ...movedUpcoming].sort((a,b)=>new Date(a.date)-new Date(b.date));
+      }
+      const next = { ...s, frozen, left_at:frozen ? (s.left_at || null) : null, schedule:nextSchedule };
       return withStatusEvent(next, frozen ? "frozen" : "active");
     });
     setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
-    pop(frozen ? "Program donduruldu" : "Program tekrar aktif edildi");
+    const savedStudent = await saveStudent(updated.find(s=>s.id===sid));
+    const firstUpcoming = [...(savedStudent.schedule||[])].filter(lesson=>lesson.status==="upcoming").sort((a,b)=>new Date(a.date)-new Date(b.date))[0];
+    pop(frozen ? "Program donduruldu" : firstUpcoming ? "Program devam ettirildi · İlk ders "+fmtShort(firstUpcoming.date)+" "+lessonTime(savedStudent, firstUpcoming) : "Program tekrar aktif edildi");
+    return savedStudent;
   };
 
   const handleStudentLeft = async (sid) => {
