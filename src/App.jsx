@@ -177,6 +177,23 @@ function daysBetweenDates(from, to) {
   return diff > 0 ? diff : 0;
 }
 function dateKey(iso) { if (!iso) return ""; return new Date(iso).toISOString().split("T")[0]; }
+function localDateKey(value = new Date()) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "";
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function expenseAppliesToMonth(expense, targetMonth) {
+  if (!expense || expense.deleted_at || !expense.expense_date) return false;
+  const start = new Date(expense.expense_date+"T00:00:00");
+  if (isNaN(start.getTime())) return false;
+  const monthStart = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 1);
+  const monthEnd = new Date(targetMonth.getFullYear(), targetMonth.getMonth()+1, 0, 23, 59, 59, 999);
+  if (!expense.is_recurring) return start >= monthStart && start <= monthEnd;
+  if (start > monthEnd) return false;
+  if (!expense.recurring_until) return true;
+  const until = new Date(expense.recurring_until+"T23:59:59");
+  return !isNaN(until.getTime()) && until >= monthStart;
+}
 function addMonths(iso, n) { const d = iso ? new Date(iso) : new Date(); d.setMonth(d.getMonth() + n); return d.toISOString(); }
 function studentTeacherName(student) { return student?.teacher_name || student?.teacherName || DEFAULT_TEACHER_NAME; }
 function isStudentLeft(student) { return !!(student?.left_at || student?.leftAt); }
@@ -1042,6 +1059,7 @@ const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
 const FOCUS_SECTIONS = ["Teknik çalışma","Ritim","Nota okuma","Parça çalışması","Doğaçlama","Teori","Tekrar"];
 const PRODUCTIVE_WINDOWS = ["İlk 10 dk","İlk 15 dk","İlk 20 dk","İlk 25 dk","İlk 30 dk","Son 30 dk","Son 25 dk","Son 20 dk","Son 15 dk","Son 10 dk","Ders geneli dengeli"];
+const EXPENSE_CATEGORIES = ["Kira","Elektrik","Su","İnternet","Öğretmen/Personel","Muhasebe/Vergi","Malzeme","Reklam","Diğer"];
 const TIMES = [];
 for (let h=10;h<=19;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
@@ -2657,8 +2675,12 @@ function AylikOzet({ students, teachers, onTeacherAdd, onTeacherToggle }) {
   );
 }
 
-function GelirRaporu({ students }) {
+function FinansRaporu({ students, expenses, onExpenseAdd, onExpenseRemove }) {
   const [ayOffset, setAyOffset] = useState(0);
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [savingExpense, setSavingExpense] = useState(false);
+  const [expenseError, setExpenseError] = useState("");
+  const [expenseForm, setExpenseForm] = useState({ title:"", category:"Kira", amount:"", expense_date:localDateKey(), is_recurring:false });
   const simdi = new Date();
   const hedefAy = new Date(simdi.getFullYear(), simdi.getMonth() + ayOffset, 1);
   const ayAdi = hedefAy.toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
@@ -2677,6 +2699,43 @@ function GelirRaporu({ students }) {
   const toplamGelir = ayÖdemeleri.reduce((sum, o) => sum + o.tutar, 0);
   const paketGeliri = ayÖdemeleri.reduce((sum, o) => sum + (o.paketUcret || 0), 0);
   const ekGeliri = ayÖdemeleri.reduce((sum, o) => sum + (o.ekTutar || 0), 0);
+  const ayGiderleri = (expenses || [])
+    .filter(expense => expenseAppliesToMonth(expense, hedefAy))
+    .sort((a,b) => String(a.expense_date).localeCompare(String(b.expense_date)) || a.title.localeCompare(b.title, "tr"));
+  const toplamGider = ayGiderleri.reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+  const netKar = toplamGelir - toplamGider;
+  const hedefAyBaslangici = new Date(hedefAy.getFullYear(), hedefAy.getMonth(), 1);
+  const buAyBaslangici = new Date(simdi.getFullYear(), simdi.getMonth(), 1);
+
+  const openExpenseForm = () => {
+    const sameMonth = hedefAy.getFullYear() === simdi.getFullYear() && hedefAy.getMonth() === simdi.getMonth();
+    setExpenseForm({ title:"", category:"Kira", amount:"", expense_date:sameMonth ? localDateKey(simdi) : localDateKey(hedefAy), is_recurring:false });
+    setExpenseError("");
+    setShowExpenseForm(true);
+  };
+
+  const submitExpense = async () => {
+    const amount = Number(String(expenseForm.amount).replace(",","."));
+    if (!expenseForm.title.trim() || !expenseForm.expense_date || !Number.isFinite(amount) || amount <= 0) {
+      setExpenseError("Gider adı, tarih ve sıfırdan büyük tutar girin.");
+      return;
+    }
+    setExpenseError("");
+    setSavingExpense(true);
+    const saved = await onExpenseAdd({ ...expenseForm, title:expenseForm.title.trim(), amount });
+    setSavingExpense(false);
+    if (saved) setShowExpenseForm(false);
+  };
+
+  const removeExpense = async expense => {
+    const recurring = !!expense.is_recurring;
+    const message = recurring
+      ? `${expense.title} sabit gideri ${ayAdi} ayından itibaren durdurulsun mu? Önceki aylar korunur.`
+      : `${expense.title} gideri listeden kaldırılsın mı? Kayıt veritabanında geçmiş olarak korunur.`;
+    if (!window.confirm(message)) return;
+    await onExpenseRemove(expense, hedefAy);
+  };
+
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
@@ -2687,11 +2746,25 @@ function GelirRaporu({ students }) {
         </div>
         <button onClick={()=>setAyOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
       </div>
-      <div style={{ background:"linear-gradient(135deg, #059669, #10b981)", borderRadius:18, padding:"20px", marginBottom:14, color:"#fff" }}>
-        <p style={{ margin:0, fontSize:12, opacity:0.85, fontWeight:600, letterSpacing:1 }}>Toplam Tahsilat</p>
-        <p style={{ margin:"6px 0 0", fontSize:34, fontWeight:800 }}>{toplamGelir.toLocaleString("tr-TR")} TL</p>
-        <p style={{ margin:"4px 0 0", fontSize:13, opacity:0.85 }}>{ayÖdemeleri.length} ödeme alındı</p>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:8, marginBottom:14 }}>
+        <div style={{ background:"linear-gradient(135deg, #059669, #10b981)", borderRadius:16, padding:"17px", color:"#fff" }}>
+          <p style={{ margin:0, fontSize:11, opacity:.85, fontWeight:800, letterSpacing:.7 }}>TAHSİLAT</p>
+          <p style={{ margin:"6px 0 0", fontSize:25, fontWeight:900 }}>{toplamGelir.toLocaleString("tr-TR")} TL</p>
+          <p style={{ margin:"4px 0 0", fontSize:11, opacity:.85 }}>{ayÖdemeleri.length} ödeme</p>
+        </div>
+        <div style={{ background:"linear-gradient(135deg, #dc2626, #ef4444)", borderRadius:16, padding:"17px", color:"#fff" }}>
+          <p style={{ margin:0, fontSize:11, opacity:.85, fontWeight:800, letterSpacing:.7 }}>GİDER</p>
+          <p style={{ margin:"6px 0 0", fontSize:25, fontWeight:900 }}>{toplamGider.toLocaleString("tr-TR")} TL</p>
+          <p style={{ margin:"4px 0 0", fontSize:11, opacity:.85 }}>{ayGiderleri.length} gider</p>
+        </div>
+        <div style={{ background:netKar>=0?"linear-gradient(135deg, #4338ca, #7c3aed)":"linear-gradient(135deg, #9f1239, #e11d48)", borderRadius:16, padding:"17px", color:"#fff" }}>
+          <p style={{ margin:0, fontSize:11, opacity:.85, fontWeight:800, letterSpacing:.7 }}>NET KÂR</p>
+          <p style={{ margin:"6px 0 0", fontSize:25, fontWeight:900 }}>{netKar.toLocaleString("tr-TR")} TL</p>
+          <p style={{ margin:"4px 0 0", fontSize:11, opacity:.85 }}>Tahsilat − gider</p>
+        </div>
       </div>
+
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
         <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
           <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, letterSpacing:1 }}>Paket Geliri</p>
@@ -2702,6 +2775,29 @@ function GelirRaporu({ students }) {
           <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#5b21b6" }}>{ekGeliri.toLocaleString("tr-TR")} TL</p>
         </div>
       </div>
+
+      <div style={{ background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 3px rgba(0,0,0,.05)", marginBottom:14 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:12 }}>
+          <div><p style={{ margin:0, fontSize:13, fontWeight:800, color:"#111" }}>Bu Ayki Giderler</p><p style={{ margin:"3px 0 0", fontSize:11, color:"#888" }}>Sabit giderler başlangıç ayından itibaren otomatik görünür.</p></div>
+          <button onClick={openExpenseForm} style={{ background:"#dc2626", color:"#fff", border:"none", borderRadius:9, padding:"7px 10px", fontSize:12, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>＋ Gider Ekle</button>
+        </div>
+        {ayGiderleri.length === 0 ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay gider yok</p> : ayGiderleri.map((expense,index) => {
+          const canStopRecurring = expense.is_recurring && !expense.recurring_until && hedefAyBaslangici >= buAyBaslangici;
+          return (
+            <div key={expense.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"10px 0", borderBottom:index<ayGiderleri.length-1?"1px solid #f0f0f0":"none" }}>
+              <div>
+                <p style={{ margin:0, fontSize:14, fontWeight:750, color:"#111" }}>{expense.title}</p>
+                <p style={{ margin:"2px 0 0", fontSize:11, color:"#888" }}>{expense.category} · {expense.is_recurring ? `Her ay · ${fmtMed(expense.expense_date)} başlangıç` : fmtMed(expense.expense_date)}</p>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                <strong style={{ fontSize:14, color:"#dc2626" }}>{(Number(expense.amount)||0).toLocaleString("tr-TR")} TL</strong>
+                {(!expense.is_recurring || canStopRecurring) ? <button onClick={()=>removeExpense(expense)} style={{ border:"none", borderRadius:8, padding:"5px 7px", background:"#fee2e2", color:"#991b1b", fontSize:10, fontWeight:800, cursor:"pointer" }}>{expense.is_recurring ? "Durdur" : "Kaldır"}</button> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       <div style={{ background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
         <p style={{ margin:"0 0 12px", fontSize:13, fontWeight:700, color:"#111" }}>Bu Ayki Ödemeler</p>
         {ayÖdemeleri.length === 0
@@ -2717,6 +2813,24 @@ function GelirRaporu({ students }) {
             ))
         }
       </div>
+
+      {showExpenseForm ? (
+        <Sheet title="Gider Ekle" subtitle={ayAdi} onClose={()=>{ if(!savingExpense) setShowExpenseForm(false); }}>
+          <label style={LBL}>Gider Adı</label>
+          <input style={INP} value={expenseForm.title} onChange={e=>setExpenseForm(f=>({...f,title:e.target.value}))} placeholder="Örn. Atölye kirası" />
+          <label style={LBL}>Kategori</label>
+          <select style={INP} value={expenseForm.category} onChange={e=>setExpenseForm(f=>({...f,category:e.target.value}))}>{EXPENSE_CATEGORIES.map(category=><option key={category}>{category}</option>)}</select>
+          <label style={LBL}>Tutar</label>
+          <input style={INP} type="number" min="0" step="0.01" value={expenseForm.amount} onChange={e=>setExpenseForm(f=>({...f,amount:e.target.value}))} placeholder="0" />
+          <label style={LBL}>Başlangıç / Gider Tarihi</label>
+          <input style={INP} type="date" value={expenseForm.expense_date} onChange={e=>setExpenseForm(f=>({...f,expense_date:e.target.value}))} />
+          <label style={{ display:"flex", alignItems:"center", gap:9, margin:"4px 0 18px", fontSize:13, fontWeight:750, color:"#374151", cursor:"pointer" }}><input type="checkbox" checked={expenseForm.is_recurring} onChange={e=>setExpenseForm(f=>({...f,is_recurring:e.target.checked}))} /> Her ay otomatik tekrarla</label>
+          {expenseForm.is_recurring ? <p style={{ margin:"-8px 0 16px", padding:"9px 10px", background:"#eff6ff", borderRadius:9, fontSize:11, color:"#1d4ed8", fontWeight:650 }}>Bu gider başlangıç ayından itibaren her ay net kâr hesabına katılır.</p> : null}
+          {expenseError ? <p style={{ margin:"0 0 12px", color:"#b91c1c", fontSize:12, fontWeight:700 }}>{expenseError}</p> : null}
+          <button disabled={savingExpense} onClick={submitExpense} style={{ width:"100%", display:"block", marginBottom:8, border:"none", borderRadius:14, padding:"13px 16px", background:"#dc2626", color:"#fff", fontWeight:700, fontSize:14, cursor:savingExpense?"wait":"pointer", opacity:savingExpense?.7:1, fontFamily:"inherit" }}>{savingExpense ? "Kaydediliyor..." : "Gideri Kaydet"}</button>
+          <Btn bg="#111" outline onClick={()=>{ if(!savingExpense) setShowExpenseForm(false); }}>İptal</Btn>
+        </Sheet>
+      ) : null}
     </div>
   );
 }
@@ -2728,6 +2842,7 @@ export default function App() {
   const SIFRE = "sonsuz2024";
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
+  const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionModal, setActionModal] = useState(null);
   const [detailSt, setDetailSt] = useState(null);
@@ -2790,7 +2905,16 @@ export default function App() {
     }
   };
 
-  useEffect(() => { loadStudents(); loadTeachers(); document.title = "Sonsuz Sanat CRM"; }, []);
+  const loadExpenses = async () => {
+    const { data, error } = await supabase.from("expenses").select("*").order("expense_date");
+    if (!error && data) setExpenses(data);
+    if (error) {
+      console.error("Gider listesi yükleme hatası:", error);
+      pop("Giderler yüklenemedi. v61 Supabase SQL dosyasını çalıştırdığınızdan emin olun.", 8000);
+    }
+  };
+
+  useEffect(() => { loadStudents(); loadTeachers(); loadExpenses(); document.title = "Sonsuz Sanat CRM"; }, []);
 
   const studentPayload = (student, recordVersion, writeId) => {
     const slots = getStudentSlots(student);
@@ -3563,6 +3687,44 @@ export default function App() {
     pop(nextActive ? "Öğretmen aktif edildi" : "Öğretmen pasife alındı");
   };
 
+  const handleExpenseAdd = async expense => {
+    const payload = {
+      title:expense.title,
+      category:expense.category,
+      amount:expense.amount,
+      expense_date:expense.expense_date,
+      is_recurring:!!expense.is_recurring,
+      recurring_until:null,
+      deleted_at:null,
+      updated_at:new Date().toISOString(),
+    };
+    const { data, error } = await supabase.from("expenses").insert(payload).select("*").single();
+    if (error || !data?.id) {
+      console.error("Gider kaydetme hatası:", error);
+      pop("Gider veritabanına kaydedilemedi", 6000);
+      return false;
+    }
+    setExpenses(prev => [...prev, data].sort((a,b)=>String(a.expense_date).localeCompare(String(b.expense_date))));
+    pop(expense.is_recurring ? "Sabit gider kaydedildi" : "Gider kaydedildi");
+    return true;
+  };
+
+  const handleExpenseRemove = async (expense, targetMonth) => {
+    const updatedAt = new Date().toISOString();
+    const changes = expense.is_recurring
+      ? { recurring_until:localDateKey(new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 0)), updated_at:updatedAt }
+      : { deleted_at:updatedAt, updated_at:updatedAt };
+    const { data, error } = await supabase.from("expenses").update(changes).eq("id",expense.id).select("*").single();
+    if (error || !data?.id) {
+      console.error("Gider güncelleme hatası:", error);
+      pop(expense.is_recurring ? "Sabit gider durdurulamadı" : "Gider kaldırılamadı", 6000);
+      return false;
+    }
+    setExpenses(prev => prev.map(item=>item.id===data.id?data:item));
+    pop(expense.is_recurring ? "Sabit gider durduruldu; geçmiş aylar korundu" : "Gider listeden kaldırıldı");
+    return true;
+  };
+
   const isÖdemeBekleyen = (s) => {
     return isPaymentDue(s);
   };
@@ -3586,14 +3748,14 @@ export default function App() {
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:"♙", badge:stats.active },
     { key:"takvim", label:"Takvim", icon:"□" },
-    { key:"gelir", label:"Gelir", icon:"↗" },
+    { key:"gelir", label:"Finans", icon:"↗" },
     { key:"ozet", label:"Özet", icon:"◎" },
   ];
   const viewMeta = {
     bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
     liste:{ eyebrow:"ÖĞRENCİ YÖNETİMİ", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
     takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
-    gelir:{ eyebrow:"Finansal Görünüm", title:"Gelir raporu", subtitle:"Tahsilatlarını aylık olarak takip et." },
+    gelir:{ eyebrow:"Finansal Görünüm", title:"Finans", subtitle:"Tahsilat, gider ve net kârını aylık olarak takip et." },
     ozet:{ eyebrow:"AYLIK YÖNETİM", title:"Kurum özeti", subtitle:"Ders, gelir, kayıt, öğrenci durumu ve öğretmen dağılımını ay ay izle." },
   }[mainTab];
 
@@ -3768,7 +3930,7 @@ export default function App() {
         ) : null}
 
         {mainTab === "takvim" ? <WeekCal students={students} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} /> : null}
-        {mainTab === "gelir" ? <GelirRaporu students={students} /> : null}
+        {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
         {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
         {mainTab === "liste" ? (
           <div>
