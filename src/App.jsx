@@ -1401,7 +1401,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
   );
 }
 
-function TelafiSheet({ record, student, onClose, onSave }) {
+function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
   const plannedAt = telafiPlannedAt(record);
   const plannedDate = plannedAt ? dateKey(plannedAt) : new Date().toISOString().split("T")[0];
   const plannedTime = plannedAt ? timeFromISO(plannedAt) : (student?.time || "10:00");
@@ -1518,6 +1518,7 @@ function TelafiSheet({ record, student, onClose, onSave }) {
                   <Btn bg="#111" outline onClick={() => setStep("main")}>Geri</Btn>
                 </>
               : <>
+                  <Btn bg="#25D366" onClick={() => onPlanMessage(record)}>Plan Mesajını Gönder</Btn>
                   <Btn bg="#10b981" onClick={() => setStep("attended")}>Katıldı</Btn>
                   <Btn bg="#f97316" onClick={() => setStep("counted")}>Yapıldı Say</Btn>
                   <Btn bg="#6366f1" onClick={() => setStep("plan")}>Planı Düzenle</Btn>
@@ -1758,7 +1759,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
   );
 }
 
-function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -2024,7 +2025,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
           <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name+" kalıcı olarak silinsin mi? Bu işlem yalnızca hatalı veya mükerrer kayıtlar için kullanılmalıdır.")){ onDelete(student.id); onClose(); } }}>Kalıcı Sil</Btn>
         </div>
       </Sheet>
-      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { onTelafiDone(student.id, id, payload); setTelafiSel(null); }} /> : null}
+      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { onTelafiDone(student.id, id, payload); setTelafiSel(null); }} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => { onMoveOne(student.id, lid, date, time); setShiftSel(null); }} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
@@ -2119,6 +2120,12 @@ function msgTelafiHakki(student, record) {
   const lessonText = record?.lessonDate ? fmtMed(record.lessonDate)+" tarihli dersiniz" : "Dersiniz";
   const expiryText = record?.expiry ? fmtMed(record.expiry) : "oluşturulduğu tarihten itibaren 30 gün";
   return "Merhaba,\n\n"+lessonText+" için telafi hakkı oluşturulmuştur. Telafi hakkınızı 30 gün içinde, "+expiryText+" tarihine kadar kullanabilirsiniz.\n\nUygunluk oluştuğunda telafi dersi planlaması için sizinle iletişime geçeceğiz.\n\nBodrum Sonsuz Sanat";
+}
+function msgTelafiPlanlandi(student, record) {
+  const plannedAt = telafiPlannedAt(record);
+  const plannedDate = new Date(plannedAt);
+  const dateText = isNaN(plannedDate.getTime()) ? fmtDate(plannedAt) : plannedDate.toLocaleDateString("tr-TR", { day:"numeric", month:"long", weekday:"long" });
+  return "Merhaba,\n\n"+student.name+" için telafi dersimiz "+dateText+" günü saat "+timeFromISO(plannedAt)+" olarak planlanmıştır.\n\nPlanlanan telafi derslerinde yeniden gün ve saat değişikliği yapılamamaktadır. Belirtilen tarih ve saatte katılımınızı rica ederiz.\n\nBilginize, iyi günler.\n\nBodrum Sonsuz Sanat";
 }
 function packageLessonsText(student, info) {
   if (!info) return "";
@@ -2297,6 +2304,26 @@ function TelafiHakkiMesajSheet({ student, record, onClose, onSent }) {
         <p style={{ margin:0, fontSize:12, color:"#1e3a8a", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
       </div>
       <p style={{ margin:"0 0 12px", fontSize:12, color:"#64748b" }}>Telafi hakkı veritabanına kaydedildi. Mesajı şimdi veliye gönderebilirsiniz.</p>
+      <Btn bg="#25D366" onClick={send}>{student.phone ? "WhatsApp'tan Gönder" : "Mesajı Kopyala"}</Btn>
+      <Btn bg="#111" outline onClick={onClose}>Şimdi Değil</Btn>
+    </Sheet>
+  );
+}
+
+function TelafiPlanMesajSheet({ student, record, onClose, onSent }) {
+  const text = msgTelafiPlanlandi(student, record);
+  const send = async () => {
+    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
+    else await navigator.clipboard.writeText(text);
+    await onSent(phone ? "whatsapp" : "copied");
+  };
+  return (
+    <Sheet title="Telafi Planını Bildir" subtitle={student.name+" · "+fmtDate(telafiPlannedAt(record))+" · "+timeFromISO(telafiPlannedAt(record))} onClose={onClose}>
+      <div style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
+        <p style={{ margin:0, fontSize:12, color:"#581c87", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
+      </div>
+      <p style={{ margin:"0 0 12px", fontSize:12, color:"#64748b" }}>Telafi günü ve saati veritabanına kaydedildi. Plan bilgisini şimdi veliye gönderebilirsiniz.</p>
       <Btn bg="#25D366" onClick={send}>{student.phone ? "WhatsApp'tan Gönder" : "Mesajı Kopyala"}</Btn>
       <Btn bg="#111" outline onClick={onClose}>Şimdi Değil</Btn>
     </Sheet>
@@ -2888,6 +2915,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [actionModal, setActionModal] = useState(null);
   const [telafiMessagePrompt, setTelafiMessagePrompt] = useState(null);
+  const [telafiPlanMessagePrompt, setTelafiPlanMessagePrompt] = useState(null);
   const [detailSt, setDetailSt] = useState(null);
   const [detailInitialTab, setDetailInitialTab] = useState("takvim");
   const [showAdd, setShowAdd] = useState(false);
@@ -3206,8 +3234,12 @@ export default function App() {
       })
     });
     setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
+    const savedStudent = await saveStudent(updated.find(s=>s.id===sid));
     pop(action === "plan" ? "Telafi planlandı" : "Telafi yapıldı");
+    if (action === "plan") {
+      const plannedRecord = (savedStudent.telafi_records || []).find(record => record.id === tid);
+      if (plannedRecord?.plannedAt) setTelafiPlanMessagePrompt({ student:savedStudent, record:plannedRecord });
+    }
   };
 
   const handleShift = async (sid, fromLid, days) => {
@@ -4098,7 +4130,8 @@ export default function App() {
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
