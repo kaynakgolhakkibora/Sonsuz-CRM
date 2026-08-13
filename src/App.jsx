@@ -158,6 +158,11 @@ function uid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, 
 function addDays(iso, n) { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString(); }
 function expiry30() { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().split("T")[0]; }
 function daysLeft(iso) { if (!iso) return null; return Math.ceil((new Date(iso) - new Date()) / 86400000); }
+function isCurrentTelafi(record) {
+  if (!record || record.done) return false;
+  const remaining = daysLeft(record.expiry);
+  return remaining === null || !Number.isFinite(remaining) || remaining >= 0;
+}
 function fmtDate(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { weekday:"short", day:"numeric", month:"long" }); }
 function fmtMed(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { day:"numeric", month:"long" }); }
 function fmtShort(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { day:"numeric", month:"short" }); }
@@ -1048,6 +1053,24 @@ function StatusPill({ status }) {
   const M = { upcoming:{label:"Planlandı",bg:"#f3f4f6",color:"#6b7280"}, completed:{label:"Katıldı",bg:"#d1fae5",color:"#065f46"}, noshow:{label:"No-Show",bg:"#fee2e2",color:"#991b1b"}, lastminute:{label:"Son Dakika",bg:"#ffedd5",color:"#9a3412"}, telafi:{label:"Telafi",bg:"#dbeafe",color:"#1e40af"} };
   const s = M[status] || M.upcoming;
   return <Pill label={s.label} bg={s.bg} color={s.color} />;
+}
+
+function AçılırBugünBölümü({ title, color, children, style }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={style}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+        style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, margin:0, padding:0, background:"transparent", border:"none", color, fontWeight:700, fontSize:13, textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}
+      >
+        <span>{title}</span>
+        <span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open ? <div style={{ marginTop:10 }}>{children}</div> : null}
+    </div>
+  );
 }
 
 const CARD = { background:"#fff", border:"1px solid #e8e4de", borderRadius:18, boxShadow:"0 8px 28px rgba(38,30,48,.055)" };
@@ -2383,8 +2406,7 @@ function BugünDersleri({ students, onWA, onReminderToggle, onStudentClick }) {
   todayLessons.sort((a,b) => lessonTime(a.student, a.lesson).localeCompare(lessonTime(b.student, b.lesson)));
   if (todayLessons.length === 0) return null;
   return (
-    <div style={{ background:"#f0f9ff", border:"1.5px solid #bae6fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-      <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#0369a1" }}>Bugünün Dersleri ({todayLessons.length})</p>
+    <AçılırBugünBölümü title={`Bugünün Dersleri (${todayLessons.length})`} color="#0369a1" style={{ background:"#f0f9ff", border:"1.5px solid #bae6fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
       {todayLessons.map(({student, lesson}) => {
         const sent = lessonReminderSentInfo(student, lesson);
         return (
@@ -2402,7 +2424,7 @@ function BugünDersleri({ students, onWA, onReminderToggle, onStudentClick }) {
           </div>
         </div>
       );})}
-    </div>
+    </AçılırBugünBölümü>
   );
 }
 
@@ -2411,7 +2433,7 @@ function BekleyenTelafiler({ students, onStudentClick }) {
   students.forEach(student => {
     if (isStudentLeft(student)) return;
     (student.telafi_records || []).forEach(record => {
-      if (!record.done) telafiler.push({ student, record });
+      if (isCurrentTelafi(record)) telafiler.push({ student, record });
     });
   });
   telafiler.sort((a,b) => {
@@ -2423,13 +2445,11 @@ function BekleyenTelafiler({ students, onStudentClick }) {
   });
   if (telafiler.length === 0) return null;
   return (
-    <div style={{ background:"#eff6ff", border:"1.5px solid #93c5fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-      <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#1d4ed8" }}>Bekleyen Telafiler ({telafiler.length})</p>
+    <AçılırBugünBölümü title={`Bekleyen Telafiler (${telafiler.length})`} color="#1d4ed8" style={{ background:"#eff6ff", border:"1.5px solid #93c5fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
       {telafiler.map(({student, record}, index) => {
         const kalan = daysLeft(record.expiry);
-        const doldu = kalan !== null && kalan < 0;
-        const acil = !doldu && kalan !== null && kalan <= 7;
-        const renk = doldu ? "#dc2626" : acil ? "#d97706" : "#0284c7";
+        const acil = Number.isFinite(kalan) && kalan <= 7;
+        const renk = acil ? "#d97706" : "#0284c7";
         return (
           <div key={student.id+"-"+record.id} onClick={() => onStudentClick(student)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"9px 0", borderBottom:index<telafiler.length-1?"1px solid #dbeafe":"none", cursor:"pointer" }}>
             <div>
@@ -2439,12 +2459,12 @@ function BekleyenTelafiler({ students, onStudentClick }) {
             </div>
             <div style={{ textAlign:"right", flexShrink:0 }}>
               <p style={{ margin:"0 0 4px", fontSize:11, color:"#64748b" }}>{record.expiry ? fmtMed(record.expiry) : "Süre belirtilmedi"}</p>
-              <span style={{ display:"inline-block", background:renk, color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:800 }}>{doldu ? "Doldu" : kalan === null ? "Süre yok" : kalan+" gün"}</span>
+              <span style={{ display:"inline-block", background:renk, color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:800 }}>{Number.isFinite(kalan) ? kalan+" gün" : "Süre yok"}</span>
             </div>
           </div>
         );
       })}
-    </div>
+    </AçılırBugünBölümü>
   );
 }
 
@@ -2473,8 +2493,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
     <>
     <div style={{ marginBottom:14 }}>
       {bugünÖdeme.length > 0 ? (
-        <div style={{ background:"#fff7ed", border:"1.5px solid #fb923c", borderRadius:14, padding:"12px 16px", marginBottom:10 }}>
-          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#c2410c" }}>Bugünkü Ödemeler ({bugünÖdeme.length})</p>
+        <AçılırBugünBölümü title={`Bugünkü Ödemeler (${bugünÖdeme.length})`} color="#c2410c" style={{ background:"#fff7ed", border:"1.5px solid #fb923c", borderRadius:14, padding:"12px 16px", marginBottom:10 }}>
           {bugünÖdeme.map(s => {
             const info = ödemeInfo(s);
             return (
@@ -2490,11 +2509,10 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
             </div>
             );
           })}
-        </div>
+        </AçılırBugünBölümü>
       ) : null}
       {gecikenler.length > 0 ? (
-        <div style={{ background:"#fff1f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 16px" }}>
-          <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#be123c" }}>Geciken Ödemeler ({gecikenler.length})</p>
+        <AçılırBugünBölümü title={`Geciken Ödemeler (${gecikenler.length})`} color="#be123c" style={{ background:"#fff1f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 16px" }}>
           {gecikenler.map(s => {
             const info = ödemeInfo(s);
             const geciken = info ? paymentOverdueDays(info.start) : 0;
@@ -2513,7 +2531,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
               </div>
             );
           })}
-        </div>
+        </AçılırBugünBölümü>
       ) : null}
     </div>
     {odemeModal ? (
@@ -3701,8 +3719,7 @@ export default function App() {
               });
               if (dogumGünleri.length === 0) return null;
               return (
-                <div style={{ background:"#fdf4ff", border:"1.5px solid #e879f9", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-                  <p style={{ margin:"0 0 8px", fontWeight:700, fontSize:13, color:"#86198f" }}>Bugün Doğum Günü</p>
+                <AçılırBugünBölümü title={`Bugün Doğum Günü (${dogumGünleri.length})`} color="#86198f" style={{ background:"#fdf4ff", border:"1.5px solid #e879f9", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                   {dogumGünleri.map(s => {
                     const yaş = new Date().getFullYear() - new Date(s.dogum_tarihi).getFullYear();
                     return (
@@ -3712,14 +3729,13 @@ export default function App() {
                       </div>
                     );
                   })}
-                </div>
+                </AçılırBugünBölümü>
               );
             })()}
             <BugünDersleri students={students} onWA={handleWADers} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} />
             <BekleyenTelafiler students={students} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
             {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
-              <div style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-                <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#7e22ce" }}>Paketi Biten Öğrenciler</p>
+              <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
                   const info = lastCompletedPackageInfo(s);
                   const sent = summarySentInfo(s, info);
@@ -3739,10 +3755,10 @@ export default function App() {
                     </div>
                   );
                 })}
-              </div>
+              </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={students} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {students.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isÖdemeBekleyen(s)) && !students.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(r=>!r.done)) ? (
+            {students.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isÖdemeBekleyen(s)) && !students.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
