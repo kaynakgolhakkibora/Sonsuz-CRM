@@ -2464,21 +2464,120 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
   const days = Array.from({length:7},(_,i)=>{ const d=new Date(start); d.setDate(start.getDate()+i); return d; });
   const label = fmtMed(days[0].toISOString()) + " - " + fmtMed(days[6].toISOString());
   const todayMid = midday();
-  const SC = { upcoming:"#3b82f6", completed:"#10b981", telafi:"#8b5cf6", lastminute:"#f97316", noshow:"#ef4444" };
-  const lessonsOn = (d) => {
-    const res = [];
-    students.forEach(s => {
-      if (isStudentLeft(s)) return;
-      s.schedule.forEach(l => {
-      const ld = midday(new Date(l.date));
-      if (ld.getTime() === d.getTime()) res.push({s,l});
+  const dayNames = ["Pzt","Sal","Çar","Per","Cum","Cmt","Paz"];
+  const startMinutes = 10 * 60;
+  const endMinutes = 20 * 60;
+  const slotMinutes = 15;
+  const rowCount = (endMinutes - startMinutes) / slotMinutes;
+  const dayKeyToIndex = new Map(days.map((day,index)=>[localDateKey(day), index]));
+  const calendarItems = [];
+  const addItem = item => {
+    const [hour, minute] = String(item.time || "").split(":").map(Number);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return;
+    const row = Math.round(((hour * 60 + minute) - startMinutes) / slotMinutes);
+    if (row < 0 || row >= rowCount) return;
+    const duration = Math.max(15, parseInt(item.duration)||45);
+    calendarItems.push({ ...item, row, span:Math.max(1, Math.min(rowCount-row, Math.ceil(duration/slotMinutes))) });
+  };
+
+  students.forEach(student => {
+    if (student.frozen || isStudentLeft(student)) return;
+    const schedule = student.schedule || [];
+    const packageEnded = calcBalance(schedule) === 0;
+    const scheduleDates = schedule.map(lesson=>new Date(lesson.date)).filter(date=>!isNaN(date.getTime()));
+    const earliestSchedule = scheduleDates.length ? new Date(Math.min(...scheduleDates.map(date=>date.getTime()))) : null;
+    const earliestScheduleWeek = earliestSchedule ? (() => {
+      const date = midday(earliestSchedule);
+      const day = date.getDay();
+      date.setDate(date.getDate() - (day===0 ? 6 : day-1));
+      return date;
+    })() : null;
+    const statedStart = student.lesson_start_date || student.lessonStartDate;
+    const programStart = statedStart ? midday(new Date(statedStart+(/^\d{4}-\d{2}-\d{2}$/.test(statedStart)?"T12:00:00":""))) : (earliestScheduleWeek || todayMid);
+    const actualKeys = new Set();
+
+    schedule.forEach(lesson => {
+      const dayIndex = dayKeyToIndex.get(localDateKey(lesson.date));
+      if (dayIndex === undefined) return;
+      const time = lessonTime(student, lesson);
+      actualKeys.add(dayIndex+"|"+time);
+      addItem({
+        key:"lesson-"+student.id+"-"+(lesson.id || localDateKey(lesson.date)+"-"+time),
+        student,
+        dayIndex,
+        time,
+        duration:getLessonDuration(student, lesson),
+        kind:lesson.status === "telafi" ? "telafi-slot" : "normal",
+        subtitle:lesson.status === "telafi" ? "Telafi hakkı · saat boş" : "",
       });
     });
-    return res.sort((a,b)=>lessonTime(a.s, a.l).localeCompare(lessonTime(b.s, b.l)));
+
+    getStudentSlots(student).forEach((slot,slotIndex) => {
+      const targetDay = slotDayIndex(slot.day);
+      const dayIndex = days.findIndex(day=>day.getDay()===targetDay);
+      if (dayIndex < 0) return;
+      const slotDate = midday(days[dayIndex]);
+      if (slotDate < midday(programStart) || slotDate < todayMid) return;
+      if (actualKeys.has(dayIndex+"|"+slot.time)) return;
+      addItem({
+        key:"slot-"+student.id+"-"+slotIndex+"-"+localDateKey(slotDate),
+        student,
+        dayIndex,
+        time:slot.time,
+        duration:getLessonDuration(student),
+        kind:packageEnded ? "package-ended" : "normal",
+        subtitle:packageEnded ? "Paket bitti · yer korunuyor" : "",
+      });
+    });
+
+    (student.telafi_records || []).forEach(record => {
+      const plannedAt = telafiPlannedAt(record);
+      if (!plannedAt) return;
+      const dayIndex = dayKeyToIndex.get(localDateKey(plannedAt));
+      if (dayIndex === undefined) return;
+      addItem({
+        key:"planned-telafi-"+student.id+"-"+(record.id || plannedAt),
+        student,
+        dayIndex,
+        time:timeFromISO(plannedAt),
+        duration:record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student),
+        kind:"planned-telafi",
+        subtitle:"Planlanmış telafi",
+      });
+    });
+  });
+
+  const groupedItems = Object.values(calendarItems.reduce((groups,item) => {
+    const key = item.dayIndex+"|"+item.row;
+    if (!groups[key]) groups[key] = { key, dayIndex:item.dayIndex, row:item.row, span:item.span, items:[] };
+    groups[key].span = Math.max(groups[key].span, item.span);
+    groups[key].items.push(item);
+    return groups;
+  }, {})).sort((a,b)=>a.dayIndex-b.dayIndex || a.row-b.row);
+
+  const itemColors = {
+    normal:{ background:"#526fd4", border:"#344fae", opacity:1 },
+    "package-ended":{ background:"#43a66c", border:"#267849", opacity:1 },
+    "telafi-slot":{ background:"#526fd4", border:"#344fae", opacity:.28 },
+    "planned-telafi":{ background:"#df8a37", border:"#a85c19", opacity:1 },
   };
   return (
     <div>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+      <style>{`
+        .week-calendar-v66 { overflow:hidden; background:#fff; border:1px solid #e5e7eb; border-radius:14px; }
+        .week-calendar-v66-grid { display:grid; grid-template-columns:48px repeat(7,minmax(0,1fr)); grid-template-rows:48px repeat(${rowCount},14px); width:100%; min-width:0; position:relative; }
+        .week-calendar-v66-event { min-width:0; height:100%; border:0; border-left:4px solid; border-radius:7px; padding:3px 5px; color:#fff; font-family:inherit; text-align:left; overflow:hidden; cursor:pointer; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; gap:3px; }
+        .week-calendar-v66-name,.week-calendar-v66-time { display:block; width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .week-calendar-v66-name { font-size:10px; line-height:1.05; font-weight:800; letter-spacing:-.1px; }
+        .week-calendar-v66-time { font-size:9px; line-height:1; font-weight:700; font-variant-numeric:tabular-nums; }
+        @media (max-width:700px) {
+          .week-calendar-v66-grid { grid-template-columns:42px repeat(7,minmax(0,1fr)); }
+          .week-calendar-v66-event { border-left-width:2px; padding:3px 2px; }
+          .week-calendar-v66-name { font-size:8px; }
+          .week-calendar-v66-time { font-size:7px; }
+        }
+      `}</style>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
         <button onClick={()=>setOffset(o=>o-1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>‹</button>
         <div style={{ textAlign:"center" }}>
           <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#111" }}>{label}</p>
@@ -2486,35 +2585,33 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
         </div>
         <button onClick={()=>setOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
       </div>
-      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-        {days.map((d,i) => {
-          const lessons = lessonsOn(midday(d));
-          const today = d.getTime() === todayMid.getTime();
-          return (
-            <div key={i} style={{ background:today?"#f0f9ff":"#fff", border:today?"1.5px solid #bae6fd":"1px solid #f0f0f0", borderRadius:14, overflow:"hidden" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom:lessons.length?"1px solid #f0f0f0":"none" }}>
-                <div style={{ width:36, height:36, borderRadius:"50%", flexShrink:0, background:today?"#0ea5e9":"#f3f4f6", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:15, color:today?"#fff":"#374151" }}>{d.getDate()}</div>
-                <div>
-                  <p style={{ margin:0, fontWeight:700, fontSize:14, color:today?"#0369a1":"#111" }}>{d.toLocaleDateString("tr-TR",{weekday:"long"})}</p>
-                  <p style={{ margin:0, fontSize:11, color:"#999" }}>{d.toLocaleDateString("tr-TR",{day:"numeric",month:"short"})}{today?" · Bugün":""}</p>
-                </div>
-                <p style={{ margin:"0 0 0 auto", fontSize:12, color:lessons.length?"#666":"#ccc", fontWeight:600 }}>{lessons.length?lessons.length+" ders":"Ders yok"}</p>
-              </div>
-              {lessons.map(({s,l},li) => (
-                <div key={li} onClick={()=>onStudentClick(s)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", borderBottom:li<lessons.length-1?"1px solid #f8f8f8":"none", cursor:"pointer", background:l.status!=="upcoming"?"#fafafa":"transparent" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    <div style={{ width:4, height:36, borderRadius:4, background:SC[l.status]||"#94a3b8", flexShrink:0 }} />
-                    <div>
-                      <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                      <p style={{ margin:"1px 0 0", fontSize:12, color:"#888" }}>{lessonTime(s, l)} · {s.instrument}</p>
-                    </div>
-                  </div>
-                  <StatusPill status={l.status} />
-                </div>
-              ))}
-            </div>
-          );
-        })}
+      <div style={{ display:"flex", gap:14, alignItems:"center", flexWrap:"wrap", padding:"0 2px 9px", color:"#64748b", fontSize:11, fontWeight:700 }}>
+        {[
+          ["#526fd4",1,"Aktif ders"],
+          ["#43a66c",1,"Paket bitti · yer korunuyor"],
+          ["#526fd4",.28,"Telafi hakkı · saat boş"],
+          ["#df8a37",1,"Planlanmış telafi"],
+        ].map(([color,opacity,text])=><span key={text} style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:20, height:10, borderRadius:3, background:color, opacity }} />{text}</span>)}
+      </div>
+      <div className="week-calendar-v66">
+        <div className="week-calendar-v66-grid">
+          <div style={{ gridColumn:1, gridRow:1, background:"#fbfaf9", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", zIndex:2 }} />
+          {days.map((day,index) => {
+            const today = midday(day).getTime() === todayMid.getTime();
+            return <div key={localDateKey(day)} style={{ gridColumn:index+2, gridRow:1, zIndex:2, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2, background:today?"#eff6ff":"#fbfaf9", color:today?"#1d4ed8":"#374151", borderRight:"1px solid #e5e7eb", borderBottom:"1px solid #d1d5db", fontWeight:800, fontSize:11 }}><span>{dayNames[index]}</span><span style={{ color:today?"#2563eb":"#94a3b8", fontSize:10 }}>{day.getDate()} {day.toLocaleDateString("tr-TR",{month:"short"})}</span></div>;
+          })}
+          {Array.from({length:10},(_,hourIndex) => <div key={hourIndex} style={{ gridColumn:1, gridRow:`${hourIndex*4+2} / span 4`, zIndex:2, display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:6, background:"#fbfaf9", color:"#475569", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", fontSize:11, lineHeight:1, fontWeight:800, fontVariantNumeric:"tabular-nums" }}>{String(hourIndex+10).padStart(2,"0")}:00</div>)}
+          {Array.from({length:rowCount},(_,row) => days.map((day,dayIndex) => <div key={dayIndex+"-"+row} style={{ gridColumn:dayIndex+2, gridRow:row+2, zIndex:0, background:midday(day).getTime()===todayMid.getTime()?"#f8fbff":"#fff", borderRight:"1px solid #eef2f7", borderBottom:(row%4===3?"1px solid #d1d5db":"1px solid #f1f5f9") }} />))}
+          {groupedItems.map(group => <div key={group.key} style={{ gridColumn:group.dayIndex+2, gridRow:`${group.row+2} / span ${group.span}`, zIndex:3, display:"flex", gap:2, minWidth:0, padding:"1px 3px" }}>
+            {group.items.map(item => {
+              const colors = itemColors[item.kind] || itemColors.normal;
+              return <button key={item.key} className="week-calendar-v66-event" onClick={()=>onStudentClick(item.student)} style={{ flex:1, background:colors.background, borderLeftColor:colors.border, opacity:colors.opacity }} aria-label={item.student.name+" · "+item.time+(item.subtitle?" · "+item.subtitle:"")}>
+                <span className="week-calendar-v66-name" style={{ fontSize:item.student.name.length>16?8:item.student.name.length>12?9:undefined }}>{item.student.name}</span>
+                <span className="week-calendar-v66-time">{item.time}</span>
+              </button>;
+            })}
+          </div>)}
+        </div>
       </div>
     </div>
   );
