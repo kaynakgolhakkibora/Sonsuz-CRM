@@ -1064,7 +1064,6 @@ function isPaymentDue(student) {
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
 const FOCUS_SECTIONS = ["Teknik çalışma","Ritim","Nota okuma","Parça çalışması","Doğaçlama","Teori","Tekrar"];
-const PRODUCTIVE_WINDOWS = ["İlk 10 dk","İlk 15 dk","İlk 20 dk","İlk 25 dk","İlk 30 dk","Son 30 dk","Son 25 dk","Son 20 dk","Son 15 dk","Son 10 dk","Ders geneli dengeli"];
 const EXPENSE_CATEGORIES = ["Kira","Elektrik","Su","İnternet","Öğretmen/Personel","Muhasebe/Vergi","Malzeme","Reklam","Diğer"];
 const TIMES = [];
 for (let h=10;h<=19;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
@@ -1310,17 +1309,16 @@ const INP = { width:"100%", border:"1px solid #ded9d3", borderRadius:11, padding
 const LBL = { display:"block", fontSize:11, fontWeight:750, color:"#756f7a", letterSpacing:.3, marginBottom:6, marginTop:15 };
 
 function ActionSheet({ student, lessonId, onClose, onAction }) {
-  const [step, setStep] = useState("main");
-  const [note, setNote] = useState("");
-  const [activeMinutes, setActiveMinutes] = useState("");
-  const [focusMinutes, setFocusMinutes] = useState("");
-  const [productiveWindow, setProductiveWindow] = useState(PRODUCTIVE_WINDOWS[0]);
-  const [focusSection, setFocusSection] = useState(FOCUS_SECTIONS[0]);
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
+  const [step, setStep] = useState("main");
+  const [note, setNote] = useState(lesson?.note || "");
+  const [activeMinutes, setActiveMinutes] = useState(lesson?.activeMinutes ?? lesson?.active_minutes ?? "");
+  const [focusMinutes, setFocusMinutes] = useState(lesson?.focusMinutes ?? lesson?.focus_minutes ?? "");
+  const [focusSection, setFocusSection] = useState(lesson?.focusSection || lesson?.focus_section || FOCUS_SECTIONS[0]);
   const activeTelafi = student.telafi_records.filter(r=>!r.done).length;
   const willWarn = activeTelafi === 4;
   const willFreeze = activeTelafi === 5;
-  const reset = (s) => { setNote(""); setStep(s); };
+  const reset = (s) => { setNote(s === "attended" ? (lesson?.note || "") : ""); setStep(s); };
   const act = (a) => onAction(a, note, lessonId || lesson?.id);
 
   const TelafiWarn = () => (
@@ -1337,7 +1335,26 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
           <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:12, padding:"10px 12px", marginBottom:12 }}>
             <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Mevcut durum</p>
             <StatusPill status={lesson.status} />
-            <p style={{ margin:"8px 0 0", fontSize:12, color:"#64748b" }}>Yanlış işaretlendiyse buradan düzeltebilirsin.</p>
+            <div style={{ marginTop:10, borderTop:"1px solid #e2e8f0", paddingTop:9 }}>
+              <p style={{ margin:"0 0 7px", fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Ders Verileri</p>
+              {[
+                ["Ders süresi", getLessonDuration(student, lesson)+" dk"],
+                ["Aktif ders süresi", lesson.activeMinutes ?? lesson.active_minutes, " dk"],
+                ["En uzun odaklanma", lesson.focusMinutes ?? lesson.focus_minutes, " dk"],
+                ["Dersin güçlü bölümü", lesson.focusSection || lesson.focus_section],
+                ["En verimli zaman", lesson.productiveWindow || lesson.productive_window],
+              ].filter(([,value])=>value !== undefined && value !== null && value !== "").map(([label,value,suffix=""]) => (
+                <div key={label} style={{ display:"flex", justifyContent:"space-between", gap:12, marginBottom:5, fontSize:12 }}>
+                  <span style={{ color:"#64748b" }}>{label}</span>
+                  <span style={{ color:"#0f172a", fontWeight:700, textAlign:"right" }}>{value}{suffix}</span>
+                </div>
+              ))}
+              <div style={{ marginTop:7, background:"#fff", border:"1px solid #e2e8f0", borderRadius:9, padding:"8px 9px" }}>
+                <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#94a3b8", letterSpacing:.5 }}>ÖĞRETMEN NOTU</p>
+                <p style={{ margin:"4px 0 0", fontSize:12, color:lesson.note?"#334155":"#94a3b8", whiteSpace:"pre-wrap" }}>{lesson.note || "Bu ders için not girilmemiş."}</p>
+              </div>
+            </div>
+            <p style={{ margin:"9px 0 0", fontSize:12, color:"#64748b" }}>Yanlış işaretlendiyse aşağıdan düzeltebilirsin.</p>
           </div>
         ) : null}
         <Btn bg="#10b981" onClick={() => reset("attended")}>Katıldı</Btn>
@@ -1358,10 +1375,6 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
         <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={activeMinutes} onChange={e=>setActiveMinutes(e.target.value)} placeholder="Örn. 35" />
         <label style={LBL}>En Uzun Odaklanma (dk)</label>
         <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={focusMinutes} onChange={e=>setFocusMinutes(e.target.value)} placeholder="Örn. 12" />
-        <label style={LBL}>En Verimli Zaman</label>
-        <select style={INP} value={productiveWindow} onChange={e=>setProductiveWindow(e.target.value)}>
-          {PRODUCTIVE_WINDOWS.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
         <label style={LBL}>Dersin Güçlü Bölümü</label>
         <select style={INP} value={focusSection} onChange={e=>setFocusSection(e.target.value)}>
           {FOCUS_SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1372,7 +1385,6 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
           note,
           activeMinutes:parseInt(activeMinutes)||0,
           focusMinutes:parseInt(focusMinutes)||0,
-          productiveWindow,
           focusSection,
         }, lessonId || lesson?.id)}>Katılımı Kaydet</Btn>
         <Btn bg="#111" outline onClick={() => reset("main")}>Geri</Btn>
@@ -1449,7 +1461,6 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
   const [doneNote, setDoneNote] = useState("");
   const [activeMinutes, setActiveMinutes] = useState("");
   const [focusMinutes, setFocusMinutes] = useState("");
-  const [productiveWindow, setProductiveWindow] = useState(PRODUCTIVE_WINDOWS[0]);
   const [focusSection, setFocusSection] = useState(FOCUS_SECTIONS[0]);
   const days = daysLeft(record.expiry);
   const expired = days !== null && days < 0;
@@ -1519,10 +1530,6 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
                 <input style={INP} type="number" min={0} max={duration} value={activeMinutes} onChange={e=>setActiveMinutes(e.target.value)} placeholder="Örn. 35" />
                 <label style={LBL}>En Uzun Odaklanma (dk)</label>
                 <input style={INP} type="number" min={0} max={duration} value={focusMinutes} onChange={e=>setFocusMinutes(e.target.value)} placeholder="Örn. 12" />
-                <label style={LBL}>En Verimli Zaman</label>
-                <select style={INP} value={productiveWindow} onChange={e=>setProductiveWindow(e.target.value)}>
-                  {PRODUCTIVE_WINDOWS.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
                 <label style={LBL}>Dersin Güçlü Bölümü</label>
                 <select style={INP} value={focusSection} onChange={e=>setFocusSection(e.target.value)}>
                   {FOCUS_SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1536,7 +1543,6 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
                     doneNote,
                     activeMinutes: parseInt(activeMinutes) || 0,
                     focusMinutes: parseInt(focusMinutes) || 0,
-                    productiveWindow,
                     focusSection,
                   });
                   onClose();
@@ -3155,7 +3161,7 @@ export default function App() {
               note:detail.note || "",
               activeMinutes:detail.activeMinutes || 0,
               focusMinutes:detail.focusMinutes || 0,
-              productiveWindow:detail.productiveWindow || "",
+              productiveWindow:detail.productiveWindow !== undefined ? detail.productiveWindow : (l.productiveWindow || l.productive_window || ""),
               focusSection:detail.focusSection || "",
             } : l),
           };
