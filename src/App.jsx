@@ -1127,7 +1127,7 @@ const MIZAN_UI_CSS = `
   .crm-loading{min-height:100vh;display:grid;place-items:center;background:var(--crm-paper);text-align:center}.crm-loading-mark{width:50px;height:50px;margin:0 auto 14px;display:grid;place-items:center;border-radius:17px 17px 17px 5px;background:var(--crm-purple);color:#fff;font-size:24px;box-shadow:0 10px 28px rgba(91,66,214,.22)}
   .crm-sheet-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:20px;background:rgba(29,27,36,.52);backdrop-filter:blur(6px)}.crm-sheet{width:min(100%,560px);max-height:calc(100vh - 40px);overflow:hidden;background:#fff;border-radius:22px;box-shadow:0 25px 90px rgba(0,0,0,.22)}.crm-sheet-head{display:flex;justify-content:space-between;align-items:center;padding:20px 23px;border-bottom:1px solid var(--crm-border);background:#fff}.crm-sheet-head strong{display:block;font-size:18px;letter-spacing:-.025em}.crm-sheet-head span{display:block;margin-top:3px;color:#96909b;font-size:12px}.crm-sheet-close{width:34px;height:34px;border:0;border-radius:50%;background:#f4f1ee;color:#746e78;font-size:20px;cursor:pointer}.crm-sheet-body{padding:20px 23px 28px;max-height:calc(100vh - 124px);overflow-y:auto}
   @media(max-width:980px){.crm-content{padding-left:26px;padding-right:26px}.crm-sidebar{width:220px}.crm-content{margin-left:220px}}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:9px;font-weight:700;padding:5px 1px}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(6,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:8px;font-weight:700;padding:5px 1px}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -2455,7 +2455,7 @@ function ZamSheet({ student, onClose, onSave }) {
   );
 }
 
-function WeekCal({ students, offset, setOffset, onStudentClick }) {
+function WeekCal({ students, offset, setOffset, onStudentClick, teacherName = "" }) {
   const now = new Date();
   const dow = now.getDay();
   const start = new Date(now);
@@ -2497,6 +2497,7 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
     const actualKeys = new Set();
 
     schedule.forEach(lesson => {
+      if (teacherName && teacherForDate(student, lesson.date, lesson) !== teacherName) return;
       const dayIndex = dayKeyToIndex.get(localDateKey(lesson.date));
       if (dayIndex === undefined) return;
       const time = lessonTime(student, lesson);
@@ -2513,6 +2514,7 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
     });
 
     getStudentSlots(student).forEach((slot,slotIndex) => {
+      if (teacherName && studentTeacherName(student) !== teacherName) return;
       const targetDay = slotDayIndex(slot.day);
       const dayIndex = days.findIndex(day=>day.getDay()===targetDay);
       if (dayIndex < 0) return;
@@ -2533,6 +2535,7 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
     (student.telafi_records || []).forEach(record => {
       const plannedAt = telafiPlannedAt(record);
       if (!plannedAt) return;
+      if (teacherName && teacherForDate(student, plannedAt, record) !== teacherName) return;
       const dayIndex = dayKeyToIndex.get(localDateKey(plannedAt));
       if (dayIndex === undefined) return;
       addItem({
@@ -2613,6 +2616,112 @@ function WeekCal({ students, offset, setOffset, onStudentClick }) {
           </div>)}
         </div>
       </div>
+    </div>
+  );
+}
+
+function studentAge(student) {
+  if (!student?.dogum_tarihi) return null;
+  const birth = new Date(student.dogum_tarihi+(/^\d{4}-\d{2}-\d{2}$/.test(student.dogum_tarihi)?"T12:00:00":""));
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
+  return age >= 0 ? age : null;
+}
+
+function ÖğretmenlerPaneli({ students, teachers, onStudentClick }) {
+  const [selectedTeacherId, setSelectedTeacherId] = useState(null);
+  const [teacherWeekOffset, setTeacherWeekOffset] = useState(0);
+  const [monthOffset, setMonthOffset] = useState(0);
+  const activeTeachers = teachers.filter(teacher=>teacher.active);
+  const selectedTeacher = activeTeachers.find(teacher=>teacher.id===selectedTeacherId) || null;
+  const currentStudentsFor = teacher => students.filter(student => {
+    if (student.frozen || isStudentLeft(student)) return false;
+    if (student.teacher_id) return student.teacher_id === teacher.id;
+    return studentTeacherName(student) === teacher.name;
+  });
+  const lessonCountsFor = (teacher, targetMonth) => {
+    const counts = { normal:0, telafi:0, extra:0 };
+    students.forEach(student => {
+      (student.schedule || []).forEach(lesson => {
+        if (lesson.status === "completed" && inMonth(lesson.date,targetMonth) && teacherForDate(student,lesson.date,lesson) === teacher.name) counts.normal++;
+      });
+      (student.telafi_records || []).forEach(record => {
+        const doneAt = telafiDoneAt(record);
+        if (record.done && record.doneStatus !== "counted" && doneAt && inMonth(doneAt,targetMonth) && teacherForDate(student,doneAt,record) === teacher.name) counts.telafi++;
+      });
+      (student.ek_dersler || []).forEach(extra => {
+        if (extra.status === "done" && inMonth(extra.date,targetMonth) && teacherForDate(student,extra.date,extra) === teacher.name) counts.extra++;
+      });
+    });
+    return { ...counts, total:counts.normal+counts.telafi+counts.extra };
+  };
+  const now = new Date();
+  const currentMonth = new Date(now.getFullYear(),now.getMonth(),1);
+
+  if (!selectedTeacher) {
+    return (
+      <div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))", gap:12 }}>
+          {activeTeachers.map(teacher => {
+            const teacherStudents = currentStudentsFor(teacher);
+            const counts = lessonCountsFor(teacher,currentMonth);
+            return <button key={teacher.id} onClick={()=>{ setSelectedTeacherId(teacher.id); setTeacherWeekOffset(0); setMonthOffset(0); }} style={{ ...CARD, border:"1px solid #e8eaee", padding:"18px", textAlign:"left", cursor:"pointer", fontFamily:"inherit", background:"#fff" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
+                <div><p style={{ margin:0, color:"#111", fontSize:17, fontWeight:850 }}>{teacher.name}</p><p style={{ margin:"5px 0 0", color:"#64748b", fontSize:12, fontWeight:650 }}>{teacherStudents.length} aktif öğrenci · Bu ay {counts.total} ders</p></div>
+                <span style={{ width:34, height:34, borderRadius:12, display:"grid", placeItems:"center", background:"#eeeafd", color:"#6d28d9", fontSize:20, fontWeight:800 }}>›</span>
+              </div>
+            </button>;
+          })}
+        </div>
+        {activeTeachers.length===0 ? <div style={{ textAlign:"center", padding:"48px 20px", color:"#94a3b8" }}><p style={{ fontSize:34, margin:"0 0 8px" }}>♬</p><p style={{ margin:0, fontWeight:700 }}>Aktif öğretmen bulunmuyor</p></div> : null}
+      </div>
+    );
+  }
+
+  const teacherStudents = currentStudentsFor(selectedTeacher).sort((a,b)=>a.name.localeCompare(b.name,"tr"));
+  const targetMonth = new Date(now.getFullYear(),now.getMonth()+monthOffset,1);
+  const monthName = targetMonth.toLocaleDateString("tr-TR",{ month:"long", year:"numeric" });
+  const counts = lessonCountsFor(selectedTeacher,targetMonth);
+  return (
+    <div>
+      <button onClick={()=>setSelectedTeacherId(null)} style={{ border:"none", background:"transparent", color:"#6d28d9", fontWeight:800, fontSize:13, padding:"0 0 12px", cursor:"pointer", fontFamily:"inherit" }}>‹ Öğretmenlere dön</button>
+      <div style={{ ...CARD, padding:"15px 17px", marginBottom:14, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+        <div><p style={{ margin:0, fontSize:18, fontWeight:850, color:"#111" }}>{selectedTeacher.name}</p><p style={{ margin:"4px 0 0", fontSize:12, color:"#64748b", fontWeight:650 }}>{teacherStudents.length} aktif öğrenci</p></div>
+        <TonePill tone="good">Aktif</TonePill>
+      </div>
+
+      <section style={{ marginBottom:20 }}>
+        <p style={{ margin:"0 0 9px", fontSize:13, fontWeight:850, color:"#374151" }}>Haftalık ders takvimi</p>
+        <WeekCal students={students} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} teacherName={selectedTeacher.name} />
+      </section>
+
+      <section style={{ ...CARD, padding:"16px 18px", marginBottom:16 }}>
+        <p style={{ margin:"0 0 10px", fontSize:14, fontWeight:850, color:"#111" }}>Öğrenciler ({teacherStudents.length})</p>
+        {teacherStudents.map(student => {
+          const age = studentAge(student);
+          return <button key={student.id} onClick={()=>onStudentClick(student)} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, padding:"10px 2px", border:"none", borderBottom:"1px solid #eef2f7", background:"transparent", textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}>
+            <strong style={{ color:"#111", fontSize:13 }}>{student.name}</strong>
+            <span style={{ color:"#64748b", fontSize:12, textAlign:"right" }}>{age===null?"Yaş belirtilmemiş":age+" yaş"} · {student.instrument || "Enstrüman belirtilmemiş"} ›</span>
+          </button>;
+        })}
+        {teacherStudents.length===0 ? <p style={{ margin:0, color:"#94a3b8", fontSize:13 }}>Bu öğretmene bağlı aktif öğrenci yok.</p> : null}
+      </section>
+
+      <section style={{ ...CARD, padding:"16px 18px" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+          <button onClick={()=>setMonthOffset(value=>value-1)} style={{ border:"none", borderRadius:8, background:"#f3f4f6", padding:"6px 12px", cursor:"pointer", fontSize:18 }}>‹</button>
+          <div style={{ textAlign:"center" }}><p style={{ margin:0, fontSize:14, fontWeight:800, color:"#111", textTransform:"capitalize" }}>{monthName}</p>{monthOffset!==0?<button onClick={()=>setMonthOffset(0)} style={{ border:"none", background:"transparent", padding:"3px 0 0", color:"#6d28d9", fontSize:11, fontWeight:700, cursor:"pointer" }}>Bu aya dön</button>:null}</div>
+          <button onClick={()=>setMonthOffset(value=>value+1)} style={{ border:"none", borderRadius:8, background:"#f3f4f6", padding:"6px 12px", cursor:"pointer", fontSize:18 }}>›</button>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(105px,1fr))", gap:8 }}>
+          <MiniMetric label="Toplam" value={counts.total} tone="info" />
+          <MiniMetric label="Normal" value={counts.normal} tone="good" />
+          <MiniMetric label="Telafi" value={counts.telafi} tone="special" />
+          <MiniMetric label="Ek Ders" value={counts.extra} tone="warn" />
+        </div>
+      </section>
     </div>
   );
 }
@@ -3995,6 +4104,7 @@ export default function App() {
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:"♙", badge:stats.active },
+    { key:"ogretmenler", label:"Öğretmenler", icon:"♬", badge:teachers.filter(t=>t.active).length },
     { key:"takvim", label:"Takvim", icon:"□" },
     { key:"gelir", label:"Finans", icon:"↗" },
     { key:"ozet", label:"Özet", icon:"◎" },
@@ -4002,6 +4112,7 @@ export default function App() {
   const viewMeta = {
     bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
     liste:{ eyebrow:"ÖĞRENCİ YÖNETİMİ", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
+    ogretmenler:{ eyebrow:"ÖĞRETMEN YÖNETİMİ", title:"Öğretmenler", subtitle:"Öğretmenlerin öğrencilerini, haftalık programını ve aylık derslerini gör." },
     takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
     gelir:{ eyebrow:"Finansal Görünüm", title:"Finans", subtitle:"Tahsilat, gider ve net kârını aylık olarak takip et." },
     ozet:{ eyebrow:"AYLIK YÖNETİM", title:"Kurum özeti", subtitle:"Ders, gelir, kayıt, öğrenci durumu ve öğretmen dağılımını ay ay izle." },
@@ -4178,6 +4289,7 @@ export default function App() {
         ) : null}
 
         {mainTab === "takvim" ? <WeekCal students={students} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} /> : null}
+        {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} onStudentClick={setDetailSt} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
         {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
         {mainTab === "liste" ? (
