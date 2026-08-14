@@ -202,6 +202,7 @@ function expenseAppliesToMonth(expense, targetMonth) {
 function addMonths(iso, n) { const d = iso ? new Date(iso) : new Date(); d.setMonth(d.getMonth() + n); return d.toISOString(); }
 function studentTeacherName(student) { return student?.teacher_name || student?.teacherName || DEFAULT_TEACHER_NAME; }
 function isStudentLeft(student) { return !!(student?.left_at || student?.leftAt); }
+function isStudentDeleted(student) { return (student?.status_history || []).some(event=>event?.type==="deleted"); }
 function teacherForDate(student, iso, item = null) {
   const direct = item?.teacherName || item?.teacher_name;
   if (direct) return direct;
@@ -2114,7 +2115,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
             </button>
             {!left ? <button onClick={() => { if(window.confirm(student.name+" ayrılan öğrenci olarak kaydedilsin mi? Geçmiş kayıtlar korunacaktır.")) onStudentLeft(student.id); }} style={{ width:"100%", marginTop:8, background:"#be123c", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Öğrenci Ayrıldı</button> : null}
           </div>
-          <Btn bg="#ef4444" onClick={() => { if(window.confirm(student.name+" kalıcı olarak silinsin mi? Bu işlem yalnızca hatalı veya mükerrer kayıtlar için kullanılmalıdır.")){ onDelete(student.id); onClose(); } }}>Kalıcı Sil</Btn>
+          <Btn bg="#ef4444" onClick={async() => { if(window.confirm(student.name+" öğrenci ekranlarından kaldırılsın mı? Geçmiş ders ve ödeme kayıtları finans geçmişinde korunacaktır.")){ const deleted=await onDelete(student.id); if(deleted) onClose(); } }}>Öğrenciyi Sil</Btn>
         </div>
       </Sheet>
       {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { onTelafiDone(student.id, id, payload); setTelafiSel(null); }} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} /> : null}
@@ -3698,15 +3699,18 @@ export default function App() {
   };
 
   const handleDelete = async (sid) => {
-    const { error } = await supabase.from("students").delete().eq("id", sid);
-    if (error) {
-      console.error("Silme hatası:", error);
-      pop("Öğrenci silinemedi. Ekran geri yüklendi.", 6000);
-      await loadStudents();
-      return;
+    const source = students.find(student=>student.id===sid);
+    if (!source) return false;
+    const deletedAt = new Date().toISOString();
+    const archived = withStatusEvent({ ...source, frozen:true, left_at:dateKey(deletedAt) }, "deleted", deletedAt);
+    setStudents(prev=>prev.map(student=>student.id===sid?archived:student));
+    try {
+      await saveStudent(archived);
+      pop("Öğrenci silindi; geçmiş ders ve ödemeler korundu");
+      return true;
+    } catch (error) {
+      return false;
     }
-    setStudents(p => p.filter(s => s.id !== sid));
-    pop("Öğrenci silindi");
   };
 
   const handleRecharge = async (sid, odemeDate, selectedLessonCount) => {
@@ -4274,9 +4278,10 @@ export default function App() {
     return isPaymentDue(s);
   };
 
-  const todayPayments = students.filter(isÖdemeBekleyen);
-  const raiseDueList = students.filter(isRaiseDue);
-  const filtered = students.filter(s => {
+  const operationalStudents = students.filter(student=>!isStudentDeleted(student));
+  const todayPayments = operationalStudents.filter(isÖdemeBekleyen);
+  const raiseDueList = operationalStudents.filter(isRaiseDue);
+  const filtered = operationalStudents.filter(s => {
     if (search.trim() && !s.name.toLowerCase().includes(search.toLowerCase().trim())) return false;
     if (filter==="active") return !s.frozen;
     if (filter==="frozen") return s.frozen && !isStudentLeft(s);
@@ -4287,8 +4292,8 @@ export default function App() {
     return true;
   });
 
-  const stats = { total:students.length, active:students.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:students.filter(s=>s.frozen && !isStudentLeft(s)).length, left:students.filter(isStudentLeft).length, telafi:students.filter(s=>s.telafi_records.some(r=>!r.done)).length, odeme:todayPayments.length, zam:raiseDueList.length };
-  const telafiWarnList = students.filter(s => s.telafi_records.filter(r=>!r.done).length===5 && !s.frozen);
+  const stats = { total:operationalStudents.length, active:operationalStudents.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:operationalStudents.filter(s=>s.frozen && !isStudentLeft(s)).length, left:operationalStudents.filter(isStudentLeft).length, telafi:operationalStudents.filter(s=>s.telafi_records.some(r=>!r.done)).length, odeme:todayPayments.length, zam:raiseDueList.length };
+  const telafiWarnList = operationalStudents.filter(s => s.telafi_records.filter(r=>!r.done).length===5 && !s.frozen);
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:<StudentsNavIcon />, badge:stats.active },
@@ -4422,7 +4427,7 @@ export default function App() {
             {(() => {
               const bugün = new Date();
               const bugünMD = (bugün.getMonth()+1)+"-"+bugün.getDate();
-              const dogumGünleri = students.filter(s => {
+              const dogumGünleri = operationalStudents.filter(s => {
                 if (isStudentLeft(s)) return false;
                 if (!s.dogum_tarihi) return false;
                 const d = new Date(s.dogum_tarihi);
@@ -4443,11 +4448,11 @@ export default function App() {
                 </AçılırBugünBölümü>
               );
             })()}
-            <BugünDersleri students={students} onWA={handleWADers} onWATelafi={handleWATelafi} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} onTelafiClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
-            <BekleyenTelafiler students={students} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
-            {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
-              <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-                {students.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
+            <BugünDersleri students={operationalStudents} onWA={handleWADers} onWATelafi={handleWATelafi} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} onTelafiClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
+            <BekleyenTelafiler students={operationalStudents} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
+            {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
+              <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+                {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
                   const info = lastCompletedPackageInfo(s);
                   const sent = summarySentInfo(s, info);
                   return (
@@ -4468,8 +4473,8 @@ export default function App() {
                 })}
               </AçılırBugünBölümü>
             ) : null}
-            <BugünÖdemeleri students={students} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {students.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !students.some(s=>isÖdemeBekleyen(s)) && !students.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
+            {operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -4478,7 +4483,7 @@ export default function App() {
           </div>
         ) : null}
 
-        {mainTab === "takvim" ? <WeekCal students={students} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} /> : null}
+        {mainTab === "takvim" ? <WeekCal students={operationalStudents} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} /> : null}
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} onStudentClick={setDetailSt} /> : null}
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
@@ -4574,7 +4579,7 @@ export default function App() {
               {filtered.length===0 ? (
                 <div style={{ textAlign:"center", padding:"48px 20px", color:"#bbb" }}>
                   <p style={{ fontSize:36 }}>🎵</p>
-                  <p style={{ fontWeight:600, color:"#aaa" }}>{students.length===0 ? "Henüz öğrenci yok" : "Bu filtrede öğrenci yok"}</p>
+                  <p style={{ fontWeight:600, color:"#aaa" }}>{operationalStudents.length===0 ? "Henüz öğrenci yok" : "Bu filtrede öğrenci yok"}</p>
                 </div>
               ) : null}
             </div>
