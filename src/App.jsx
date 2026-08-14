@@ -1123,7 +1123,6 @@ function currentPackageInfoForLesson(student, lesson) {
 }
 
 function packageLessonStatusText(lesson) {
-  if (isToday(lesson.date) && lesson.status === "upcoming") return "Bugünkü ders";
   const m = {
     upcoming: "Planlandı",
     completed: "Katıldı",
@@ -2345,7 +2344,7 @@ function msgDersHatirlatma(student) {
   const nextLesson = todayLesson || student.schedule.find(l => l.status === "upcoming");
   const info = currentPackageInfoForLesson(student, nextLesson);
   const status = packageStatusText(student, info);
-  let msg = "Günaydın :) Bugünkü ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
+  let msg = "Günaydın :) Ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
   if (status) msg += "\n\nMevcut dönem durumu:\n"+status;
   return msg;
 }
@@ -2374,20 +2373,12 @@ function packageLessonsText(student, info) {
     .join("\n");
 }
 
-function msgIlkDersÖdeme(student) {
-  const info = currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
-  const lessons = packageLessonsText(student, info);
-  let msg = "Merhaba,\n\nYeni ders dönemimiz bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\n";
-  if (info) {
-    msg += "Dönem: "+info.donem+"\n";
-    if (lessons) msg += "Planlanan dersler:\n"+lessons+"\n\n";
-  }
-  msg += "İlginiz için teşekkür eder, iyi dersler dileriz.\n\nBodrum Sonsuz Sanat";
-  return msg;
+function msgIlkDersÖdeme() {
+  return "Merhaba,\n\nYeni ders dönemimiz bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\nİlginiz için teşekkür eder, iyi dersler dileriz.\n\nBodrum Sonsuz Sanat";
 }
 
 function msgYeniKayitKurallari() {
-  return "Sonsuz Sanat Ders Süreci Bilgilendirmesi\n\nDerslerimiz haftalık sabit gün ve saatlerde ilerler. Eğitim sürecinde devamlılık ve düzenli katılım büyük önem taşır.\n\nLütfen aşağıdaki kuralları inceleyiniz:\n\nDers İptalleri\n\n• Ders iptallerinin en az 24 saat önceden bildirilmesi gerekir.\n• Her telafi hakkı oluşturulduğu tarihten itibaren 30 gün geçerlidir.\n• Kullanılmayan telafi hakları bir sonraki döneme devredilmez.\n\nDers Günü İptalleri\n\n• Ders günü yapılan iptallerde, eğer iptal sebebi sağlık sorunlarının dışındaysa ders yapılmış sayılır.\n• Derse habersiz gelinmemesi durumunda ders yapılmış sayılır ve telafi hakkı oluşmaz.\n\nTelafi Dersleri\n\n• Telafi dersleri kurumun uygunluk durumuna göre planlanır, uygunluk oluştuğunda tarafınıza bilgi verilir.\n• Telafi derslerinde gün ve saat seçimi yapılamaz.\n\nProgram Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi durumunda size ayrılan gün ve saat, öğrenciye özel olarak korunur.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.\n\nÖdeme Düzeni\n\n• Ödemelerin zamanında yapılması programın devamlılığı açısından önemlidir.\n• Ödeme sürecinin aksaması durumunda program dondurulabilir ve ayrılan gün/saat başka öğrencilere açılabilir.\n\nAmacımız tüm öğrencilerimiz için düzenli, adil ve sürdürülebilir bir eğitim süreci oluşturmaktır.\n\nBodrum Sonsuz Sanat";
+  return "Sonsuz Sanat Ders Süreci Bilgilendirmesi\n\nDerslerimiz haftalık sabit gün ve saatlerde ilerler. Eğitim sürecinde devamlılık ve düzenli katılım büyük önem taşır.\n\nLütfen aşağıdaki kuralları inceleyiniz:\n\nDers İptalleri\n\n• Ders iptallerinin en az 24 saat önceden bildirilmesi gerekir.\n• Her telafi hakkı oluşturulduğu tarihten itibaren 30 gün geçerlidir.\n• Kullanılmayan telafi hakları bir sonraki döneme devredilmez.\n\nDers Günü İptalleri\n\n• Ders günü yapılan iptallerde, eğer iptal sebebi sağlık sorunlarının dışındaysa ders yapılmış sayılır.\n• Derse habersiz gelinmemesi durumunda ders yapılmış sayılır ve telafi hakkı oluşmaz.\n\nTelafi Dersleri\n\n• Telafi dersleri kurumun uygunluk durumuna göre planlanır, uygunluk oluştuğunda tarafınıza bilgi verilir.\n\nProgram Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi durumunda size ayrılan gün ve saat, öğrenciye özel olarak korunur.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.\n\nÖdeme Düzeni\n\n• Ödemelerin zamanında yapılması programın devamlılığı açısından önemlidir.\n• Ödeme sürecinin aksaması durumunda program dondurulabilir ve ayrılan gün/saat başka öğrencilere açılabilir.\n\nAmacımız tüm öğrencilerimiz için düzenli, adil ve sürdürülebilir bir eğitim süreci oluşturmaktır.\n\nBodrum Sonsuz Sanat";
 }
 function msgWhatsAppGroup(student) {
   const greeting = student?.veli_adi ? "Merhaba "+student.veli_adi+"," : "Merhaba,";
@@ -2404,14 +2395,24 @@ function msgGoogleReview(student) {
 function msgÖdemeHatirlatma() {
   return "Merhaba,\nDers ödemesini henüz tarafımıza ulaşmış olarak göremiyoruz.\nÖdemenizi uygun olduğunuzda gerçekleştirmenizi rica ederiz. Herhangi bir sorunuz olması durumunda bizimle iletişime geçebilirsiniz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
 }
-function msgÖdemeHatirlatma2() {
-  return "Merhaba,\nDers ödemesi hâlâ tarafımıza ulaşmamıştır.\nEğitim programının kesintisiz şekilde devam edebilmesi ve öğrencimizin gün/saat planlamasının korunabilmesi için ödemenizin bu hafta içerisinde tamamlanmasını rica ederiz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
+function paymentOverdueMessageLine(student) {
+  const info = currentPaymentDueInfo(student) || [...customPackageInfos(student), ...regularPackageInfos(student)]
+    .filter(item => item.complete && midday(new Date(item.start)) <= midday() && !hasPaymentForPackage(student, item))
+    .sort((a,b)=>new Date(a.start)-new Date(b.start))[0];
+  const days = info?.start ? paymentOverdueDays(info.start) : 0;
+  return days > 0 ? "Ödemeniz "+days+" gündür gecikmiştir." : "";
 }
-function msgÖdemeHatirlatma3() {
-  return "Merhaba,\n\nDers ödemesi hâlâ tarafımıza ulaşmamıştır.\n\nDüzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır. Bu nedenle ödemenin belirtilen süre içerisinde tamamlanmaması durumunda programınız dondurulacak, ayrılan gün ve saat bekleme listesindeki öğrenciler için kullanıma açılacaktır.\n\nLütfen ödemenizi en kısa sürede gerçekleştiriniz.\n\nTeşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
+function msgÖdemeHatirlatma2(student) {
+  const delay = paymentOverdueMessageLine(student);
+  return "Merhaba,\nDers ödemesi hâlâ tarafımıza ulaşmamıştır.\n"+(delay ? delay+"\n" : "")+"Eğitim programının kesintisiz şekilde devam edebilmesi ve öğrencimizin gün/saat planlamasının korunabilmesi için ödemenizin bu hafta içerisinde tamamlanmasını rica ederiz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
 }
-function msgDondurmaUyarisi() {
-  return "Merhaba,\n\nÖdeme konusunda daha önce tarafınıza bilgilendirme yapılmış olmasına rağmen ödemeniz henüz tarafımıza ulaşmamıştır.\n\nEğitim programlarımız sabit gün ve saat planlamasıyla yürütüldüğü için, düzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır.\n\nBu nedenle programınızı bugün itibarıyla donduruyoruz. Ayrılan gün ve saat, bekleme listesindeki diğer öğrencilerin kullanımına açılacaktır.\n\nİlerleyen dönemde programa devam etmek istemeniz halinde, o tarihteki uygun kontenjan durumuna göre yeni bir gün ve saat planlaması yapılabilir.\n\nAnlayışınız için teşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
+function msgÖdemeHatirlatma3(student) {
+  const delay = paymentOverdueMessageLine(student);
+  return "Merhaba,\n\nDers ödemesi hâlâ tarafımıza ulaşmamıştır."+(delay ? "\n"+delay : "")+"\n\nDüzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır. Bu nedenle ödemenin belirtilen süre içerisinde tamamlanmaması durumunda programınız dondurulacak, ayrılan gün ve saat bekleme listesindeki öğrenciler için kullanıma açılacaktır.\n\nLütfen ödemenizi en kısa sürede gerçekleştiriniz.\n\nTeşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
+}
+function msgDondurmaUyarisi(student) {
+  const delay = paymentOverdueMessageLine(student);
+  return "Merhaba,\n\nÖdeme konusunda daha önce tarafınıza bilgilendirme yapılmış olmasına rağmen ödemeniz henüz tarafımıza ulaşmamıştır."+(delay ? "\n"+delay : "")+"\n\nEğitim programlarımız sabit gün ve saat planlamasıyla yürütüldüğü için, düzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır.\n\nBu nedenle programınızı bugün itibarıyla donduruyoruz. Ayrılan gün ve saat, bekleme listesindeki diğer öğrencilerin kullanımına açılacaktır.\n\nİlerleyen dönemde programa devam etmek istemeniz halinde, o tarihteki uygun kontenjan durumuna göre yeni bir gün ve saat planlaması yapılabilir.\n\nAnlayışınız için teşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
 }
 function msgPaketOzeti(student) {
   const info = lastCompletedPackageInfo(student);
@@ -2509,9 +2510,9 @@ function MesajSheet({ student, onClose, initialKey = "" }) {
     { key:"yenikayit", label:"Yeni Kayıt - Ders Süreci", text:msgYeniKayitKurallari() },
     { key:"ozet", label:"Dönem Sonu Özeti", text:msgPaketOzeti(student) },
     { key:"odeme1", label:"Ödeme Hatırlatma (1.)", text:msgÖdemeHatirlatma() },
-    { key:"odeme2", label:"Ödeme Hatırlatma (2.)", text:msgÖdemeHatirlatma2() },
-    { key:"odeme3", label:"Ödeme Hatırlatma (3.)", text:msgÖdemeHatirlatma3() },
-    { key:"dondur", label:"Dondurma Uyarısı", text:msgDondurmaUyarisi() },
+    { key:"odeme2", label:"Ödeme Hatırlatma (2.)", text:msgÖdemeHatirlatma2(student) },
+    { key:"odeme3", label:"Ödeme Hatırlatma (3.)", text:msgÖdemeHatirlatma3(student) },
+    { key:"dondur", label:"Dondurma Uyarısı", text:msgDondurmaUyarisi(student) },
   ];
   const visibleMsgs = initialKey ? msgs.filter(m => m.key === initialKey) : msgs;
   const send = (text) => {
@@ -3163,8 +3164,8 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
                 </div>
                 <div style={{ display:"flex", gap:4, flexWrap:"wrap", justifyContent:"flex-end" }}>
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma()),"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 1</button>
-                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma2()),"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 2</button>
-                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma3()),"_blank"); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 3</button>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma2(s)),"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 2</button>
+                  <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma3(s)),"_blank"); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 3</button>
                   <button onClick={() => { setÖdemeDate(new Date().toISOString().split("T")[0]); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
                 </div>
               </div>
