@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://wuizpkfueudglmgdsavu.supabase.co";
@@ -8,6 +8,9 @@ const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
 const LIFECYCLE_TRACKING_START = "2026-08-01";
+const WHATSAPP_GROUP_URL = "https://chat.whatsapp.com/H30hg6FbqWzGN5rYfKA0Ks";
+const NEWSLETTER_URL = "https://bodrumsonsuzsanat.com/#bulten";
+const GOOGLE_REVIEW_URL = "https://g.page/r/CSo8oia25vGSEBI/review";
 
 const DAY_IDX = { "Pazartesi":1, "Sali":2, "Carsamba":3, "Persembe":4, "Cuma":5, "Cumartesi":6, "Pazar":0 };
 const TR_DAYS_MAP = { "Pazartesi":"Pazartesi", "Salı":"Sali", "Çarşamba":"Carsamba", "Perşembe":"Persembe", "Cuma":"Cuma", "Cumartesi":"Cumartesi", "Pazar":"Pazar" };
@@ -216,6 +219,39 @@ function withStatusEvent(student, type, at = new Date().toISOString()) {
       { id:uid(), type, at }
     ]
   };
+}
+function latestCommunicationEvent(student, key) {
+  return [...(student?.status_history || [])]
+    .filter(event=>event?.type==="communication_"+key && event?.at)
+    .sort((a,b)=>new Date(b.at)-new Date(a.at))[0] || null;
+}
+function communicationFlag(student, key) { return latestCommunicationEvent(student,key)?.value === true; }
+function firstCompletedLessonAt(student) {
+  const completed = (student?.schedule || []).filter(lesson=>lesson.status==="completed" && lesson.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  return completed[0]?.date || null;
+}
+function googleReviewDueAt(student) {
+  const firstLesson = firstCompletedLessonAt(student);
+  if (!firstLesson) return null;
+  return addMonths(firstLesson,1);
+}
+function instrumentLessonPhrase(student) {
+  const instrument = String(student?.instrument || "müzik").trim().toLocaleLowerCase("tr-TR");
+  return instrument.endsWith(" dersi") ? instrument : instrument+" dersi";
+}
+function googleReviewState(student) {
+  const event = latestCommunicationEvent(student,"google_review");
+  if (event?.value==="completed") return { key:"completed", label:"Yaptı", event };
+  if (event?.value==="closed") return { key:"closed", label:"Takip kapatıldı", event };
+  if (event?.value==="requested" || event?.value==="waiting") {
+    const checkAt = event.remindAt || addDays(event.at,7);
+    const due = midday(new Date(checkAt)).getTime() <= midday().getTime();
+    return { key:due?"check":"requested", label:due?"Yaptı mı?":"İstendi · bekleniyor", event, checkAt };
+  }
+  const dueAt = googleReviewDueAt(student);
+  if (!dueAt) return { key:"no-lesson", label:"İlk ders bekleniyor", dueAt:null };
+  const due = midday(new Date(dueAt)).getTime() <= midday().getTime();
+  return { key:due?"due":"scheduled", label:due?"İstenmedi":fmtShort(dueAt)+" tarihinde", dueAt };
 }
 function inMonth(iso, monthDate) {
   if (!iso) return false;
@@ -1127,7 +1163,7 @@ const MIZAN_UI_CSS = `
   .crm-loading{min-height:100vh;display:grid;place-items:center;background:var(--crm-paper);text-align:center}.crm-loading-mark{width:50px;height:50px;margin:0 auto 14px;display:grid;place-items:center;border-radius:17px 17px 17px 5px;background:var(--crm-purple);color:#fff;font-size:24px;box-shadow:0 10px 28px rgba(91,66,214,.22)}
   .crm-sheet-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:20px;background:rgba(29,27,36,.52);backdrop-filter:blur(6px)}.crm-sheet{width:min(100%,560px);max-height:calc(100vh - 40px);overflow:hidden;background:#fff;border-radius:22px;box-shadow:0 25px 90px rgba(0,0,0,.22)}.crm-sheet-head{display:flex;justify-content:space-between;align-items:center;padding:20px 23px;border-bottom:1px solid var(--crm-border);background:#fff}.crm-sheet-head strong{display:block;font-size:18px;letter-spacing:-.025em}.crm-sheet-head span{display:block;margin-top:3px;color:#96909b;font-size:12px}.crm-sheet-close{width:34px;height:34px;border:0;border-radius:50%;background:#f4f1ee;color:#746e78;font-size:20px;cursor:pointer}.crm-sheet-body{padding:20px 23px 28px;max-height:calc(100vh - 124px);overflow-y:auto}
   @media(max-width:980px){.crm-content{padding-left:26px;padding-right:26px}.crm-sidebar{width:220px}.crm-content{margin-left:220px}}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(6,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:8px;font-weight:700;padding:5px 1px}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(7,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -1137,6 +1173,10 @@ function StudentsNavIcon() {
 
 function TeachersNavIcon() {
   return <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="3" width="16" height="12" rx="1.5"/><path d="M13 11l3-3 3 2 3-4"/><circle cx="5.5" cy="11" r="3"/><path d="M1.5 24v-4.5c0-3.2 1.5-5 4-5 2.6 0 4 1.8 4 5V24"/><path d="M8 15l5-4"/></svg>;
+}
+
+function CommunicationNavIcon() {
+  return <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M4 5.5h20v14H11l-5.5 4v-4H4z"/><path d="M8 10h12M8 14h8"/></svg>;
 }
 
 function TonePill({ children, tone="neutral" }) {
@@ -2093,6 +2133,7 @@ function AddSheet({ teachers, onClose, onAdd }) {
   const todayISO = new Date().toISOString().split("T")[0];
   const firstTeacher = teachers.find(t => t.active);
   const [f, setF] = useState({ name:"", teacher_id:firstTeacher?.id || "", phone:"", veli_adi:"", dogum_tarihi:"", lesson_start_date:todayISO, instrument:"Davul", lessonDuration:45, lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"", last_raise_date:"" });
+  const [saving, setSaving] = useState(false);
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const setSlot = (i,k,v) => setF(p=>({
     ...p,
@@ -2151,7 +2192,7 @@ function AddSheet({ teachers, onClose, onAdd }) {
       <label style={LBL}>İlk Ders Tarihi</label>
       <input style={INP} type="date" value={f.firstDate} onChange={e=>s("firstDate",e.target.value)} />
       {f.name && previewDates() ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginTop:12, fontSize:12, color:"#166534" }}><strong>Planlanacak dersler:</strong><br />{previewDates()}</div> : null}
-      <div style={{ marginTop:16 }}><Btn bg="#111" onClick={() => { if(f.name.trim() && f.teacher_id && f.lesson_start_date){ onAdd(f); onClose(); } }}>Kaydet</Btn></div>
+      <div style={{ marginTop:16 }}><Btn bg="#111" onClick={async() => { if(!f.name.trim() || !f.teacher_id || !f.lesson_start_date || saving) return; setSaving(true); const saved=await onAdd(f); setSaving(false); if(saved) onClose(); }}>{saving?"Kaydediliyor...":"Kaydet"}</Btn></div>
     </Sheet>
   );
 }
@@ -2204,6 +2245,18 @@ function msgIlkDersÖdeme(student) {
 
 function msgYeniKayitKurallari() {
   return "Sonsuz Sanat Ders Süreci Bilgilendirmesi\n\nDerslerimiz haftalık sabit gün ve saatlerde ilerler. Eğitim sürecinde devamlılık ve düzenli katılım büyük önem taşır.\n\nLütfen aşağıdaki kuralları inceleyiniz:\n\nDers İptalleri\n\n• Ders iptallerinin en az 24 saat önceden bildirilmesi gerekir.\n• Her telafi hakkı oluşturulduğu tarihten itibaren 30 gün geçerlidir.\n• Kullanılmayan telafi hakları bir sonraki döneme devredilmez.\n\nDers Günü İptalleri\n\n• Ders günü yapılan iptallerde, eğer iptal sebebi sağlık sorunlarının dışındaysa ders yapılmış sayılır.\n• Derse habersiz gelinmemesi durumunda ders yapılmış sayılır ve telafi hakkı oluşmaz.\n\nTelafi Dersleri\n\n• Telafi dersleri kurumun uygunluk durumuna göre planlanır, uygunluk oluştuğunda tarafınıza bilgi verilir.\n• Telafi derslerinde gün ve saat seçimi yapılamaz.\n\nProgram Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi durumunda size ayrılan gün ve saat, öğrenciye özel olarak korunur.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.\n\nÖdeme Düzeni\n\n• Ödemelerin zamanında yapılması programın devamlılığı açısından önemlidir.\n• Ödeme sürecinin aksaması durumunda program dondurulabilir ve ayrılan gün/saat başka öğrencilere açılabilir.\n\nAmacımız tüm öğrencilerimiz için düzenli, adil ve sürdürülebilir bir eğitim süreci oluşturmaktır.\n\nBodrum Sonsuz Sanat";
+}
+function msgWhatsAppGroup(student) {
+  const greeting = student?.veli_adi ? "Merhaba "+student.veli_adi+"," : "Merhaba,";
+  return greeting+"\n\nBodrum Sonsuz Sanat ders duyurularını ve önemli bilgilendirmeleri takip edebilmeniz için WhatsApp grubumuza aşağıdaki bağlantıdan katılabilirsiniz:\n\n"+WHATSAPP_GROUP_URL+"\n\nBodrum Sonsuz Sanat";
+}
+function msgNewsletter(student) {
+  const greeting = student?.veli_adi ? "Merhaba "+student.veli_adi+"," : "Merhaba,";
+  return greeting+"\n\nBodrum Sonsuz Sanat bültenine abone olarak sanat, eğitim ve etkinlik içeriklerimizi takip edebilirsiniz:\n\n"+NEWSLETTER_URL+"\n\nBodrum Sonsuz Sanat";
+}
+function msgGoogleReview(student) {
+  const lessonPhrase = instrumentLessonPhrase(student);
+  return "Merhaba,\n\nDers sürecimizle ilgili deneyiminizi Google’da paylaşmanız bizi çok mutlu eder. Yorumunuz hem bize hem de bizi araştıran ailelere çok yardımcı oluyor.\n\nYorumunuzda “"+lessonPhrase+"” ifadesine yer vermeniz, Bodrum’da "+lessonPhrase+" arayan ailelerin bizi bulmasına da yardımcı olur.\n\nYorum bırakmak için: "+GOOGLE_REVIEW_URL+"\n\nTeşekkür ederiz.\nBodrum Sonsuz Sanat";
 }
 function msgÖdemeHatirlatma() {
   return "Merhaba,\nDers ödemesini henüz tarafımıza ulaşmış olarak göremiyoruz.\nÖdemenizi uygun olduğunuzda gerçekleştirmenizi rica ederiz. Herhangi bir sorunuz olması durumunda bizimle iletişime geçebilirsiniz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
@@ -2734,6 +2787,99 @@ function ÖğretmenlerPaneli({ students, teachers, onStudentClick }) {
   );
 }
 
+function İletişimPaneli({ students, onStudentClick, onMessage, onStatusChange }) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [googleConfirmId, setGoogleConfirmId] = useState(null);
+  const activeStudents = students.filter(student=>!student.frozen && !isStudentLeft(student));
+  const counts = {
+    whatsapp:activeStudents.filter(student=>communicationFlag(student,"whatsapp_group")).length,
+    newsletter:activeStudents.filter(student=>communicationFlag(student,"newsletter")).length,
+    rules:activeStudents.filter(student=>communicationFlag(student,"rules_sent")).length,
+    review:activeStudents.filter(student=>googleReviewState(student).key==="completed").length,
+  };
+  const visibleStudents = activeStudents.filter(student=>{
+    if (search.trim() && !student.name.toLocaleLowerCase("tr-TR").includes(search.trim().toLocaleLowerCase("tr-TR"))) return false;
+    if (filter==="incomplete") return !communicationFlag(student,"whatsapp_group") || !communicationFlag(student,"newsletter") || !communicationFlag(student,"rules_sent") || !["completed","closed"].includes(googleReviewState(student).key);
+    if (filter==="whatsapp") return !communicationFlag(student,"whatsapp_group");
+    if (filter==="newsletter") return !communicationFlag(student,"newsletter");
+    if (filter==="rules") return !communicationFlag(student,"rules_sent");
+    if (filter==="review") return googleReviewState(student).key!=="completed";
+    return true;
+  }).sort((a,b)=>a.name.localeCompare(b.name,"tr"));
+  const smallAction = { border:"none", borderRadius:8, padding:"6px 8px", fontSize:11, fontWeight:800, cursor:"pointer", fontFamily:"inherit" };
+  const sendGoogle = student => {
+    onMessage(student,msgGoogleReview(student),"Google yorum mesajı WhatsApp'ta hazırlandı");
+    setGoogleConfirmId(student.id);
+  };
+  return (
+    <div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:8, marginBottom:14 }}>
+        <MiniMetric label="WhatsApp Grubunda" value={counts.whatsapp+" / "+activeStudents.length} tone="good" />
+        <MiniMetric label="Bültene Abone" value={counts.newsletter+" / "+activeStudents.length} tone="info" />
+        <MiniMetric label="Kurallar Gönderildi" value={counts.rules+" / "+activeStudents.length} tone="special" />
+        <MiniMetric label="Google Yorumu Yaptı" value={counts.review+" / "+activeStudents.length} tone="warn" />
+      </div>
+      <div style={{ ...CARD, padding:"12px", marginBottom:12 }}>
+        <input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Öğrenci ara..." style={{ width:"100%", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 12px", boxSizing:"border-box", fontFamily:"inherit", marginBottom:9 }} />
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          {[["all","Tümü"],["incomplete","Eksikler"],["whatsapp","WhatsApp"],["newsletter","Bülten"],["rules","Kurallar"],["review","Google Yorumu"]].map(([key,label])=><button key={key} onClick={()=>setFilter(key)} style={{ ...smallAction, background:filter===key?"#5b42d6":"#f3f4f6", color:filter===key?"#fff":"#475569" }}>{label}</button>)}
+        </div>
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {visibleStudents.map(student=>{
+          const waJoined = communicationFlag(student,"whatsapp_group");
+          const subscribed = communicationFlag(student,"newsletter");
+          const rulesSent = communicationFlag(student,"rules_sent");
+          const review = googleReviewState(student);
+          return <div key={student.id} style={{ ...CARD, padding:"15px 16px" }}>
+            <button onClick={()=>onStudentClick(student)} style={{ border:"none", background:"transparent", padding:0, margin:"0 0 11px", color:"#111", fontSize:15, fontWeight:850, cursor:"pointer", fontFamily:"inherit", textAlign:"left" }}>{student.name} <span style={{ color:"#94a3b8", fontSize:11 }}>· {student.instrument}</span></button>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(205px,1fr))", gap:8 }}>
+              <div style={{ background:"#f8fafc", borderRadius:10, padding:"10px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}><strong style={{ fontSize:12 }}>WhatsApp Grubu</strong><TonePill tone={waJoined?"good":"neutral"}>{waJoined?"Katıldı":"Katılmadı"}</TonePill></div>
+                <div style={{ display:"flex", gap:6, marginTop:8 }}><button onClick={()=>onMessage(student,msgWhatsAppGroup(student),"Grup daveti WhatsApp'ta hazırlandı")} style={{ ...smallAction, background:"#dcfce7", color:"#166534" }}>Davet Gönder</button><button onClick={()=>onStatusChange(student,"whatsapp_group",!waJoined)} style={{ ...smallAction, background:waJoined?"#f3f4f6":"#111", color:waJoined?"#475569":"#fff" }}>{waJoined?"Geri Al":"Katıldı"}</button></div>
+              </div>
+              <div style={{ background:"#f8fafc", borderRadius:10, padding:"10px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}><strong style={{ fontSize:12 }}>Bülten</strong><TonePill tone={subscribed?"info":"neutral"}>{subscribed?"Abone":"Abone değil"}</TonePill></div>
+                <div style={{ display:"flex", gap:6, marginTop:8 }}><button onClick={()=>onMessage(student,msgNewsletter(student),"Bülten bağlantısı WhatsApp'ta hazırlandı")} style={{ ...smallAction, background:"#dbeafe", color:"#1d4ed8" }}>Link Gönder</button><button onClick={()=>onStatusChange(student,"newsletter",!subscribed)} style={{ ...smallAction, background:subscribed?"#f3f4f6":"#111", color:subscribed?"#475569":"#fff" }}>{subscribed?"Geri Al":"Abone Oldu"}</button></div>
+              </div>
+              <div style={{ background:"#f8fafc", borderRadius:10, padding:"10px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}><strong style={{ fontSize:12 }}>Ders Kuralları</strong><TonePill tone={rulesSent?"special":"neutral"}>{rulesSent?"Gönderildi":"Gönderilmedi"}</TonePill></div>
+                <div style={{ display:"flex", gap:6, marginTop:8 }}><button onClick={()=>onMessage(student,msgYeniKayitKurallari(),"Ders kuralları WhatsApp'ta hazırlandı")} style={{ ...smallAction, background:"#ede9fe", color:"#5b21b6" }}>Gönder</button><button onClick={()=>onStatusChange(student,"rules_sent",!rulesSent)} style={{ ...smallAction, background:rulesSent?"#f3f4f6":"#111", color:rulesSent?"#475569":"#fff" }}>{rulesSent?"Geri Al":"Gönderildi"}</button></div>
+              </div>
+              <div style={{ background:"#fff7ed", borderRadius:10, padding:"10px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}><strong style={{ fontSize:12 }}>Google Yorumu</strong><TonePill tone={review.key==="completed"?"good":review.key==="check"||review.key==="due"?"warn":"neutral"}>{review.label}</TonePill></div>
+                <div style={{ display:"flex", gap:6, marginTop:8, flexWrap:"wrap" }}>
+                  {review.key!=="completed"&&review.key!=="closed"?<button onClick={()=>sendGoogle(student)} style={{ ...smallAction, background:"#f97316", color:"#fff" }}>Yorum Linkini Gönder</button>:null}
+                  {googleConfirmId===student.id?<><button onClick={()=>{ onStatusChange(student,"google_review","requested"); setGoogleConfirmId(null); }} style={{ ...smallAction, background:"#111", color:"#fff" }}>Gönderdim</button><button onClick={()=>setGoogleConfirmId(null)} style={{ ...smallAction, background:"#f3f4f6", color:"#475569" }}>Göndermedim</button></>:null}
+                  {review.key==="requested"||review.key==="check"?<button onClick={()=>onStatusChange(student,"google_review","completed")} style={{ ...smallAction, background:"#dcfce7", color:"#166534" }}>Yaptı</button>:null}
+                  {review.key==="check"?<><button onClick={()=>onStatusChange(student,"google_review","waiting",{ remindAt:addDays(new Date().toISOString(),7) })} style={{ ...smallAction, background:"#fef3c7", color:"#92400e" }}>Yapmadı · 7 gün sonra</button><button onClick={()=>onStatusChange(student,"google_review","closed")} style={{ ...smallAction, background:"#f3f4f6", color:"#475569" }}>Takibi Kapat</button></>:null}
+                </div>
+              </div>
+            </div>
+          </div>;
+        })}
+        {visibleStudents.length===0?<div style={{ textAlign:"center", padding:"42px 20px", color:"#94a3b8", fontWeight:700 }}>Bu filtrede öğrenci yok.</div>:null}
+      </div>
+    </div>
+  );
+}
+
+function YeniÖğrenciİletişimSheet({ student, onClose, onMessage, onStatusChange }) {
+  const waJoined = communicationFlag(student,"whatsapp_group");
+  const subscribed = communicationFlag(student,"newsletter");
+  const rulesSent = communicationFlag(student,"rules_sent");
+  const action = { border:"none", borderRadius:9, padding:"8px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit" };
+  const row = (title,status,sendLabel,onSend,doneLabel,onDone,tone="neutral") => <div style={{ background:"#f8fafc", border:"1px solid #eef2f7", borderRadius:12, padding:"12px", marginBottom:9 }}><div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}><strong style={{ fontSize:13 }}>{title}</strong><TonePill tone={status?tone:"neutral"}>{status?doneLabel:"Bekliyor"}</TonePill></div><div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:7, marginTop:9 }}><button onClick={onSend} style={{ ...action, background:"#25D366", color:"#fff" }}>{sendLabel}</button><button onClick={onDone} style={{ ...action, background:status?"#f3f4f6":"#111", color:status?"#475569":"#fff" }}>{status?"Geri Al":doneLabel}</button></div></div>;
+  return <Sheet title="Yeni Öğrenci İletişimi" subtitle={student.name+" başarıyla kaydedildi"} onClose={onClose}>
+    {row("WhatsApp Grubu",waJoined,"Grup Davetini Gönder",()=>onMessage(student,msgWhatsAppGroup(student),"Grup daveti WhatsApp'ta hazırlandı"),"Katıldı",()=>onStatusChange(student,"whatsapp_group",!waJoined),"good")}
+    {row("Bülten",subscribed,"Abonelik Linkini Gönder",()=>onMessage(student,msgNewsletter(student),"Bülten bağlantısı WhatsApp'ta hazırlandı"),"Abone Oldu",()=>onStatusChange(student,"newsletter",!subscribed),"info")}
+    {row("Ders Kuralları",rulesSent,"Kuralları Gönder",()=>onMessage(student,msgYeniKayitKurallari(),"Ders kuralları WhatsApp'ta hazırlandı"),"Gönderildi",()=>onStatusChange(student,"rules_sent",!rulesSent),"special")}
+    <div style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:12, padding:"12px", marginBottom:13 }}><strong style={{ display:"block", fontSize:13, color:"#9a3412" }}>Google Yorumu</strong><span style={{ display:"block", marginTop:4, fontSize:12, color:"#9a3412" }}>İlk tamamlanan dersten bir ay sonra İletişim sekmesinde hatırlatılacak. Yorum linki oradan daha önce de gönderilebilir.</span></div>
+    <Btn bg="#111" onClick={onClose}>Tamam</Btn>
+  </Sheet>;
+}
+
 function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStudentClick, onTelafiClick }) {
   const todayLessons = [];
   students.forEach(s => {
@@ -3178,6 +3324,8 @@ export default function App() {
   const [detailSt, setDetailSt] = useState(null);
   const [detailInitialTab, setDetailInitialTab] = useState("takvim");
   const [showAdd, setShowAdd] = useState(false);
+  const [welcomeStudentId, setWelcomeStudentId] = useState(null);
+  const communicationQueueRef = useRef(Promise.resolve());
   const [filter, setFilter] = useState("all");
   const [mainTab, setMainTab] = useState("bugün");
   const [weekOffset, setWeekOffset] = useState(0);
@@ -3607,8 +3755,40 @@ export default function App() {
       schedule: buildScheduleSlots(slots, packageLessonCount, from, f.lessonDuration), ek_dersler: [],
     };
     setStudents(p=>[...p, newStudent]);
-    await saveStudent(newStudent);
-    pop("Öğrenci eklendi");
+    try {
+      const saved = await saveStudent(newStudent);
+      pop("Öğrenci eklendi");
+      setWelcomeStudentId(saved.id);
+      return saved;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const handleCommunicationMessage = async (student, text, successText) => {
+    const phone = student.phone ? student.phone.replace(/[^0-9]/g,"") : "";
+    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text),"_blank");
+    else { await navigator.clipboard.writeText(text); pop("Telefon bulunamadı; mesaj kopyalandı"); return; }
+    pop(successText || "Mesaj WhatsApp'ta hazırlandı");
+  };
+
+  const handleCommunicationStatus = (student, key, value, extra={}) => {
+    const persist = async () => {
+      const result = await supabase.from("students").select("*").eq("id",student.id).single();
+      const current = result.data || students.find(item=>item.id===student.id) || student;
+      const event = { id:uid(), type:"communication_"+key, value, at:new Date().toISOString(), ...extra };
+      const updatedStudent = { ...current, status_history:[...(current.status_history || []),event] };
+      setStudents(prev=>prev.map(item=>item.id===updatedStudent.id?updatedStudent:item));
+      try {
+        await saveStudent(updatedStudent);
+        pop("İletişim durumu kaydedildi");
+        return true;
+      } catch (error) {
+        return false;
+      }
+    };
+    communicationQueueRef.current = communicationQueueRef.current.then(persist,persist);
+    return communicationQueueRef.current;
   };
 
   const buildPaymentUpdate = (sourceStudents, sid, tarih) => {
@@ -4113,6 +4293,7 @@ export default function App() {
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:<StudentsNavIcon />, badge:stats.active },
     { key:"ogretmenler", label:"Öğretmenler", icon:<TeachersNavIcon />, badge:teachers.filter(t=>t.active).length },
+    { key:"iletisim", label:"İletişim", icon:<CommunicationNavIcon /> },
     { key:"takvim", label:"Takvim", icon:"□" },
     { key:"gelir", label:"Finans", icon:"↗" },
     { key:"ozet", label:"Özet", icon:"◎" },
@@ -4121,6 +4302,7 @@ export default function App() {
     bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
     liste:{ eyebrow:"ÖĞRENCİ YÖNETİMİ", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
     ogretmenler:{ eyebrow:"ÖĞRETMEN YÖNETİMİ", title:"Öğretmenler", subtitle:"Öğretmenlerin öğrencilerini, haftalık programını ve aylık derslerini gör." },
+    iletisim:{ eyebrow:"VELİ İLETİŞİMİ", title:"İletişim", subtitle:"WhatsApp grubu, bülten, ders kuralları ve Google yorumlarını takip et." },
     takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
     gelir:{ eyebrow:"Finansal Görünüm", title:"Finans", subtitle:"Tahsilat, gider ve net kârını aylık olarak takip et." },
     ozet:{ eyebrow:"AYLIK YÖNETİM", title:"Kurum özeti", subtitle:"Ders, gelir, kayıt, öğrenci durumu ve öğretmen dağılımını ay ay izle." },
@@ -4298,6 +4480,7 @@ export default function App() {
 
         {mainTab === "takvim" ? <WeekCal students={students} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} /> : null}
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} onStudentClick={setDetailSt} /> : null}
+        {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
         {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
         {mainTab === "liste" ? (
@@ -4413,6 +4596,7 @@ export default function App() {
       {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
+      {welcomeStudentId && students.find(student=>student.id===welcomeStudentId) ? <YeniÖğrenciİletişimSheet student={students.find(student=>student.id===welcomeStudentId)} onClose={()=>setWelcomeStudentId(null)} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
 
