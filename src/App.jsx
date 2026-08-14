@@ -1131,6 +1131,14 @@ const MIZAN_UI_CSS = `
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
+function StudentsNavIcon() {
+  return <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><circle cx="10" cy="8" r="3"/><circle cx="19" cy="10" r="2.5"/><path d="M3.5 23c.3-5.2 2.6-8 6.5-8s6.2 2.8 6.5 8"/><path d="M16.5 16.5c3.9-.8 6.6 1.2 7.5 5.5"/></svg>;
+}
+
+function TeachersNavIcon() {
+  return <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="3" width="16" height="12" rx="1.5"/><path d="M13 11l3-3 3 2 3-4"/><circle cx="5.5" cy="11" r="3"/><path d="M1.5 24v-4.5c0-3.2 1.5-5 4-5 2.6 0 4 1.8 4 5V24"/><path d="M8 15l5-4"/></svg>;
+}
+
 function TonePill({ children, tone="neutral" }) {
   const map = {
     neutral:{ bg:"#f3f4f6", color:"#374151" },
@@ -4103,8 +4111,8 @@ export default function App() {
   const telafiWarnList = students.filter(s => s.telafi_records.filter(r=>!r.done).length===5 && !s.frozen);
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
-    { key:"liste", label:"Öğrenciler", icon:"♙", badge:stats.active },
-    { key:"ogretmenler", label:"Öğretmenler", icon:"♬", badge:teachers.filter(t=>t.active).length },
+    { key:"liste", label:"Öğrenciler", icon:<StudentsNavIcon />, badge:stats.active },
+    { key:"ogretmenler", label:"Öğretmenler", icon:<TeachersNavIcon />, badge:teachers.filter(t=>t.active).length },
     { key:"takvim", label:"Takvim", icon:"□" },
     { key:"gelir", label:"Finans", icon:"↗" },
     { key:"ozet", label:"Özet", icon:"◎" },
