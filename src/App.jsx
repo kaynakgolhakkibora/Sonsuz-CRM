@@ -173,6 +173,65 @@ function fmtMed(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateStr
 function fmtShort(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { day:"numeric", month:"short" }); }
 function calcBalance(schedule) { return schedule.filter(l => l.status === "upcoming").length; }
 function calcNextPayment(schedule) { const up = schedule.filter(l => l.status === "upcoming"); if (!up.length) return null; const d = new Date(up[up.length-1].date); d.setDate(d.getDate()+7); return d.toISOString(); }
+
+const HOMEWORK_STATUS_LABELS = {
+  done:"Yaptı",
+  partial:"Kısmen Yaptı",
+  not_done:"Yapmadı",
+  unchecked:"Kontrol Edilmedi",
+  pending:"Kontrol Bekliyor",
+};
+
+function homeworkStatusLabel(status) {
+  return HOMEWORK_STATUS_LABELS[status] || "Kontrol Bekliyor";
+}
+
+function homeworkCheckRef(type, id) {
+  return id ? `${type}:${id}` : "";
+}
+
+function homeworkAssignments(student) {
+  const normal = (student?.schedule || []).filter(item=>item?.homework).map(item=>({ ...item, homeworkSource:"schedule", homeworkSourceId:item.id, homeworkDate:item.date }));
+  const telafi = (student?.telafi_records || []).filter(item=>item?.homework).map(item=>({ ...item, homeworkSource:"telafi", homeworkSourceId:item.id, homeworkDate:telafiDoneAt(item) || telafiPlannedAt(item) || item.lessonDate }));
+  return [...normal, ...telafi];
+}
+
+function homeworkForCheck(student, occurrenceDate, checkRef, excludedSourceRef="") {
+  const occurrenceTime = new Date(occurrenceDate).getTime();
+  if (!Number.isFinite(occurrenceTime) || !checkRef) return null;
+  return homeworkAssignments(student)
+    .filter(item => {
+      const sourceRef = homeworkCheckRef(item.homeworkSource, item.homeworkSourceId);
+      if (sourceRef === excludedSourceRef) return false;
+      const itemTime = new Date(item.homeworkDate).getTime();
+      if (!Number.isFinite(itemTime) || itemTime >= occurrenceTime) return false;
+      const pending = !item.homeworkStatus || item.homeworkStatus === "pending";
+      return pending || item.homeworkCheckedInRef === checkRef;
+    })
+    .sort((a,b) => new Date(b.homeworkDate) - new Date(a.homeworkDate))[0] || null;
+}
+
+function homeworkForLessonCheck(student, lesson) {
+  return lesson?.id ? homeworkForCheck(student, lesson.date, homeworkCheckRef("lesson", lesson.id), homeworkCheckRef("schedule", lesson.id)) : null;
+}
+
+function homeworkForTelafiCheck(student, record) {
+  const occurrenceDate = telafiPlannedAt(record) || telafiDoneAt(record);
+  return record?.id && occurrenceDate ? homeworkForCheck(student, occurrenceDate, homeworkCheckRef("telafi", record.id), homeworkCheckRef("telafi", record.id)) : null;
+}
+
+function pendingHomeworkBefore(student, occurrenceDate, excludedSourceRef="") {
+  const occurrenceTime = new Date(occurrenceDate).getTime();
+  if (!Number.isFinite(occurrenceTime)) return null;
+  return homeworkAssignments(student)
+    .filter(item => homeworkCheckRef(item.homeworkSource, item.homeworkSourceId) !== excludedSourceRef && new Date(item.homeworkDate).getTime() < occurrenceTime && (!item.homeworkStatus || item.homeworkStatus === "pending"))
+    .sort((a,b) => new Date(b.homeworkDate) - new Date(a.homeworkDate))[0] || null;
+}
+
+function homeworkCheckedInOccurrence(student, checkRef) {
+  if (!checkRef) return null;
+  return homeworkAssignments(student).find(item => item.homeworkCheckedInRef === checkRef) || null;
+}
 function midday(d = new Date()) { const x = new Date(d); x.setHours(0,0,0,0); return x; }
 function isToday(iso) { return midday(new Date(iso)).getTime() === midday().getTime(); }
 function paymentOverdueDays(iso) { if (!iso) return 0; const diff = Math.floor((midday() - midday(new Date(iso))) / 86400000); return diff > 0 ? diff : 0; }
@@ -1359,11 +1418,18 @@ const LBL = { display:"block", fontSize:11, fontWeight:750, color:"#756f7a", let
 
 function ActionSheet({ student, lessonId, onClose, onAction }) {
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
+  const previousHomework = homeworkForLessonCheck(student, lesson);
+  const lessonCheckRef = homeworkCheckRef("lesson", lesson?.id);
+  const checkedHomework = homeworkCheckedInOccurrence(student, lessonCheckRef);
   const [step, setStep] = useState("main");
   const [note, setNote] = useState(lesson?.note || "");
   const [activeMinutes, setActiveMinutes] = useState(lesson?.activeMinutes ?? lesson?.active_minutes ?? "");
   const [focusMinutes, setFocusMinutes] = useState(lesson?.focusMinutes ?? lesson?.focus_minutes ?? "");
   const [focusSection, setFocusSection] = useState(lesson?.focusSection || lesson?.focus_section || FOCUS_SECTIONS[0]);
+  const [homework, setHomework] = useState(lesson?.homework || "");
+  const [homeworkStatus, setHomeworkStatus] = useState(previousHomework?.homeworkCheckedInRef === lessonCheckRef ? (previousHomework.homeworkStatus || "") : "");
+  const [homeworkCheckNote, setHomeworkCheckNote] = useState(previousHomework?.homeworkCheckedInRef === lessonCheckRef ? (previousHomework.homeworkCheckNote || "") : "");
+  const [homeworkError, setHomeworkError] = useState(false);
   const activeTelafi = student.telafi_records.filter(r=>!r.done).length;
   const willWarn = activeTelafi === 4;
   const willFreeze = activeTelafi === 5;
@@ -1402,6 +1468,18 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
                 <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#94a3b8", letterSpacing:.5 }}>ÖĞRETMEN NOTU</p>
                 <p style={{ margin:"4px 0 0", fontSize:12, color:lesson.note?"#334155":"#94a3b8", whiteSpace:"pre-wrap" }}>{lesson.note || "Bu ders için not girilmemiş."}</p>
               </div>
+              {checkedHomework ? <div style={{ marginTop:7, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:9, padding:"8px 9px" }}>
+                <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#92400e", letterSpacing:.5 }}>BU DERSTE KONTROL EDİLEN ÖDEV</p>
+                <p style={{ margin:"4px 0 0", fontSize:12, color:"#78350f", whiteSpace:"pre-wrap" }}>{checkedHomework.homework}</p>
+                <p style={{ margin:"5px 0 0", fontSize:11, color:"#92400e", fontWeight:800 }}>{homeworkStatusLabel(checkedHomework.homeworkStatus)}</p>
+                {checkedHomework.homeworkCheckNote ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#78350f", whiteSpace:"pre-wrap" }}>{checkedHomework.homeworkCheckNote}</p> : null}
+              </div> : null}
+              {lesson.homework ? <div style={{ marginTop:7, background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:9, padding:"8px 9px" }}>
+                <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#6d28d9", letterSpacing:.5 }}>BU DERSTE VERİLEN ÖDEV</p>
+                <p style={{ margin:"4px 0 0", fontSize:12, color:"#4c1d95", whiteSpace:"pre-wrap" }}>{lesson.homework}</p>
+                <p style={{ margin:"5px 0 0", fontSize:11, color:"#6d28d9", fontWeight:800 }}>{homeworkStatusLabel(lesson.homeworkStatus)}</p>
+                {lesson.homeworkCheckNote ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#4c1d95", whiteSpace:"pre-wrap" }}>{lesson.homeworkCheckNote}</p> : null}
+              </div> : null}
             </div>
             <p style={{ margin:"9px 0 0", fontSize:12, color:"#64748b" }}>Yanlış işaretlendiyse aşağıdan düzeltebilirsin.</p>
           </div>
@@ -1420,6 +1498,20 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
       </>}
       {step === "attended" && <>
         <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ders verim bilgilerini gir.</p>
+        {previousHomework ? <div style={{ background:"#fffbeb", border:`1px solid ${homeworkError?"#ef4444":"#fde68a"}`, borderRadius:12, padding:"11px 12px", marginBottom:14 }}>
+          <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#92400e", letterSpacing:.5 }}>ÖNCEKİ ÖDEV KONTROLÜ</p>
+          <p style={{ margin:"5px 0 10px", fontSize:13, color:"#78350f", whiteSpace:"pre-wrap" }}>{previousHomework.homework}</p>
+          <select style={{ ...INP, borderColor:homeworkError?"#ef4444":"#ded9d3" }} value={homeworkStatus} onChange={event=>{ setHomeworkStatus(event.target.value); setHomeworkError(false); }}>
+            <option value="">Durumu seçin</option>
+            <option value="done">Yaptı</option>
+            <option value="partial">Kısmen Yaptı</option>
+            <option value="not_done">Yapmadı</option>
+            <option value="unchecked">Kontrol Edilmedi</option>
+          </select>
+          {homeworkError ? <p style={{ margin:"6px 0 0", fontSize:11, color:"#dc2626", fontWeight:800 }}>Ödev durumunu seçin.</p> : null}
+          <label style={{ ...LBL, marginTop:10 }}>Ödev Kontrol Notu</label>
+          <NoteArea value={homeworkCheckNote} onChange={setHomeworkCheckNote} placeholder="İsteğe bağlı kısa not" />
+        </div> : null}
         <label style={{ ...LBL, marginTop:0 }}>Aktif Ders Süresi (dk)</label>
         <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={activeMinutes} onChange={e=>setActiveMinutes(e.target.value)} placeholder="Örn. 35" />
         <label style={LBL}>En Uzun Odaklanma (dk)</label>
@@ -1430,12 +1522,22 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
         </select>
         <label style={LBL}>Öğretmen Notu</label>
         <NoteArea value={note} onChange={setNote} placeholder="Kısa not" />
-        <Btn bg="#10b981" onClick={() => onAction("attended", {
-          note,
-          activeMinutes:parseInt(activeMinutes)||0,
-          focusMinutes:parseInt(focusMinutes)||0,
-          focusSection,
-        }, lessonId || lesson?.id)}>Katılımı Kaydet</Btn>
+        <label style={LBL}>Gelecek Ders İçin Ödev</label>
+        <NoteArea value={homework} onChange={setHomework} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
+        <Btn bg="#10b981" onClick={() => {
+          if (previousHomework && !homeworkStatus) { setHomeworkError(true); return; }
+          onAction("attended", {
+            note,
+            activeMinutes:parseInt(activeMinutes)||0,
+            focusMinutes:parseInt(focusMinutes)||0,
+            focusSection,
+            homework:homework.trim(),
+            previousHomeworkSource:previousHomework?.homeworkSource || null,
+            previousHomeworkSourceId:previousHomework?.homeworkSourceId || null,
+            homeworkStatus:previousHomework ? homeworkStatus : "",
+            homeworkCheckNote:previousHomework ? homeworkCheckNote.trim() : "",
+          }, lessonId || lesson?.id);
+        }}>Katılımı Kaydet</Btn>
         <Btn bg="#111" outline onClick={() => reset("main")}>Geri</Btn>
       </>}
       {step === "yapildi" && <>
@@ -1500,6 +1602,9 @@ function ResumeProgramSheet({ student, onClose, onResume }) {
 
 function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
   const plannedAt = telafiPlannedAt(record);
+  const telafiCheckRef = homeworkCheckRef("telafi", record?.id);
+  const previousHomework = homeworkForTelafiCheck(student, record);
+  const checkedHomework = homeworkCheckedInOccurrence(student, telafiCheckRef);
   const plannedDate = plannedAt ? dateKey(plannedAt) : new Date().toISOString().split("T")[0];
   const plannedTime = plannedAt ? timeFromISO(plannedAt) : (student?.time || "10:00");
   const [step, setStep] = useState(plannedAt || record.done ? "main" : "plan");
@@ -1511,6 +1616,10 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
   const [activeMinutes, setActiveMinutes] = useState("");
   const [focusMinutes, setFocusMinutes] = useState("");
   const [focusSection, setFocusSection] = useState(FOCUS_SECTIONS[0]);
+  const [homework, setHomework] = useState(record?.homework || "");
+  const [homeworkStatus, setHomeworkStatus] = useState(previousHomework?.homeworkCheckedInRef === telafiCheckRef ? (previousHomework.homeworkStatus || "") : "");
+  const [homeworkCheckNote, setHomeworkCheckNote] = useState(previousHomework?.homeworkCheckedInRef === telafiCheckRef ? (previousHomework.homeworkCheckNote || "") : "");
+  const [homeworkError, setHomeworkError] = useState(false);
   const days = daysLeft(record.expiry);
   const expired = days !== null && days < 0;
   const urgent = !expired && days !== null && days <= 7;
@@ -1556,6 +1665,17 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
             {telafiDoneAt(record) && <p style={{ margin:"4px 0 0", fontSize:13, color:"#16a34a" }}>{telafiDoneDateText(record)}</p>}
             {telafiMetricText(record) ? <p style={{ margin:"4px 0 0", fontSize:13, color:"#166534" }}>{telafiMetricText(record)}</p> : null}
             {record.doneNote ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>{record.doneNote}</p> : null}
+            {checkedHomework ? <div style={{ marginTop:9, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:9, padding:"8px 9px" }}>
+              <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#92400e", letterSpacing:.5 }}>BU TELAFİDE KONTROL EDİLEN ÖDEV</p>
+              <p style={{ margin:"4px 0 0", fontSize:12, color:"#78350f", whiteSpace:"pre-wrap" }}>{checkedHomework.homework}</p>
+              <p style={{ margin:"5px 0 0", fontSize:11, color:"#92400e", fontWeight:800 }}>{homeworkStatusLabel(checkedHomework.homeworkStatus)}</p>
+              {checkedHomework.homeworkCheckNote ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#78350f", whiteSpace:"pre-wrap" }}>{checkedHomework.homeworkCheckNote}</p> : null}
+            </div> : null}
+            {record.homework ? <div style={{ marginTop:9, background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:9, padding:"8px 9px" }}>
+              <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#6d28d9", letterSpacing:.5 }}>BU TELAFİDE VERİLEN ÖDEV</p>
+              <p style={{ margin:"4px 0 0", fontSize:12, color:"#4c1d95", whiteSpace:"pre-wrap" }}>{record.homework}</p>
+              <p style={{ margin:"5px 0 0", fontSize:11, color:"#6d28d9", fontWeight:800 }}>{homeworkStatusLabel(record.homeworkStatus)}</p>
+            </div> : null}
           </div>
         : step === "plan"
           ? <>
@@ -1575,6 +1695,20 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
           : step === "attended"
             ? <>
                 <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Telafi dersinin verim bilgilerini gir.</p>
+                {previousHomework ? <div style={{ background:"#fffbeb", border:`1px solid ${homeworkError?"#ef4444":"#fde68a"}`, borderRadius:12, padding:"11px 12px", marginBottom:14 }}>
+                  <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#92400e", letterSpacing:.5 }}>ÖNCEKİ ÖDEV KONTROLÜ</p>
+                  <p style={{ margin:"5px 0 10px", fontSize:13, color:"#78350f", whiteSpace:"pre-wrap" }}>{previousHomework.homework}</p>
+                  <select style={{ ...INP, borderColor:homeworkError?"#ef4444":"#ded9d3" }} value={homeworkStatus} onChange={event=>{ setHomeworkStatus(event.target.value); setHomeworkError(false); }}>
+                    <option value="">Durumu seçin</option>
+                    <option value="done">Yaptı</option>
+                    <option value="partial">Kısmen Yaptı</option>
+                    <option value="not_done">Yapmadı</option>
+                    <option value="unchecked">Kontrol Edilmedi</option>
+                  </select>
+                  {homeworkError ? <p style={{ margin:"6px 0 0", fontSize:11, color:"#dc2626", fontWeight:800 }}>Ödev durumunu seçin.</p> : null}
+                  <label style={{ ...LBL, marginTop:10 }}>Ödev Kontrol Notu</label>
+                  <NoteArea value={homeworkCheckNote} onChange={setHomeworkCheckNote} placeholder="İsteğe bağlı kısa not" />
+                </div> : null}
                 <label style={{ ...LBL, marginTop:0 }}>Aktif Ders Süresi (dk)</label>
                 <input style={INP} type="number" min={0} max={duration} value={activeMinutes} onChange={e=>setActiveMinutes(e.target.value)} placeholder="Örn. 35" />
                 <label style={LBL}>En Uzun Odaklanma (dk)</label>
@@ -1585,7 +1719,10 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
                 </select>
                 <label style={LBL}>Öğretmen Notu</label>
                 <NoteArea value={doneNote} onChange={setDoneNote} placeholder="Kısa not" />
+                <label style={LBL}>Gelecek Ders İçin Ödev</label>
+                <NoteArea value={homework} onChange={setHomework} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
                 <Btn bg="#10b981" onClick={() => {
+                  if (previousHomework && !homeworkStatus) { setHomeworkError(true); return; }
                   onSave(record.id, {
                     action: "attended",
                     doneAt: plannedAt || `${date}T${time}:00`,
@@ -1593,6 +1730,11 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
                     activeMinutes: parseInt(activeMinutes) || 0,
                     focusMinutes: parseInt(focusMinutes) || 0,
                     focusSection,
+                    homework:homework.trim(),
+                    previousHomeworkSource:previousHomework?.homeworkSource || null,
+                    previousHomeworkSourceId:previousHomework?.homeworkSourceId || null,
+                    homeworkStatus:previousHomework ? homeworkStatus : "",
+                    homeworkCheckNote:previousHomework ? homeworkCheckNote.trim() : "",
                   });
                   onClose();
                 }}>Katılımı Kaydet</Btn>
@@ -2902,12 +3044,16 @@ function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStuden
       {todayLessons.map(({kind, student, lesson, record, time}) => {
         const reminderRef = kind === "telafi" ? telafiReminderRef(record) : (lesson.id || dateKey(lesson.date));
         const sent = lessonReminderSentInfo(student, { id:reminderRef });
+        const occurrenceDate = kind === "telafi" ? telafiPlannedAt(record) : lesson.date;
+        const occurrenceRef = homeworkCheckRef(kind === "telafi" ? "telafi" : "schedule", kind === "telafi" ? record.id : lesson.id);
+        const pendingHomework = pendingHomeworkBefore(student, occurrenceDate, occurrenceRef);
         return (
         <div key={kind+"-"+(lesson?.id || record?.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #e0f2fe" }}>
           <div onClick={() => kind === "telafi" ? onTelafiClick(student) : onStudentClick(student)} style={{ cursor:"pointer" }}>
             <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
             <p style={{ margin:"2px 0 0", fontSize:12, color:kind==="telafi"?"#7e22ce":"#0369a1", fontWeight:kind==="telafi"?700:400 }}>{time} · {student.instrument}{kind === "telafi" ? " · Telafi dersi" : ""}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent ? "Hatırlatma gönderildi" : "Hatırlatma bekliyor"}</p>
+            {pendingHomework ? <p style={{ margin:"3px 0 0", fontSize:11, color:"#b45309", fontWeight:800 }}>● Ödev kontrolü var</p> : null}
           </div>
           <div style={{ display:"flex", gap:6, flexShrink:0 }}>
             {student.phone ? (
@@ -3503,6 +3649,37 @@ export default function App() {
     return { id:uid(), lessonId:lesson?.id||null, lessonDate:lesson?.date||new Date().toISOString(), note, createdAt:new Date().toISOString(), expiry:expiry30(), done:false, doneAt:null };
   };
 
+  const clearHomeworkEffects = (schedule, lessonId) => (schedule || []).map(item => {
+    if (item.id === lessonId) {
+      return {
+        ...item,
+        homework:"",
+        homeworkStatus:"",
+        homeworkCheckNote:"",
+        homeworkCheckedAt:null,
+        homeworkCheckedInRef:null,
+      };
+    }
+    if (item.homeworkCheckedInRef === homeworkCheckRef("lesson", lessonId)) {
+      return {
+        ...item,
+        homeworkStatus:"pending",
+        homeworkCheckNote:"",
+        homeworkCheckedAt:null,
+        homeworkCheckedInRef:null,
+      };
+    }
+    return item;
+  });
+
+  const clearHomeworkCheckInTelafi = (records, checkRef) => (records || []).map(item => item.homeworkCheckedInRef === checkRef ? {
+    ...item,
+    homeworkStatus:"pending",
+    homeworkCheckNote:"",
+    homeworkCheckedAt:null,
+    homeworkCheckedInRef:null,
+  } : item);
+
   const buildActionUpdate = (sourceStudents, sid, action, note="", lid=null) => {
     let msg = "Kaydedildi";
     const updated = sourceStudents.map(s => {
@@ -3514,42 +3691,70 @@ export default function App() {
         case "attended": {
           const detail = typeof note === "object" && note ? note : {};
           msg = "Katılım ve verim bilgisi kaydedildi";
+          const homeworkText = (detail.homework || "").trim();
+          const checkedAt = new Date().toISOString();
+          const checkRef = homeworkCheckRef("lesson", lid);
+          const cleanedTelafiRecords = cleanTelafiForLesson(s.telafi_records||[]).map(record => detail.previousHomeworkSource === "telafi" && record.id === detail.previousHomeworkSourceId ? {
+            ...record,
+            homeworkStatus:detail.homeworkStatus,
+            homeworkCheckNote:detail.homeworkCheckNote || "",
+            homeworkCheckedAt:checkedAt,
+            homeworkCheckedInRef:checkRef,
+          } : record);
           return {
             ...s,
             no_show:Math.max(0, s.no_show+noShowFix),
-            telafi_records:cleanTelafiForLesson(s.telafi_records||[]),
-            schedule:(s.schedule||[]).map(l => l.id===lid ? {
-              ...l,
-              status:"completed",
-              note:detail.note || "",
-              activeMinutes:detail.activeMinutes || 0,
-              focusMinutes:detail.focusMinutes || 0,
-              productiveWindow:detail.productiveWindow !== undefined ? detail.productiveWindow : (l.productiveWindow || l.productive_window || ""),
-              focusSection:detail.focusSection || "",
-            } : l),
+            telafi_records:cleanedTelafiRecords,
+            schedule:(s.schedule||[]).map(l => {
+              if (detail.previousHomeworkSource === "schedule" && l.id === detail.previousHomeworkSourceId) {
+                return {
+                  ...l,
+                  homeworkStatus:detail.homeworkStatus,
+                  homeworkCheckNote:detail.homeworkCheckNote || "",
+                  homeworkCheckedAt:checkedAt,
+                  homeworkCheckedInRef:checkRef,
+                };
+              }
+              if (l.id !== lid) return l;
+              const homeworkChanged = (l.homework || "") !== homeworkText;
+              return {
+                ...l,
+                status:"completed",
+                note:detail.note || "",
+                activeMinutes:detail.activeMinutes || 0,
+                focusMinutes:detail.focusMinutes || 0,
+                productiveWindow:detail.productiveWindow !== undefined ? detail.productiveWindow : (l.productiveWindow || l.productive_window || ""),
+                focusSection:detail.focusSection || "",
+                homework:homeworkText,
+                homeworkStatus:homeworkText ? (homeworkChanged ? "pending" : (l.homeworkStatus || "pending")) : "",
+                homeworkCheckNote:homeworkText && !homeworkChanged ? (l.homeworkCheckNote || "") : "",
+                homeworkCheckedAt:homeworkText && !homeworkChanged ? (l.homeworkCheckedAt || null) : null,
+                homeworkCheckedInRef:homeworkText && !homeworkChanged ? (l.homeworkCheckedInRef || null) : null,
+              };
+            }),
           };
         }
         case "telafi": {
           const rec = mkTelafi(s, lid, note||"24 saat oncesi iptal");
-          const recs = [...cleanTelafiForLesson(s.telafi_records||[]), rec];
+          const recs = clearHomeworkCheckInTelafi([...cleanTelafiForLesson(s.telafi_records||[]), rec], homeworkCheckRef("lesson", lid));
           const ac = recs.filter(r=>!r.done).length;
           const frozen = ac>=6 ? true : s.frozen;
           msg = ac>=6 ? "6. telafi - program donduruldu" : ac===5 ? "5. telafi uyarisi" : "Telafi oluşturuldu";
-          const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(s.schedule, lid, "telafi", note)};
+          const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "telafi", note)};
           return frozen && !s.frozen ? withStatusEvent(next, "frozen") : next;
         }
         case "lm-telafi": {
           const rec = mkTelafi(s, lid, note||"Son dakika iptali");
-          const recs = [...cleanTelafiForLesson(s.telafi_records||[]), rec];
+          const recs = clearHomeworkCheckInTelafi([...cleanTelafiForLesson(s.telafi_records||[]), rec], homeworkCheckRef("lesson", lid));
           const ac = recs.filter(r=>!r.done).length;
           const frozen = ac>=6 ? true : s.frozen;
           msg = ac>=6 ? "6. telafi - program donduruldu" : "Son dakika + telafi kaydedildi";
-          const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(s.schedule, lid, "lastminute", note||"Son dakika iptali")};
+          const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "lastminute", note||"Son dakika iptali")};
           return frozen && !s.frozen ? withStatusEvent(next, "frozen") : next;
         }
-        case "lm-notelafi": msg = "Son dakika iptali"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "lastminute", note||"Son dakika iptali")};
-        case "noshow": msg = "No-show kaydedildi"; return {...s, no_show:Math.max(0, s.no_show + (oldLesson?.status === "noshow" ? 0 : 1)), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: updLesson(s.schedule, lid, "noshow", note||"Habersiz gelmedi")};
-        case "reset-upcoming": msg = "Ders planlandıya alındı"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:cleanTelafiForLesson(s.telafi_records||[]), schedule: (s.schedule||[]).map(l => l.id===lid ? {...l, status:"upcoming", note:"", activeMinutes:0, focusMinutes:0, productiveMinutes:0, productiveWindow:"", focusSection:""} : l)};
+        case "lm-notelafi": msg = "Son dakika iptali"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:clearHomeworkCheckInTelafi(cleanTelafiForLesson(s.telafi_records||[]), homeworkCheckRef("lesson", lid)), schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "lastminute", note||"Son dakika iptali")};
+        case "noshow": msg = "No-show kaydedildi"; return {...s, no_show:Math.max(0, s.no_show + (oldLesson?.status === "noshow" ? 0 : 1)), telafi_records:clearHomeworkCheckInTelafi(cleanTelafiForLesson(s.telafi_records||[]), homeworkCheckRef("lesson", lid)), schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "noshow", note||"Habersiz gelmedi")};
+        case "reset-upcoming": msg = "Ders planlandıya alındı"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:clearHomeworkCheckInTelafi(cleanTelafiForLesson(s.telafi_records||[]), homeworkCheckRef("lesson", lid)), schedule: clearHomeworkEffects(s.schedule, lid).map(l => l.id===lid ? {...l, status:"upcoming", note:"", activeMinutes:0, focusMinutes:0, productiveMinutes:0, productiveWindow:"", focusSection:""} : l)};
         default: return s;
       }
     });
@@ -3625,9 +3830,27 @@ export default function App() {
 
   const handleTelafiDone = async (sid, tid, payload = {}) => {
     const action = payload.action || "attended";
-    const updated = students.map(s => s.id!==sid ? s : {
-      ...s,
-      telafi_records: (s.telafi_records || []).map(r => {
+    const updated = students.map(s => {
+      if (s.id !== sid) return s;
+      const checkRef = homeworkCheckRef("telafi", tid);
+      const checkedAt = new Date().toISOString();
+      const schedule = (s.schedule || []).map(lesson => action === "attended" && payload.previousHomeworkSource === "schedule" && lesson.id === payload.previousHomeworkSourceId ? {
+        ...lesson,
+        homeworkStatus:payload.homeworkStatus,
+        homeworkCheckNote:payload.homeworkCheckNote || "",
+        homeworkCheckedAt:checkedAt,
+        homeworkCheckedInRef:checkRef,
+      } : lesson);
+      const telafiRecords = (s.telafi_records || []).map(r => {
+        if (action === "attended" && payload.previousHomeworkSource === "telafi" && r.id === payload.previousHomeworkSourceId) {
+          return {
+            ...r,
+            homeworkStatus:payload.homeworkStatus,
+            homeworkCheckNote:payload.homeworkCheckNote || "",
+            homeworkCheckedAt:checkedAt,
+            homeworkCheckedInRef:checkRef,
+          };
+        }
         if (r.id !== tid) return r;
         if (action === "plan") {
           return {
@@ -3646,6 +3869,8 @@ export default function App() {
             doneNote:payload.doneNote || "",
           };
         }
+        const homeworkText = (payload.homework || "").trim();
+        const homeworkChanged = (r.homework || "") !== homeworkText;
         return {
           ...r,
           done:true,
@@ -3656,8 +3881,14 @@ export default function App() {
           focusMinutes:payload.focusMinutes || 0,
           productiveWindow:payload.productiveWindow || "",
           focusSection:payload.focusSection || "",
+          homework:homeworkText,
+          homeworkStatus:homeworkText ? (homeworkChanged ? "pending" : (r.homeworkStatus || "pending")) : "",
+          homeworkCheckNote:homeworkText && !homeworkChanged ? (r.homeworkCheckNote || "") : "",
+          homeworkCheckedAt:homeworkText && !homeworkChanged ? (r.homeworkCheckedAt || null) : null,
+          homeworkCheckedInRef:homeworkText && !homeworkChanged ? (r.homeworkCheckedInRef || null) : null,
         };
-      })
+      });
+      return { ...s, schedule, telafi_records:telafiRecords };
     });
     setStudents(updated);
     const savedStudent = await saveStudent(updated.find(s=>s.id===sid));
