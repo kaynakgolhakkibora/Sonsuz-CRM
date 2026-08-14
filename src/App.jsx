@@ -841,7 +841,7 @@ function nextRaiseDate(student) {
 }
 
 function isRaiseDue(student) {
-  if (student.frozen || !student.last_raise_date) return false;
+  if (student.frozen || isStudentLeft(student) || !student.last_raise_date) return false;
   const next = nextRaiseDate(student);
   return next ? midday(new Date(next)) <= midday() : false;
 }
