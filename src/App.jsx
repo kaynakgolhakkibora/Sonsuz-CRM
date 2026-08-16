@@ -322,6 +322,12 @@ const PAYMENT_PACK_SIZE = 4;
 const PACKAGE_LOAD_OPTIONS = [4, 8, 12, 16];
 const PAID_LESSON_STATUSES = ["completed", "noshow", "lastminute"];
 const SCORE_STATUSES = ["completed", "telafi", "lastminute", "noshow"];
+const LESSON_FOCUS_OPTIONS = ["Parça Tekrarı","Yeni Parça Çalışması","Teknik Çalışma","Ritim Çalışması","Teorik Çalışma"];
+const PIECE_RESULT_OPTIONS = [
+  { value:"complete", label:"Tam ve akıcı parça çıktı", score:100 },
+  { value:"partial", label:"Kısmen çıktı", score:50 },
+  { value:"none", label:"Çıkmadı", score:0 },
+];
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -334,6 +340,67 @@ function fmtNumber(n, digits = 1) {
 
 function scoreLabel(score) {
   return Number.isFinite(score) ? fmtNumber(score, 1) + "/10" : "-";
+}
+
+function roundedScore(value) {
+  return Math.round((Number(value) || 0) * 10) / 10;
+}
+
+function homeworkLessonPoints(status) {
+  return status === "done" ? 40 : status === "partial" ? 20 : 0;
+}
+
+function activeLessonPoints(minutes) {
+  const value = Math.max(0, parseInt(minutes) || 0);
+  if (value >= 35) return 10;
+  if (value >= 20) return 8;
+  if (value >= 10) return 5;
+  return 0;
+}
+
+function taskFocusLessonPoints(minutes) {
+  const value = Math.max(0, parseInt(minutes) || 0);
+  if (value >= 30) return 20;
+  if (value >= 20) return 16;
+  if (value >= 10) return 12;
+  if (value >= 5) return 8;
+  return 4;
+}
+
+function redirectionLessonPoints(count) {
+  return Math.max(0, 30 - (Math.max(0, parseInt(count) || 0) * 3));
+}
+
+function calculateLessonScore({ homeworkStatus, homeworkApplicable=true, activeMinutes, taskFocusMinutes, redirectionCount }) {
+  const homework = homeworkApplicable ? homeworkLessonPoints(homeworkStatus) : 0;
+  const active = activeLessonPoints(activeMinutes);
+  const taskFocus = taskFocusLessonPoints(taskFocusMinutes);
+  const redirection = redirectionLessonPoints(redirectionCount);
+  const earned = homework + active + taskFocus + redirection;
+  const maximum = homeworkApplicable ? 100 : 60;
+  return {
+    homework,
+    homeworkMaximum:homeworkApplicable ? 40 : 0,
+    active,
+    activeMaximum:10,
+    taskFocus,
+    taskFocusMaximum:20,
+    redirection,
+    redirectionMaximum:30,
+    earned,
+    maximum,
+    total:maximum ? roundedScore((earned / maximum) * 100) : 0,
+    homeworkApplicable,
+  };
+}
+
+function storedLessonScore(record) {
+  const score = Number(record?.lessonScore ?? record?.lesson_score);
+  return Number.isFinite(score) ? score : null;
+}
+
+function pieceResultOption(value) {
+  return PIECE_RESULT_OPTIONS.find(option => option.value === value) || null;
 }
 
 function readFailedOps() {
@@ -442,7 +509,9 @@ function telafiStatusLabel(record) {
 function telafiMetricText(record) {
   const parts = [];
   if (record?.activeMinutes) parts.push(record.activeMinutes + " dk aktif");
-  if (record?.focusMinutes) parts.push(record.focusMinutes + " dk odak");
+  if (record?.taskFocusMinutes !== undefined || record?.task_focus_minutes !== undefined) parts.push((record.taskFocusMinutes ?? record.task_focus_minutes) + " dk görev odağı");
+  else if (record?.focusMinutes) parts.push(record.focusMinutes + " dk odak");
+  if (record?.redirectionCount !== undefined || record?.redirection_count !== undefined) parts.push((record.redirectionCount ?? record.redirection_count) + " yönlendirme");
   if (record?.productiveWindow) parts.push(record.productiveWindow + " en verimli bölüm");
   return parts.join(", ");
 }
@@ -1010,15 +1079,63 @@ function summarySentInfo(student, info) {
   return (student.package_summary_logs || []).find(log => log.packageKey === key) || null;
 }
 
+function packageEvaluationLessons(student, info) {
+  const ids = new Set(info?.lessonIds || []);
+  return (student.schedule || [])
+    .filter(lesson => ids.has(lesson.id))
+    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+}
+
+function packageEvaluationStats(student, info) {
+  if (!info) return null;
+  const lessons = packageEvaluationLessons(student, info);
+  if (!lessons.length) return null;
+  const expectedLessonCount = Math.max(1, parseInt(info.expectedPackageSize || info.packageSize || lessons.length) || lessons.length);
+  const attendedLessons = lessons.filter(lesson => lesson.status === "completed");
+  const scoredLessons = attendedLessons.filter(lesson => storedLessonScore(lesson) !== null);
+  const attendanceScore = roundedScore((attendedLessons.length / expectedLessonCount) * 100);
+  const lessonAverage = scoredLessons.length
+    ? roundedScore(scoredLessons.reduce((sum,lesson)=>sum+storedLessonScore(lesson),0) / scoredLessons.length)
+    : 0;
+  return {
+    lessons,
+    expectedLessonCount,
+    attendedLessons,
+    scoredLessons,
+    attendanceScore,
+    lessonAverage,
+    missingScoreCount:attendedLessons.length - scoredLessons.length,
+  };
+}
+
+function periodEvaluationInfo(student, info) {
+  const log = summarySentInfo(student, info);
+  return log?.evaluation ? log : null;
+}
+
+function periodEvaluationScore(attendanceScore, lessonAverage, pieceScore) {
+  return roundedScore(((Number(attendanceScore)||0) + (Number(lessonAverage)||0) + (Number(pieceScore)||0)) / 3);
+}
+
+function invalidatePeriodEvaluationForLesson(student, lessonId) {
+  if (!student || !lessonId) return student;
+  const info = [...customPackageInfos(student), ...regularPackageInfos(student)].find(item => (item.lessonIds || []).includes(lessonId));
+  const key = packageSummaryKey(info);
+  if (!key) return student;
+  const logs = student.package_summary_logs || [];
+  if (!logs.some(log => log.packageKey === key && log.evaluation)) return student;
+  return { ...student, package_summary_logs:logs.filter(log => log.packageKey !== key) };
+}
+
 function lessonEngagementStats(student, info) {
   const ids = new Set(info?.lessonIds || []);
   const lessons = (student.schedule || []).filter(l => ids.has(l.id) && l.status === "completed");
-  const withStats = lessons.filter(l => l.activeMinutes || l.focusMinutes || l.productiveWindow || l.focusSection);
+  const withStats = lessons.filter(l => l.activeMinutes || l.taskFocusMinutes || l.focusMinutes || l.productiveWindow || l.lessonFocus || l.focusSection);
   if (!withStats.length) return null;
   const totalActive = withStats.reduce((sum,l)=>sum+(parseInt(l.activeMinutes)||0),0);
   const totalDuration = withStats.reduce((sum,l)=>sum+getLessonDuration(student, l),0);
   const avgActiveRate = totalDuration ? Math.round((totalActive / totalDuration) * 100) : 0;
-  const focusValues = withStats.map(l=>parseInt(l.focusMinutes)||0).filter(Boolean);
+  const focusValues = withStats.map(l=>parseInt(l.taskFocusMinutes ?? l.task_focus_minutes ?? l.focusMinutes)||0).filter(Boolean);
   const avgFocus = focusValues.length ? focusValues.reduce((a,b)=>a+b,0) / focusValues.length : 0;
   const windowCounts = {};
   withStats.forEach(l => {
@@ -1038,6 +1155,8 @@ function lessonEngagementStats(student, info) {
 
 function lessonPerformanceScore(student, lesson) {
   if (!lesson || lesson.status !== "completed") return null;
+  const storedScore = storedLessonScore(lesson);
+  if (storedScore !== null) return clamp(storedScore / 10, 0, 10);
   const duration = getLessonDuration(student, lesson);
   if (!duration) return null;
   const active = parseInt(lesson.activeMinutes) || 0;
@@ -1420,15 +1539,16 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
   const previousHomework = homeworkForLessonCheck(student, lesson);
   const lessonCheckRef = homeworkCheckRef("lesson", lesson?.id);
   const checkedHomework = homeworkCheckedInOccurrence(student, lessonCheckRef);
+  const homeworkToEvaluate = previousHomework || checkedHomework;
   const [step, setStep] = useState("main");
   const [note, setNote] = useState(lesson?.note || "");
   const [activeMinutes, setActiveMinutes] = useState(lesson?.activeMinutes ?? lesson?.active_minutes ?? "");
-  const [focusMinutes, setFocusMinutes] = useState(lesson?.focusMinutes ?? lesson?.focus_minutes ?? "");
-  const [focusSection, setFocusSection] = useState(lesson?.focusSection || lesson?.focus_section || FOCUS_SECTIONS[0]);
+  const [taskFocusMinutes, setTaskFocusMinutes] = useState(lesson?.taskFocusMinutes ?? lesson?.task_focus_minutes ?? lesson?.focusMinutes ?? lesson?.focus_minutes ?? "");
+  const [redirectionCount, setRedirectionCount] = useState(lesson?.redirectionCount ?? lesson?.redirection_count ?? "");
+  const [lessonFocus, setLessonFocus] = useState(lesson?.lessonFocus || lesson?.lesson_focus || LESSON_FOCUS_OPTIONS[0]);
   const [homework, setHomework] = useState(lesson?.homework || "");
-  const [homeworkStatus, setHomeworkStatus] = useState(previousHomework?.homeworkCheckedInRef === lessonCheckRef ? (previousHomework.homeworkStatus || "") : "");
-  const [homeworkCheckNote, setHomeworkCheckNote] = useState(previousHomework?.homeworkCheckedInRef === lessonCheckRef ? (previousHomework.homeworkCheckNote || "") : "");
-  const [homeworkError, setHomeworkError] = useState(false);
+  const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === lessonCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
+  const [formError, setFormError] = useState("");
   const activeTelafi = student.telafi_records.filter(r=>!r.done).length;
   const willWarn = activeTelafi === 4;
   const willFreeze = activeTelafi === 5;
@@ -1454,8 +1574,9 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
               {[
                 ["Ders süresi", getLessonDuration(student, lesson)+" dk"],
                 ["Aktif ders süresi", lesson.activeMinutes ?? lesson.active_minutes, " dk"],
-                ["En uzun odaklanma", lesson.focusMinutes ?? lesson.focus_minutes, " dk"],
-                ["Dersin güçlü bölümü", lesson.focusSection || lesson.focus_section],
+                [lesson.taskFocusMinutes !== undefined || lesson.task_focus_minutes !== undefined ? "Görev odağını sürdürme" : "En uzun odaklanma", lesson.taskFocusMinutes ?? lesson.task_focus_minutes ?? lesson.focusMinutes ?? lesson.focus_minutes, " dk"],
+                ["Yeniden yönlendirme", lesson.redirectionCount ?? lesson.redirection_count, " kez"],
+                [lesson.lessonFocus || lesson.lesson_focus ? "Dersin temel odağı" : "Dersin güçlü bölümü", lesson.lessonFocus || lesson.lesson_focus || lesson.focusSection || lesson.focus_section],
                 ["En verimli zaman", lesson.productiveWindow || lesson.productive_window],
               ].filter(([,value])=>value !== undefined && value !== null && value !== "").map(([label,value,suffix=""]) => (
                 <div key={label} style={{ display:"flex", justifyContent:"space-between", gap:12, marginBottom:5, fontSize:12 }}>
@@ -1463,6 +1584,11 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
                   <span style={{ color:"#0f172a", fontWeight:700, textAlign:"right" }}>{value}{suffix}</span>
                 </div>
               ))}
+              {storedLessonScore(lesson) !== null ? <div style={{ margin:"9px 0 0", background:"#ecfdf5", border:"1px solid #a7f3d0", borderRadius:10, padding:"10px 11px" }}>
+                <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#047857", letterSpacing:.5 }}>DERS VERİM PUANI</p>
+                <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:900, color:"#065f46" }}>{fmtNumber(storedLessonScore(lesson))}/100</p>
+                {lesson.lessonScoreBreakdown ? <p style={{ margin:"5px 0 0", fontSize:11, color:"#047857" }}>{lesson.lessonScoreBreakdown.homeworkApplicable === false ? "Ödev değerlendirilmedi" : "Ödev "+lesson.lessonScoreBreakdown.homework+"/40"} · Aktif süre {lesson.lessonScoreBreakdown.active}/10 · Görev odağı {lesson.lessonScoreBreakdown.taskFocus}/20 · Yönlendirme {lesson.lessonScoreBreakdown.redirection}/30</p> : null}
+              </div> : null}
               <div style={{ marginTop:7, background:"#fff", border:"1px solid #e2e8f0", borderRadius:9, padding:"8px 9px" }}>
                 <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#94a3b8", letterSpacing:.5 }}>ÖĞRETMEN NOTU</p>
                 <p style={{ margin:"4px 0 0", fontSize:12, color:lesson.note?"#334155":"#94a3b8", whiteSpace:"pre-wrap" }}>{lesson.note || "Bu ders için not girilmemiş."}</p>
@@ -1497,44 +1623,58 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
       </>}
       {step === "attended" && <>
         <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ders verim bilgilerini gir.</p>
-        {previousHomework ? <div style={{ background:"#fffbeb", border:`1px solid ${homeworkError?"#ef4444":"#fde68a"}`, borderRadius:12, padding:"11px 12px", marginBottom:14 }}>
+        {homeworkToEvaluate ? <div style={{ background:"#fffbeb", border:`1px solid ${formError && !homeworkStatus?"#ef4444":"#fde68a"}`, borderRadius:12, padding:"11px 12px", marginBottom:14 }}>
           <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#92400e", letterSpacing:.5 }}>ÖNCEKİ ÖDEV KONTROLÜ</p>
-          <p style={{ margin:"5px 0 10px", fontSize:13, color:"#78350f", whiteSpace:"pre-wrap" }}>{previousHomework.homework}</p>
-          <select style={{ ...INP, borderColor:homeworkError?"#ef4444":"#ded9d3" }} value={homeworkStatus} onChange={event=>{ setHomeworkStatus(event.target.value); setHomeworkError(false); }}>
+          <p style={{ margin:"5px 0 10px", fontSize:13, color:"#78350f", whiteSpace:"pre-wrap" }}>{homeworkToEvaluate.homework}</p>
+          <select style={{ ...INP, borderColor:formError && !homeworkStatus?"#ef4444":"#ded9d3" }} value={homeworkStatus} onChange={event=>{ setHomeworkStatus(event.target.value); setFormError(""); }}>
             <option value="">Durumu seçin</option>
             <option value="done">Yaptı</option>
             <option value="partial">Kısmen Yaptı</option>
             <option value="not_done">Yapmadı</option>
-            <option value="unchecked">Kontrol Edilmedi</option>
           </select>
-          {homeworkError ? <p style={{ margin:"6px 0 0", fontSize:11, color:"#dc2626", fontWeight:800 }}>Ödev durumunu seçin.</p> : null}
-          <label style={{ ...LBL, marginTop:10 }}>Ödev Kontrol Notu</label>
-          <NoteArea value={homeworkCheckNote} onChange={setHomeworkCheckNote} placeholder="İsteğe bağlı kısa not" />
         </div> : null}
         <label style={{ ...LBL, marginTop:0 }}>Aktif Ders Süresi (dk)</label>
-        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={activeMinutes} onChange={e=>setActiveMinutes(e.target.value)} placeholder="Örn. 35" />
-        <label style={LBL}>En Uzun Odaklanma (dk)</label>
-        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={focusMinutes} onChange={e=>setFocusMinutes(e.target.value)} placeholder="Örn. 12" />
-        <label style={LBL}>Dersin Güçlü Bölümü</label>
-        <select style={INP} value={focusSection} onChange={e=>setFocusSection(e.target.value)}>
-          {FOCUS_SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={activeMinutes} onChange={e=>{ setActiveMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 35" />
+        <label style={LBL}>Görev Odağını Sürdürme (en uzun / yaklaşık dk)</label>
+        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={taskFocusMinutes} onChange={e=>{ setTaskFocusMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 17" />
+        <label style={LBL}>Yeniden Yönlendirme Sayısı</label>
+        <input style={INP} type="number" min={0} step={1} value={redirectionCount} onChange={e=>{ setRedirectionCount(e.target.value); setFormError(""); }} placeholder="Örn. 2" />
+        <label style={LBL}>Dersin Temel Odağı</label>
+        <select style={INP} value={lessonFocus} onChange={e=>setLessonFocus(e.target.value)}>
+          {LESSON_FOCUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <label style={LBL}>Öğretmen Notu</label>
         <NoteArea value={note} onChange={setNote} placeholder="Kısa not" />
         <label style={LBL}>Gelecek Ders İçin Ödev</label>
-        <NoteArea value={homework} onChange={setHomework} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
+        <NoteArea value={homework} onChange={value=>{ setHomework(value); setFormError(""); }} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
+        {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
         <Btn bg="#10b981" onClick={() => {
-          if (previousHomework && !homeworkStatus) { setHomeworkError(true); return; }
+          const duration = getLessonDuration(student, lesson);
+          if (homeworkToEvaluate && !homeworkStatus) { setFormError("Ödev durumunu seçin."); return; }
+          if (activeMinutes === "" || parseInt(activeMinutes) < 0 || parseInt(activeMinutes) > duration) { setFormError("Geçerli aktif ders süresi girin."); return; }
+          if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > duration) { setFormError("Geçerli görev odağı süresi girin."); return; }
+          if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
+          if (!homework.trim()) { setFormError("Gelecek ders ödevini girin."); return; }
+          const scoreBreakdown = calculateLessonScore({
+            homeworkStatus,
+            homeworkApplicable:!!homeworkToEvaluate,
+            activeMinutes,
+            taskFocusMinutes,
+            redirectionCount,
+          });
           onAction("attended", {
             note,
             activeMinutes:parseInt(activeMinutes)||0,
-            focusMinutes:parseInt(focusMinutes)||0,
-            focusSection,
+            taskFocusMinutes:parseInt(taskFocusMinutes)||0,
+            redirectionCount:parseInt(redirectionCount)||0,
+            lessonFocus,
+            lessonScore:scoreBreakdown.total,
+            lessonScoreBreakdown:scoreBreakdown,
             homework:homework.trim(),
-            previousHomeworkSource:previousHomework?.homeworkSource || null,
-            previousHomeworkSourceId:previousHomework?.homeworkSourceId || null,
-            homeworkStatus:previousHomework ? homeworkStatus : "",
-            homeworkCheckNote:previousHomework ? homeworkCheckNote.trim() : "",
+            previousHomeworkSource:homeworkToEvaluate?.homeworkSource || null,
+            previousHomeworkSourceId:homeworkToEvaluate?.homeworkSourceId || null,
+            homeworkStatus:homeworkToEvaluate ? homeworkStatus : "",
+            evaluatedHomework:homeworkToEvaluate?.homework || "",
           }, lessonId || lesson?.id);
         }}>Katılımı Kaydet</Btn>
         <Btn bg="#111" outline onClick={() => reset("main")}>Geri</Btn>
@@ -1604,6 +1744,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
   const telafiCheckRef = homeworkCheckRef("telafi", record?.id);
   const previousHomework = homeworkForTelafiCheck(student, record);
   const checkedHomework = homeworkCheckedInOccurrence(student, telafiCheckRef);
+  const homeworkToEvaluate = previousHomework || checkedHomework;
   const plannedDate = plannedAt ? dateKey(plannedAt) : new Date().toISOString().split("T")[0];
   const plannedTime = plannedAt ? timeFromISO(plannedAt) : (student?.time || "10:00");
   const [step, setStep] = useState(plannedAt || record.done ? "main" : "plan");
@@ -1611,14 +1752,14 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
   const [time, setTime] = useState(plannedTime);
   const [duration, setDuration] = useState(record.plannedDurationMinutes || getLessonDuration(student));
   const [note, setNote] = useState(record.plannedNote || "");
-  const [doneNote, setDoneNote] = useState("");
-  const [activeMinutes, setActiveMinutes] = useState("");
-  const [focusMinutes, setFocusMinutes] = useState("");
-  const [focusSection, setFocusSection] = useState(FOCUS_SECTIONS[0]);
+  const [doneNote, setDoneNote] = useState(record?.doneNote || "");
+  const [activeMinutes, setActiveMinutes] = useState(record?.activeMinutes ?? "");
+  const [taskFocusMinutes, setTaskFocusMinutes] = useState(record?.taskFocusMinutes ?? record?.task_focus_minutes ?? record?.focusMinutes ?? "");
+  const [redirectionCount, setRedirectionCount] = useState(record?.redirectionCount ?? record?.redirection_count ?? "");
+  const [lessonFocus, setLessonFocus] = useState(record?.lessonFocus || record?.lesson_focus || LESSON_FOCUS_OPTIONS[0]);
   const [homework, setHomework] = useState(record?.homework || "");
-  const [homeworkStatus, setHomeworkStatus] = useState(previousHomework?.homeworkCheckedInRef === telafiCheckRef ? (previousHomework.homeworkStatus || "") : "");
-  const [homeworkCheckNote, setHomeworkCheckNote] = useState(previousHomework?.homeworkCheckedInRef === telafiCheckRef ? (previousHomework.homeworkCheckNote || "") : "");
-  const [homeworkError, setHomeworkError] = useState(false);
+  const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === telafiCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
+  const [formError, setFormError] = useState("");
   const days = daysLeft(record.expiry);
   const expired = days !== null && days < 0;
   const urgent = !expired && days !== null && days <= 7;
@@ -1663,6 +1804,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
             <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>Telafi Yapıldı</p>
             {telafiDoneAt(record) && <p style={{ margin:"4px 0 0", fontSize:13, color:"#16a34a" }}>{telafiDoneDateText(record)}</p>}
             {telafiMetricText(record) ? <p style={{ margin:"4px 0 0", fontSize:13, color:"#166534" }}>{telafiMetricText(record)}</p> : null}
+            {storedLessonScore(record) !== null ? <p style={{ margin:"6px 0 0", fontSize:15, color:"#065f46", fontWeight:900 }}>Ders Verim Puanı: {fmtNumber(storedLessonScore(record))}/100</p> : null}
             {record.doneNote ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>{record.doneNote}</p> : null}
             {checkedHomework ? <div style={{ marginTop:9, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:9, padding:"8px 9px" }}>
               <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#92400e", letterSpacing:.5 }}>BU TELAFİDE KONTROL EDİLEN ÖDEV</p>
@@ -1694,46 +1836,54 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
           : step === "attended"
             ? <>
                 <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Telafi dersinin verim bilgilerini gir.</p>
-                {previousHomework ? <div style={{ background:"#fffbeb", border:`1px solid ${homeworkError?"#ef4444":"#fde68a"}`, borderRadius:12, padding:"11px 12px", marginBottom:14 }}>
+                {homeworkToEvaluate ? <div style={{ background:"#fffbeb", border:`1px solid ${formError && !homeworkStatus?"#ef4444":"#fde68a"}`, borderRadius:12, padding:"11px 12px", marginBottom:14 }}>
                   <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#92400e", letterSpacing:.5 }}>ÖNCEKİ ÖDEV KONTROLÜ</p>
-                  <p style={{ margin:"5px 0 10px", fontSize:13, color:"#78350f", whiteSpace:"pre-wrap" }}>{previousHomework.homework}</p>
-                  <select style={{ ...INP, borderColor:homeworkError?"#ef4444":"#ded9d3" }} value={homeworkStatus} onChange={event=>{ setHomeworkStatus(event.target.value); setHomeworkError(false); }}>
+                  <p style={{ margin:"5px 0 10px", fontSize:13, color:"#78350f", whiteSpace:"pre-wrap" }}>{homeworkToEvaluate.homework}</p>
+                  <select style={{ ...INP, borderColor:formError && !homeworkStatus?"#ef4444":"#ded9d3" }} value={homeworkStatus} onChange={event=>{ setHomeworkStatus(event.target.value); setFormError(""); }}>
                     <option value="">Durumu seçin</option>
                     <option value="done">Yaptı</option>
                     <option value="partial">Kısmen Yaptı</option>
                     <option value="not_done">Yapmadı</option>
-                    <option value="unchecked">Kontrol Edilmedi</option>
                   </select>
-                  {homeworkError ? <p style={{ margin:"6px 0 0", fontSize:11, color:"#dc2626", fontWeight:800 }}>Ödev durumunu seçin.</p> : null}
-                  <label style={{ ...LBL, marginTop:10 }}>Ödev Kontrol Notu</label>
-                  <NoteArea value={homeworkCheckNote} onChange={setHomeworkCheckNote} placeholder="İsteğe bağlı kısa not" />
                 </div> : null}
                 <label style={{ ...LBL, marginTop:0 }}>Aktif Ders Süresi (dk)</label>
-                <input style={INP} type="number" min={0} max={duration} value={activeMinutes} onChange={e=>setActiveMinutes(e.target.value)} placeholder="Örn. 35" />
-                <label style={LBL}>En Uzun Odaklanma (dk)</label>
-                <input style={INP} type="number" min={0} max={duration} value={focusMinutes} onChange={e=>setFocusMinutes(e.target.value)} placeholder="Örn. 12" />
-                <label style={LBL}>Dersin Güçlü Bölümü</label>
-                <select style={INP} value={focusSection} onChange={e=>setFocusSection(e.target.value)}>
-                  {FOCUS_SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                <input style={INP} type="number" min={0} max={duration} value={activeMinutes} onChange={e=>{ setActiveMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 35" />
+                <label style={LBL}>Görev Odağını Sürdürme (en uzun / yaklaşık dk)</label>
+                <input style={INP} type="number" min={0} max={duration} value={taskFocusMinutes} onChange={e=>{ setTaskFocusMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 17" />
+                <label style={LBL}>Yeniden Yönlendirme Sayısı</label>
+                <input style={INP} type="number" min={0} step={1} value={redirectionCount} onChange={e=>{ setRedirectionCount(e.target.value); setFormError(""); }} placeholder="Örn. 2" />
+                <label style={LBL}>Dersin Temel Odağı</label>
+                <select style={INP} value={lessonFocus} onChange={e=>setLessonFocus(e.target.value)}>
+                  {LESSON_FOCUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <label style={LBL}>Öğretmen Notu</label>
                 <NoteArea value={doneNote} onChange={setDoneNote} placeholder="Kısa not" />
                 <label style={LBL}>Gelecek Ders İçin Ödev</label>
-                <NoteArea value={homework} onChange={setHomework} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
+                <NoteArea value={homework} onChange={value=>{ setHomework(value); setFormError(""); }} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
+                {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
                 <Btn bg="#10b981" onClick={() => {
-                  if (previousHomework && !homeworkStatus) { setHomeworkError(true); return; }
+                  const lessonDuration = parseInt(duration) || getLessonDuration(student);
+                  if (homeworkToEvaluate && !homeworkStatus) { setFormError("Ödev durumunu seçin."); return; }
+                  if (activeMinutes === "" || parseInt(activeMinutes) < 0 || parseInt(activeMinutes) > lessonDuration) { setFormError("Geçerli aktif ders süresi girin."); return; }
+                  if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > lessonDuration) { setFormError("Geçerli görev odağı süresi girin."); return; }
+                  if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
+                  if (!homework.trim()) { setFormError("Gelecek ders ödevini girin."); return; }
+                  const scoreBreakdown = calculateLessonScore({ homeworkStatus, homeworkApplicable:!!homeworkToEvaluate, activeMinutes, taskFocusMinutes, redirectionCount });
                   onSave(record.id, {
                     action: "attended",
                     doneAt: plannedAt || `${date}T${time}:00`,
                     doneNote,
                     activeMinutes: parseInt(activeMinutes) || 0,
-                    focusMinutes: parseInt(focusMinutes) || 0,
-                    focusSection,
+                    taskFocusMinutes: parseInt(taskFocusMinutes) || 0,
+                    redirectionCount: parseInt(redirectionCount) || 0,
+                    lessonFocus,
+                    lessonScore:scoreBreakdown.total,
+                    lessonScoreBreakdown:scoreBreakdown,
                     homework:homework.trim(),
-                    previousHomeworkSource:previousHomework?.homeworkSource || null,
-                    previousHomeworkSourceId:previousHomework?.homeworkSourceId || null,
-                    homeworkStatus:previousHomework ? homeworkStatus : "",
-                    homeworkCheckNote:previousHomework ? homeworkCheckNote.trim() : "",
+                    previousHomeworkSource:homeworkToEvaluate?.homeworkSource || null,
+                    previousHomeworkSourceId:homeworkToEvaluate?.homeworkSourceId || null,
+                    homeworkStatus:homeworkToEvaluate ? homeworkStatus : "",
+                    evaluatedHomework:homeworkToEvaluate?.homework || "",
                   });
                   onClose();
                 }}>Katılımı Kaydet</Btn>
@@ -2378,7 +2528,7 @@ function msgIlkDersÖdeme() {
 }
 
 function msgYeniKayitKurallari() {
-  return "Sonsuz Sanat Ders Süreci Bilgilendirmesi\n\nDerslerimiz haftalık sabit gün ve saatlerde ilerler. Eğitim sürecinde devamlılık ve düzenli katılım büyük önem taşır.\n\nLütfen aşağıdaki kuralları inceleyiniz:\n\nDers İptalleri\n\n• Ders iptallerinin en az 24 saat önceden bildirilmesi gerekir.\n• Her telafi hakkı oluşturulduğu tarihten itibaren 30 gün geçerlidir.\n• Kullanılmayan telafi hakları bir sonraki döneme devredilmez.\n\nDers Günü İptalleri\n\n• Ders günü yapılan iptallerde, eğer iptal sebebi sağlık sorunlarının dışındaysa ders yapılmış sayılır.\n• Derse habersiz gelinmemesi durumunda ders yapılmış sayılır ve telafi hakkı oluşmaz.\n\nTelafi Dersleri\n\n• Telafi dersleri kurumun uygunluk durumuna göre planlanır, uygunluk oluştuğunda tarafınıza bilgi verilir.\n\nProgram Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi durumunda size ayrılan gün ve saat, öğrenciye özel olarak korunur.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.\n\nÖdeme Düzeni\n\n• Ödemelerin zamanında yapılması programın devamlılığı açısından önemlidir.\n• Ödeme sürecinin aksaması durumunda program dondurulabilir ve ayrılan gün/saat başka öğrencilere açılabilir.\n\nAmacımız tüm öğrencilerimiz için düzenli, adil ve sürdürülebilir bir eğitim süreci oluşturmaktır.\n\nBodrum Sonsuz Sanat";
+  return "Sonsuz Sanat Ders Süreci Bilgilendirmesi\n\nDerslerimiz haftalık sabit gün ve saatlerde ilerler. Eğitim sürecinde devamlılık ve düzenli katılım büyük önem taşır.\n\nLütfen aşağıdaki kuralları inceleyiniz:\n\nDers İptalleri\n\n• Ders iptallerinin en az 24 saat önceden bildirilmesi gerekir.\n• Her telafi hakkı oluşturulduğu tarihten itibaren 30 gün geçerlidir.\n• Kullanılmayan telafi hakları bir sonraki döneme devredilmez.\n\nDers Günü İptalleri\n\n• Ders günü yapılan iptallerde, eğer iptal sebebi sağlık sorunlarının dışındaysa ders yapılmış sayılır.\n• Derse habersiz gelinmemesi durumunda ders yapılmış sayılır ve telafi hakkı oluşmaz.\n\nTelafi Dersleri\n\n• Telafi dersleri kurumun uygunluk durumuna göre planlanır, uygunluk oluştuğunda tarafınıza bilgi verilir.\n\nProgram Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi halinde öğrenciye ayrılan gün ve saat korunur; ders ve ödeme takvimi normal şekilde işlemeye devam eder.\n• Planlı yokluk sırasında derslere katılmasanız bile, size ayırılan gün ve saatin korunması için ödeme günleri gelmeye devam eder ve telafi hakları birikebilir. Bunu istemiyorsanız programı dondurmanızı öneririz.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.\n\nÖdeme Düzeni\n\n• Ödemelerin zamanında yapılması programın devamlılığı açısından önemlidir.\n• Ödeme sürecinin aksaması durumunda program dondurulabilir ve ayrılan gün/saat başka öğrencilere açılabilir.\n\nAmacımız tüm öğrencilerimiz için düzenli, adil ve sürdürülebilir bir eğitim süreci oluşturmaktır.\n\nBodrum Sonsuz Sanat";
 }
 function msgWhatsAppGroup(student) {
   const greeting = student?.veli_adi ? "Merhaba "+student.veli_adi+"," : "Merhaba,";
@@ -2400,7 +2550,7 @@ function paymentOverdueMessageLine(student) {
     .filter(item => item.complete && midday(new Date(item.start)) <= midday() && !hasPaymentForPackage(student, item))
     .sort((a,b)=>new Date(a.start)-new Date(b.start))[0];
   const days = info?.start ? paymentOverdueDays(info.start) : 0;
-  return days > 0 ? "Ödemeniz "+days+" gündür gecikmiştir." : "";
+  return days > 0 ? "Ödemeniz "+days+" gün gecikmiştir." : "";
 }
 function msgÖdemeHatirlatma2(student) {
   const delay = paymentOverdueMessageLine(student);
@@ -2503,12 +2653,115 @@ function msgPaketOzeti(student) {
   return msg;
 }
 
+function msgDersDegerlendirmesi(student, record, type="normal") {
+  const isTelafi = type === "telafi";
+  const date = isTelafi ? (telafiDoneAt(record) || telafiPlannedAt(record)) : record?.date;
+  const breakdown = record?.lessonScoreBreakdown || {};
+  const lines = [
+    "Merhaba,",
+    "",
+    student.name+" için "+(isTelafi ? "telafi dersi" : "bugünkü ders")+" değerlendirmesi:",
+    date ? "Ders tarihi: "+fmtMed(date) : "",
+    "",
+    "Dersin temel odağı: "+(record?.lessonFocus || record?.lesson_focus || "-"),
+    "Aktif ders süresi: "+(parseInt(record?.activeMinutes)||0)+" dakika ("+(breakdown.active ?? 0)+"/10)",
+    "Görev odağını sürdürme: Yaklaşık "+(parseInt(record?.taskFocusMinutes ?? record?.task_focus_minutes)||0)+" dakika ("+(breakdown.taskFocus ?? 0)+"/20)",
+    "Yeniden yönlendirme: "+(parseInt(record?.redirectionCount ?? record?.redirection_count)||0)+" kez ("+(breakdown.redirection ?? 0)+"/30)",
+  ];
+  if (breakdown.homeworkApplicable === false) lines.push("Önceki ödev: İlk ders olduğu için değerlendirilmedi");
+  else lines.push("Önceki ödev: "+homeworkStatusLabel(record?.evaluatedHomeworkStatus)+" ("+(breakdown.homework ?? 0)+"/40)");
+  lines.push("", "Ders Verim Puanı: "+fmtNumber(storedLessonScore(record) ?? 0)+"/100");
+  if (record?.note || record?.doneNote) lines.push("", "Öğretmen notu: "+(record.note || record.doneNote));
+  lines.push("", "Gelecek ders ödevi: "+(record?.homework || "-"), "", "Bodrum Sonsuz Sanat");
+  return lines.join("\n");
+}
+
+function msgDonemDegerlendirmesi(student, info, log) {
+  const evaluation = log?.evaluation;
+  if (!evaluation) return "";
+  const lines = [
+    "Merhaba,",
+    "",
+    student.name+" için dönem değerlendirmesi:",
+  ];
+  if (info?.donem) lines.push("Dönem: "+info.donem);
+  lines.push(
+    "",
+    "Derse katılım: "+fmtNumber(evaluation.attendanceScore)+"/100 ("+evaluation.attendedLessonCount+"/"+evaluation.expectedLessonCount+" ders)",
+    "Dönem derslerinin ortalaması: "+fmtNumber(evaluation.lessonAverage)+"/100",
+    "Parça sonucu: "+evaluation.pieceLabel+" ("+evaluation.pieceScore+"/100)",
+    "",
+    "Dönem Değerlendirme Puanı: "+fmtNumber(evaluation.periodScore)+"/100",
+    "",
+    "Not: Telafi dersleri dönem değerlendirmesine dahil edilmemiştir.",
+    "",
+    "Bodrum Sonsuz Sanat",
+  );
+  return lines.join("\n");
+}
+
+function WhatsAppPreviewSheet({ title, subtitle, text, onClose, onSent }) {
+  const send = async () => {
+    const phone = subtitle?.phone ? subtitle.phone.replace(/[^0-9]/g, "") : "";
+    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
+    else await navigator.clipboard.writeText(text);
+    if (onSent) await onSent(phone ? "whatsapp" : "copied");
+  };
+  const studentName = typeof subtitle === "object" ? subtitle.name : subtitle;
+  return <Sheet title={title} subtitle={studentName} onClose={onClose}>
+    <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
+      <p style={{ margin:0, fontSize:12, color:"#475569", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
+    </div>
+    <Btn bg="#25D366" onClick={send}>{subtitle?.phone ? "WhatsApp'ta Aç" : "Mesajı Kopyala"}</Btn>
+    <Btn bg="#111" outline onClick={onClose}>Kapat</Btn>
+  </Sheet>;
+}
+
+function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
+  const stats = packageEvaluationStats(student, info);
+  const existing = periodEvaluationInfo(student, info)?.evaluation;
+  const [pieceResult, setPieceResult] = useState(existing?.pieceResult || "");
+  const [error, setError] = useState("");
+  const piece = pieceResultOption(pieceResult);
+  const total = piece && stats ? periodEvaluationScore(stats.attendanceScore, stats.lessonAverage, piece.score) : null;
+  return <Sheet title="Dönemi Değerlendir" subtitle={student.name+(info?.donem ? " · "+info.donem : "")} onClose={onClose}>
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(2,minmax(0,1fr))", gap:9, marginBottom:14 }}>
+      <MiniMetric label="Katılım" value={stats ? fmtNumber(stats.attendanceScore)+"/100" : "-"} tone="info" />
+      <MiniMetric label="Ders Ortalaması" value={stats ? fmtNumber(stats.lessonAverage)+"/100" : "-"} tone="special" />
+    </div>
+    {stats ? <p style={{ margin:"0 0 14px", fontSize:12, color:"#64748b" }}>{stats.attendedLessons.length}/{stats.expectedLessonCount} normal derse katıldı · Ortalama {stats.scoredLessons.length} puanlı normal dersten hesaplandı. Telafi dersleri dahil edilmedi.</p> : null}
+    {stats?.missingScoreCount > 0 ? <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:11, padding:"10px 12px", marginBottom:14, color:"#9a3412", fontSize:12, fontWeight:700 }}>{stats.missingScoreCount} katıldığı normal derste yeni puan kaydı bulunmuyor. Yanlış dönem ortalaması oluşmaması için önce bu dersleri değerlendirin.</div> : null}
+    <label style={{ ...LBL, marginTop:0 }}>Net Bir Parça Çıktı mı?</label>
+    <select style={INP} value={pieceResult} onChange={event=>{ setPieceResult(event.target.value); setError(""); }}>
+      <option value="">Seçin</option>
+      {PIECE_RESULT_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label} · {option.score}/100</option>)}
+    </select>
+    {total !== null ? <div style={{ marginTop:14, background:"#ecfdf5", border:"1px solid #a7f3d0", borderRadius:12, padding:"12px 14px" }}><p style={{ margin:0, fontSize:11, color:"#047857", fontWeight:800 }}>DÖNEM DEĞERLENDİRME PUANI</p><p style={{ margin:"4px 0 0", fontSize:24, color:"#065f46", fontWeight:900 }}>{fmtNumber(total)}/100</p></div> : null}
+    {error ? <p style={{ margin:"9px 0 0", color:"#dc2626", fontSize:12, fontWeight:800 }}>{error}</p> : null}
+    <div style={{ marginTop:14 }}><Btn bg="#7e22ce" onClick={()=>{
+      if (!piece) { setError("Parça sonucunu seçin."); return; }
+      if (!stats || stats.missingScoreCount > 0) { setError("Puanı eksik normal dersler tamamlanmadan dönem değerlendirilemez."); return; }
+      onSave({
+        attendanceScore:stats.attendanceScore,
+        attendedLessonCount:stats.attendedLessons.length,
+        expectedLessonCount:stats.expectedLessonCount,
+        lessonAverage:stats.lessonAverage,
+        scoredLessonCount:stats.scoredLessons.length,
+        pieceResult:piece.value,
+        pieceLabel:piece.label,
+        pieceScore:piece.score,
+        periodScore:total,
+      });
+    }}>Değerlendirmeyi Kaydet</Btn></div>
+    <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
+  </Sheet>;
+}
+
 function MesajSheet({ student, onClose, initialKey = "" }) {
   const msgs = [
     { key:"ders", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
     { key:"ilkders", label:"İlk Ders - Ödeme Günü", text:msgIlkDersÖdeme(student) },
     { key:"yenikayit", label:"Yeni Kayıt - Ders Süreci", text:msgYeniKayitKurallari() },
-    { key:"ozet", label:"Dönem Sonu Özeti", text:msgPaketOzeti(student) },
     { key:"odeme1", label:"Ödeme Hatırlatma (1.)", text:msgÖdemeHatirlatma() },
     { key:"odeme2", label:"Ödeme Hatırlatma (2.)", text:msgÖdemeHatirlatma2(student) },
     { key:"odeme3", label:"Ödeme Hatırlatma (3.)", text:msgÖdemeHatirlatma3(student) },
@@ -3467,8 +3720,11 @@ export default function App() {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionModal, setActionModal] = useState(null);
+  const [lessonEvaluationPrompt, setLessonEvaluationPrompt] = useState(null);
   const [telafiMessagePrompt, setTelafiMessagePrompt] = useState(null);
   const [telafiPlanMessagePrompt, setTelafiPlanMessagePrompt] = useState(null);
+  const [periodEvaluationModal, setPeriodEvaluationModal] = useState(null);
+  const [periodSummaryPrompt, setPeriodSummaryPrompt] = useState(null);
   const [detailSt, setDetailSt] = useState(null);
   const [detailInitialTab, setDetailInitialTab] = useState("takvim");
   const [showAdd, setShowAdd] = useState(false);
@@ -3654,6 +3910,14 @@ export default function App() {
     if (item.id === lessonId) {
       return {
         ...item,
+        activeMinutes:0,
+        taskFocusMinutes:0,
+        redirectionCount:0,
+        lessonFocus:"",
+        lessonScore:null,
+        lessonScoreBreakdown:null,
+        evaluatedHomework:"",
+        evaluatedHomeworkStatus:"",
         homework:"",
         homeworkStatus:"",
         homeworkCheckNote:"",
@@ -3698,7 +3962,7 @@ export default function App() {
           const cleanedTelafiRecords = cleanTelafiForLesson(s.telafi_records||[]).map(record => detail.previousHomeworkSource === "telafi" && record.id === detail.previousHomeworkSourceId ? {
             ...record,
             homeworkStatus:detail.homeworkStatus,
-            homeworkCheckNote:detail.homeworkCheckNote || "",
+            homeworkCheckNote:"",
             homeworkCheckedAt:checkedAt,
             homeworkCheckedInRef:checkRef,
           } : record);
@@ -3711,7 +3975,7 @@ export default function App() {
                 return {
                   ...l,
                   homeworkStatus:detail.homeworkStatus,
-                  homeworkCheckNote:detail.homeworkCheckNote || "",
+                  homeworkCheckNote:"",
                   homeworkCheckedAt:checkedAt,
                   homeworkCheckedInRef:checkRef,
                 };
@@ -3723,9 +3987,13 @@ export default function App() {
                 status:"completed",
                 note:detail.note || "",
                 activeMinutes:detail.activeMinutes || 0,
-                focusMinutes:detail.focusMinutes || 0,
-                productiveWindow:detail.productiveWindow !== undefined ? detail.productiveWindow : (l.productiveWindow || l.productive_window || ""),
-                focusSection:detail.focusSection || "",
+                taskFocusMinutes:detail.taskFocusMinutes || 0,
+                redirectionCount:detail.redirectionCount || 0,
+                lessonFocus:detail.lessonFocus || "",
+                lessonScore:detail.lessonScore,
+                lessonScoreBreakdown:detail.lessonScoreBreakdown || null,
+                evaluatedHomework:detail.evaluatedHomework || "",
+                evaluatedHomeworkStatus:detail.homeworkStatus || "",
                 homework:homeworkText,
                 homeworkStatus:homeworkText ? (homeworkChanged ? "pending" : (l.homeworkStatus || "pending")) : "",
                 homeworkCheckNote:homeworkText && !homeworkChanged ? (l.homeworkCheckNote || "") : "",
@@ -3755,7 +4023,7 @@ export default function App() {
         }
         case "lm-notelafi": msg = "Son dakika iptali"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:clearHomeworkCheckInTelafi(cleanTelafiForLesson(s.telafi_records||[]), homeworkCheckRef("lesson", lid)), schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "lastminute", note||"Son dakika iptali")};
         case "noshow": msg = "No-show kaydedildi"; return {...s, no_show:Math.max(0, s.no_show + (oldLesson?.status === "noshow" ? 0 : 1)), telafi_records:clearHomeworkCheckInTelafi(cleanTelafiForLesson(s.telafi_records||[]), homeworkCheckRef("lesson", lid)), schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "noshow", note||"Habersiz gelmedi")};
-        case "reset-upcoming": msg = "Ders planlandıya alındı"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:clearHomeworkCheckInTelafi(cleanTelafiForLesson(s.telafi_records||[]), homeworkCheckRef("lesson", lid)), schedule: clearHomeworkEffects(s.schedule, lid).map(l => l.id===lid ? {...l, status:"upcoming", note:"", activeMinutes:0, focusMinutes:0, productiveMinutes:0, productiveWindow:"", focusSection:""} : l)};
+        case "reset-upcoming": msg = "Ders planlandıya alındı"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:clearHomeworkCheckInTelafi(cleanTelafiForLesson(s.telafi_records||[]), homeworkCheckRef("lesson", lid)), schedule: clearHomeworkEffects(s.schedule, lid).map(l => l.id===lid ? {...l, status:"upcoming", note:"", activeMinutes:0, taskFocusMinutes:0, redirectionCount:0, lessonFocus:"", lessonScore:null, lessonScoreBreakdown:null, evaluatedHomework:"", evaluatedHomeworkStatus:"", focusMinutes:0, productiveMinutes:0, productiveWindow:"", focusSection:""} : l)};
         default: return s;
       }
     });
@@ -3763,7 +4031,9 @@ export default function App() {
   };
 
   const handleAction = async (sid, action, note="", lid=null) => {
-    const { updated, msg } = buildActionUpdate(students, sid, action, note, lid);
+    const built = buildActionUpdate(students, sid, action, note, lid);
+    const msg = built.msg;
+    const updated = built.updated.map(student => student.id === sid ? invalidatePeriodEvaluationForLesson(student, lid) : student);
     const student = updated.find(s => s.id === sid);
     const originalStudent = students.find(s => s.id === sid);
     const lesson = originalStudent?.schedule?.find(l => l.id === lid) || originalStudent?.schedule?.find(l => l.status === "upcoming");
@@ -3779,9 +4049,13 @@ export default function App() {
     };
     setStudents(updated);
     try {
-      await saveStudentWithRetry(student, operation);
+      const savedStudent = await saveStudentWithRetry(student, operation);
       pop(msg);
       setActionModal(null);
+      if (action === "attended") {
+        const evaluatedLesson = (savedStudent.schedule || []).find(item => item.id === (lid || lesson?.id));
+        if (evaluatedLesson && storedLessonScore(evaluatedLesson) !== null) setLessonEvaluationPrompt({ student:savedStudent, record:evaluatedLesson, type:"normal" });
+      }
       if (action === "telafi" || action === "lm-telafi") {
         const previousIds = new Set((originalStudent?.telafi_records || []).map(record => record.id));
         const createdRecord = (student?.telafi_records || []).find(record => !previousIds.has(record.id));
@@ -3838,7 +4112,7 @@ export default function App() {
       const schedule = (s.schedule || []).map(lesson => action === "attended" && payload.previousHomeworkSource === "schedule" && lesson.id === payload.previousHomeworkSourceId ? {
         ...lesson,
         homeworkStatus:payload.homeworkStatus,
-        homeworkCheckNote:payload.homeworkCheckNote || "",
+        homeworkCheckNote:"",
         homeworkCheckedAt:checkedAt,
         homeworkCheckedInRef:checkRef,
       } : lesson);
@@ -3847,7 +4121,7 @@ export default function App() {
           return {
             ...r,
             homeworkStatus:payload.homeworkStatus,
-            homeworkCheckNote:payload.homeworkCheckNote || "",
+            homeworkCheckNote:"",
             homeworkCheckedAt:checkedAt,
             homeworkCheckedInRef:checkRef,
           };
@@ -3879,9 +4153,13 @@ export default function App() {
           doneAt:payload.doneAt || telafiPlannedAt(r) || new Date().toISOString(),
           doneNote:payload.doneNote || "",
           activeMinutes:payload.activeMinutes || 0,
-          focusMinutes:payload.focusMinutes || 0,
-          productiveWindow:payload.productiveWindow || "",
-          focusSection:payload.focusSection || "",
+          taskFocusMinutes:payload.taskFocusMinutes || 0,
+          redirectionCount:payload.redirectionCount || 0,
+          lessonFocus:payload.lessonFocus || "",
+          lessonScore:payload.lessonScore,
+          lessonScoreBreakdown:payload.lessonScoreBreakdown || null,
+          evaluatedHomework:payload.evaluatedHomework || "",
+          evaluatedHomeworkStatus:payload.homeworkStatus || "",
           homework:homeworkText,
           homeworkStatus:homeworkText ? (homeworkChanged ? "pending" : (r.homeworkStatus || "pending")) : "",
           homeworkCheckNote:homeworkText && !homeworkChanged ? (r.homeworkCheckNote || "") : "",
@@ -3897,6 +4175,9 @@ export default function App() {
     if (action === "plan") {
       const plannedRecord = (savedStudent.telafi_records || []).find(record => record.id === tid);
       if (plannedRecord?.plannedAt) setTelafiPlanMessagePrompt({ student:savedStudent, record:plannedRecord });
+    } else if (action === "attended") {
+      const evaluatedRecord = (savedStudent.telafi_records || []).find(record => record.id === tid);
+      if (evaluatedRecord && storedLessonScore(evaluatedRecord) !== null) setLessonEvaluationPrompt({ student:savedStudent, record:evaluatedRecord, type:"telafi" });
     }
   };
 
@@ -4184,42 +4465,68 @@ export default function App() {
     pop("Ödeme kaydı silindi");
   };
 
-  const handlePaketOzetiAc = async (sid) => {
+  const handleDonemDegerlendirmeAc = (sid) => {
+    const student = students.find(s => s.id === sid);
+    if (!student) { pop("Öğrenci kaydı bulunamadı", 5000); return; }
+    const info = lastCompletedPackageInfo(student);
+    if (!info || !packageSummaryKey(info)) { pop("Dönem kaydı oluşturulamadı", 5000); return; }
+    setPeriodEvaluationModal({ student, info });
+  };
+
+  const handleDonemDegerlendirmeKaydet = async (sid, info, evaluation) => {
     if (summaryOpeningId) return;
     const student = students.find(s => s.id === sid);
-    if (!student) {
-      pop("Öğrenci kaydı bulunamadı", 5000);
-      return;
-    }
-    const info = lastCompletedPackageInfo(student);
     const key = packageSummaryKey(info);
-    if (!info || !key) {
-      pop("Paket özeti kaydı oluşturulamadı", 5000);
-      return;
-    }
+    if (!student || !key) { pop("Dönem kaydı bulunamadı", 5000); return; }
+    const existing = (student.package_summary_logs || []).find(log => log.packageKey === key);
     const logs = (student.package_summary_logs || []).filter(log => log.packageKey !== key);
     const updatedStudent = {
       ...student,
       package_summary_logs: [
         ...logs,
         {
+          ...(existing || {}),
           packageKey:key,
-          sentAt:new Date().toISOString().split("T")[0],
+          evaluatedAt:new Date().toISOString(),
+          sentAt:null,
           packageStart:info.startKey,
           packageEnd:info.endKey,
+          evaluation,
         }
       ]
     };
     setSummaryOpeningId(sid);
     try {
-      const savedStudent = await saveStudent(updatedStudent);
-      openMesaj(savedStudent, "ozet");
-      pop("Paket özeti gönderildi işaretlendi");
+      await saveStudent(updatedStudent);
+      setPeriodEvaluationModal(null);
+      pop("Dönem değerlendirmesi kaydedildi");
     } catch {
       // saveStudent kayıt doğrulanamadığında öğrencileri veritabanından yeniden yükler.
     } finally {
       setSummaryOpeningId(null);
     }
+  };
+
+  const handlePaketOzetiAc = (sid) => {
+    const student = students.find(s => s.id === sid);
+    const info = lastCompletedPackageInfo(student);
+    const log = periodEvaluationInfo(student, info);
+    if (!student || !info || !log) { pop("Önce dönem değerlendirmesini tamamlayın", 5000); return; }
+    setPeriodSummaryPrompt({ student, info, log });
+  };
+
+  const handlePaketOzetiGonderildi = async (sid, info) => {
+    const student = students.find(s => s.id === sid);
+    const key = packageSummaryKey(info);
+    const existing = (student?.package_summary_logs || []).find(log => log.packageKey === key);
+    if (!student || !existing?.evaluation) return;
+    const updatedStudent = {
+      ...student,
+      package_summary_logs:(student.package_summary_logs || []).map(log => log.packageKey === key ? { ...log, sentAt:new Date().toISOString() } : log),
+    };
+    await saveStudent(updatedStudent);
+    setPeriodSummaryPrompt(null);
+    pop("Dönem özeti WhatsApp'ta hazırlandı");
   };
 
   const handleDuzenle = async (sid, f) => {
@@ -4686,18 +4993,21 @@ export default function App() {
               <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
                   const info = lastCompletedPackageInfo(s);
-                  const sent = summarySentInfo(s, info);
+                  const evaluationLog = periodEvaluationInfo(s, info);
+                  const sent = evaluationLog?.sentAt;
                   return (
                     <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
                       <div onClick={() => setDetailSt(s)} style={{ cursor:"pointer" }}>
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                         <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Dönem tamamlandı{info?.donem ? " · "+info.donem : ""}</p>
-                        <p style={{ margin:"2px 0 0", fontSize:12, color:sent?"#059669":"#c2410c", fontWeight:700 }}>
-                          {sent ? "Özet gönderildi · "+fmtMed(sent.sentAt) : "Özet gönderilmedi"}
+                        <p style={{ margin:"2px 0 0", fontSize:12, color:sent?"#059669":evaluationLog?"#7e22ce":"#c2410c", fontWeight:700 }}>
+                          {sent ? "Dönem özeti gönderildi · "+fmtMed(sent) : evaluationLog ? "Dönem puanı: "+fmtNumber(evaluationLog.evaluation.periodScore)+"/100 · Özet gönderilmedi" : "Dönem değerlendirilmedi"}
                         </p>
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                        <button disabled={summaryOpeningId===s.id} onClick={() => handlePaketOzetiAc(s.id)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Özeti Aç</button>
+                        {evaluationLog
+                          ? <button disabled={summaryOpeningId===s.id} onClick={() => handlePaketOzetiAc(s.id)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönem Özetini Gönder</button>
+                          : <button disabled={summaryOpeningId===s.id} onClick={() => handleDonemDegerlendirmeAc(s.id)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönemi Değerlendir</button>}
                         <button onClick={() => setÖdemeSt(s)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
                       </div>
                     </div>
@@ -4831,10 +5141,13 @@ export default function App() {
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {welcomeStudentId && students.find(student=>student.id===welcomeStudentId) ? <YeniÖğrenciİletişimSheet student={students.find(student=>student.id===welcomeStudentId)} onClose={()=>setWelcomeStudentId(null)} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
+      {periodEvaluationModal ? <DonemDegerlendirmeSheet student={students.find(student=>student.id===periodEvaluationModal.student.id) || periodEvaluationModal.student} info={periodEvaluationModal.info} onClose={()=>setPeriodEvaluationModal(null)} onSave={evaluation=>handleDonemDegerlendirmeKaydet(periodEvaluationModal.student.id, periodEvaluationModal.info, evaluation)} /> : null}
+      {periodSummaryPrompt ? <WhatsAppPreviewSheet title="Dönem Sonu Özeti" subtitle={periodSummaryPrompt.student} text={msgDonemDegerlendirmesi(periodSummaryPrompt.student, periodSummaryPrompt.info, periodSummaryPrompt.log)} onClose={()=>setPeriodSummaryPrompt(null)} onSent={()=>handlePaketOzetiGonderildi(periodSummaryPrompt.student.id, periodSummaryPrompt.info)} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
 
       {odemeKaydetModal ? (
