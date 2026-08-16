@@ -1097,6 +1097,7 @@ function packageEvaluationStats(student, info) {
   const lessonAverage = scoredLessons.length
     ? roundedScore(scoredLessons.reduce((sum,lesson)=>sum+storedLessonScore(lesson),0) / scoredLessons.length)
     : 0;
+  const missingScoreCount = attendedLessons.length - scoredLessons.length;
   return {
     lessons,
     expectedLessonCount,
@@ -1104,7 +1105,8 @@ function packageEvaluationStats(student, info) {
     scoredLessons,
     attendanceScore,
     lessonAverage,
-    missingScoreCount:attendedLessons.length - scoredLessons.length,
+    missingScoreCount,
+    newEvaluationEligible:scoredLessons.length > 0 && missingScoreCount === 0,
   };
 }
 
@@ -2730,7 +2732,7 @@ function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
       <MiniMetric label="Ders Ortalaması" value={stats ? fmtNumber(stats.lessonAverage)+"/100" : "-"} tone="special" />
     </div>
     {stats ? <p style={{ margin:"0 0 14px", fontSize:12, color:"#64748b" }}>{stats.attendedLessons.length}/{stats.expectedLessonCount} normal derse katıldı · Ortalama {stats.scoredLessons.length} puanlı normal dersten hesaplandı. Telafi dersleri dahil edilmedi.</p> : null}
-    {stats?.missingScoreCount > 0 ? <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:11, padding:"10px 12px", marginBottom:14, color:"#9a3412", fontSize:12, fontWeight:700 }}>{stats.missingScoreCount} katıldığı normal derste yeni puan kaydı bulunmuyor. Yanlış dönem ortalaması oluşmaması için önce bu dersleri değerlendirin.</div> : null}
+    {!existing && stats && !stats.newEvaluationEligible ? <div style={{ background:"#f8fafc", border:"1px solid #cbd5e1", borderRadius:11, padding:"10px 12px", marginBottom:14, color:"#475569", fontSize:12, fontWeight:700 }}>Bu dönem v73 öncesindeki dersleri içerdiği için yeni puanlama sistemine alınmaz. Eski dersleri yeniden değerlendirmeniz gerekmez.</div> : null}
     <label style={{ ...LBL, marginTop:0 }}>Net Bir Parça Çıktı mı?</label>
     <select style={INP} value={pieceResult} onChange={event=>{ setPieceResult(event.target.value); setError(""); }}>
       <option value="">Seçin</option>
@@ -2740,7 +2742,7 @@ function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
     {error ? <p style={{ margin:"9px 0 0", color:"#dc2626", fontSize:12, fontWeight:800 }}>{error}</p> : null}
     <div style={{ marginTop:14 }}><Btn bg="#7e22ce" onClick={()=>{
       if (!piece) { setError("Parça sonucunu seçin."); return; }
-      if (!stats || stats.missingScoreCount > 0) { setError("Puanı eksik normal dersler tamamlanmadan dönem değerlendirilemez."); return; }
+      if (!stats || (!existing && !stats.newEvaluationEligible)) { setError("Bu dönem yeni puanlama kapsamına alınmıyor."); return; }
       onSave({
         attendanceScore:stats.attendanceScore,
         attendedLessonCount:stats.attendedLessons.length,
@@ -4470,6 +4472,8 @@ export default function App() {
     if (!student) { pop("Öğrenci kaydı bulunamadı", 5000); return; }
     const info = lastCompletedPackageInfo(student);
     if (!info || !packageSummaryKey(info)) { pop("Dönem kaydı oluşturulamadı", 5000); return; }
+    const stats = packageEvaluationStats(student, info);
+    if (!periodEvaluationInfo(student, info) && !stats?.newEvaluationEligible) { pop("Bu dönem v73 öncesi dersleri içerdiği için yeni değerlendirmeye alınmıyor", 6000); return; }
     setPeriodEvaluationModal({ student, info });
   };
 
@@ -4994,6 +4998,8 @@ export default function App() {
                 {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
                   const info = lastCompletedPackageInfo(s);
                   const evaluationLog = periodEvaluationInfo(s, info);
+                  const evaluationStats = packageEvaluationStats(s, info);
+                  const newEvaluationEligible = !!evaluationLog || !!evaluationStats?.newEvaluationEligible;
                   const sent = evaluationLog?.sentAt;
                   return (
                     <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
@@ -5001,13 +5007,13 @@ export default function App() {
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                         <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Dönem tamamlandı{info?.donem ? " · "+info.donem : ""}</p>
                         <p style={{ margin:"2px 0 0", fontSize:12, color:sent?"#059669":evaluationLog?"#7e22ce":"#c2410c", fontWeight:700 }}>
-                          {sent ? "Dönem özeti gönderildi · "+fmtMed(sent) : evaluationLog ? "Dönem puanı: "+fmtNumber(evaluationLog.evaluation.periodScore)+"/100 · Özet gönderilmedi" : "Dönem değerlendirilmedi"}
+                          {sent ? "Dönem özeti gönderildi · "+fmtMed(sent) : evaluationLog ? "Dönem puanı: "+fmtNumber(evaluationLog.evaluation.periodScore)+"/100 · Özet gönderilmedi" : newEvaluationEligible ? "Dönem değerlendirilmedi" : "v73 öncesi dönem · Yeni değerlendirmeye alınmaz"}
                         </p>
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
                         {evaluationLog
                           ? <button disabled={summaryOpeningId===s.id} onClick={() => handlePaketOzetiAc(s.id)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönem Özetini Gönder</button>
-                          : <button disabled={summaryOpeningId===s.id} onClick={() => handleDonemDegerlendirmeAc(s.id)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönemi Değerlendir</button>}
+                          : newEvaluationEligible ? <button disabled={summaryOpeningId===s.id} onClick={() => handleDonemDegerlendirmeAc(s.id)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönemi Değerlendir</button> : null}
                         <button onClick={() => setÖdemeSt(s)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
                       </div>
                     </div>
