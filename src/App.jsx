@@ -1234,6 +1234,7 @@ function currentPackageInfoForLesson(student, lesson) {
 }
 
 function packageLessonStatusText(lesson) {
+  if (isToday(lesson.date) && lesson.status === "upcoming") return "Bugünkü ders";
   const m = {
     upcoming: "Planlandı",
     completed: "Katıldı",
@@ -1251,7 +1252,10 @@ function packageStatusText(student, info) {
     .filter(l => ids.has(l.id))
     .sort((a,b)=>new Date(a.date)-new Date(b.date));
   if (!lessons.length) return "";
-  return lessons.map((l,i) => (i+1)+". Ders: "+packageLessonStatusText(l)+" - "+fmtShort(l.date)).join("\n");
+  return lessons.map((l,i) => {
+    const statusAndDate = packageLessonStatusText(l)+" - "+fmtShort(l.date);
+    return (i+1)+". Ders: "+(isToday(l.date) && l.status === "upcoming" ? "*"+statusAndDate+"*" : statusAndDate);
+  }).join("\n");
 }
 
 function lessonReminderSentInfo(student, lesson) {
@@ -1390,14 +1394,17 @@ function NoteArea({ value, onChange, placeholder="Açıklama ekle..." }) {
   );
 }
 
-function Sheet({ title, subtitle, onClose, children }) {
+function Sheet({ title, subtitle, onClose, onBack, children }) {
   return (
     <div className="crm-sheet-backdrop">
       <div className="crm-sheet">
         <div className="crm-sheet-head">
-          <div>
-            <strong>{title}</strong>
-            {subtitle && <span>{subtitle}</span>}
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            {onBack ? <button onClick={onBack} aria-label="Geri" style={{ width:34, height:34, border:"none", borderRadius:"50%", background:"#f4f1ee", color:"#746e78", fontSize:20, lineHeight:1, cursor:"pointer", flexShrink:0 }}>←</button> : null}
+            <div>
+              <strong>{title}</strong>
+              {subtitle && <span>{subtitle}</span>}
+            </div>
           </div>
           <button className="crm-sheet-close" onClick={onClose} aria-label="Kapat">×</button>
         </div>
@@ -1542,7 +1549,7 @@ async function shareSvgAsPng(svgId, filename, student) {
 const INP = { width:"100%", border:"1px solid #ded9d3", borderRadius:11, padding:"12px 13px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#211e28" };
 const LBL = { display:"block", fontSize:11, fontWeight:750, color:"#756f7a", letterSpacing:.3, marginBottom:6, marginTop:15 };
 
-function ActionSheet({ student, lessonId, onClose, onAction, onEvaluationMessage }) {
+function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluationMessage }) {
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
   const previousHomework = homeworkForLessonCheck(student, lesson);
   const lessonCheckRef = homeworkCheckRef("lesson", lesson?.id);
@@ -1571,7 +1578,7 @@ function ActionSheet({ student, lessonId, onClose, onAction, onEvaluationMessage
   );
 
   return (
-    <Sheet title={student.name} subtitle={lesson ? fmtDate(lesson.date)+" - "+lessonTime(student, lesson) : ""} onClose={onClose}>
+    <Sheet title={student.name} subtitle={lesson ? fmtDate(lesson.date)+" - "+lessonTime(student, lesson) : ""} onClose={onClose} onBack={onBack}>
       {step === "main" && <>
         {lesson && lesson.status !== "upcoming" ? (
           <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:12, padding:"10px 12px", marginBottom:12 }}>
@@ -1621,8 +1628,10 @@ function ActionSheet({ student, lessonId, onClose, onAction, onEvaluationMessage
           <Btn bg="#10b981" onClick={() => reset("attended")}>Ders Verilerini Düzenle</Btn>
           <Btn bg="#25D366" onClick={() => onEvaluationMessage(lesson)}>WhatsApp Değerlendirmesini Tekrar Aç</Btn>
         </> : <Btn bg="#10b981" onClick={() => reset("attended")}>Katıldı</Btn>}
-        <Btn bg="#1f2937" onClick={() => reset("yapildi")}>Yapıldı Say</Btn>
-        <Btn bg="#3b82f6" onClick={() => reset("telafi")}>Telafi Hakkı Oluştur</Btn>
+        {lesson?.status === "completed" && storedLessonScore(lesson) !== null ? null : <>
+          <Btn bg="#1f2937" onClick={() => reset("yapildi")}>Yapıldı Say</Btn>
+          <Btn bg="#3b82f6" onClick={() => reset("telafi")}>Telafi Hakkı Oluştur</Btn>
+        </>}
         {lesson && lesson.status !== "upcoming" ? <Btn bg="#6b7280" onClick={() => act("reset-upcoming")}>Planlandıya Geri Al</Btn> : null}
       </>}
       {step === "telafi" && <>
@@ -2274,7 +2283,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
             return (
               <div key={l.id} style={{ background:clickable?"#f9fafb":"#fff", border:clickable?"1.5px solid #d1d5db":"1px solid #f3f4f6", borderRadius:10, padding:"10px 12px", marginBottom:6 }}>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                  <div style={{ cursor:"pointer", flex:1 }} onClick={() => onLessonClick(student, l.id)}>
+                  <div style={{ cursor:"pointer", flex:1 }} onClick={() => onLessonClick(student, l.id, tab)}>
                     <p style={{ margin:0, fontWeight:600, fontSize:14, color:"#111" }}>{fmtDate(l.date)}</p>
                     <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{lessonTime(student, l)} · düzenle</p>
                   </div>
@@ -2419,8 +2428,6 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
             </div>
           ) : null}
           <div style={{ background:left?"#fff1f2":student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(left?"#fecdd3":student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
-            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:800, color:left?"#be123c":student.frozen?"#1d4ed8":"#6b7280", letterSpacing:1 }}>Öğrenci Durumu</p>
-            <p style={{ margin:"0 0 10px", fontSize:13, color:"#475569" }}>{left ? "Öğrenci ayrılmış. Tüm geçmiş ders ve ödeme kayıtları korunuyor." : student.frozen ? "Program dondurulmuş. Öğrenci geri başlayacağı zaman buradan aktif edebilirsin." : "Öğrenci aktif. Uzun süre ara verecekse programı dondurabilirsin."}</p>
             <button onClick={() => {
               if (student.frozen && !left) setShowResumeProgram(true);
               else onToggleFreeze(student.id, left ? false : true);
@@ -2546,8 +2553,16 @@ function packageLessonsText(student, info) {
     .join("\n");
 }
 
-function msgIlkDersÖdeme() {
-  return "Merhaba,\n\nYeni ders dönemimiz bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\nİlginiz için teşekkür eder, iyi dersler dileriz.\n\nBodrum Sonsuz Sanat";
+function msgIlkDersÖdeme(student) {
+  const info = currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
+  const lessons = packageLessonsText(student, info);
+  let msg = "Merhaba,\n\nYeni ders dönemimiz bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\n";
+  if (info) {
+    msg += "Dönem: "+info.donem+"\n";
+    if (lessons) msg += "Planlanan dersler:\n"+lessons+"\n\n";
+  }
+  msg += "İlginiz için teşekkür eder, iyi dersler dileriz.\n\nBodrum Sonsuz Sanat";
+  return msg;
 }
 
 function msgYeniKayitKurallari() {
@@ -2577,11 +2592,11 @@ function paymentOverdueMessageLine(student) {
 }
 function msgÖdemeHatirlatma2(student) {
   const delay = paymentOverdueMessageLine(student);
-  return "Merhaba,\nDers ödemesi hâlâ tarafımıza ulaşmamıştır.\n"+(delay ? delay+"\n" : "")+"Eğitim programının kesintisiz şekilde devam edebilmesi ve öğrencimizin gün/saat planlamasının korunabilmesi için ödemenizin bu hafta içerisinde tamamlanmasını rica ederiz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
+  return "Merhaba,\n"+(delay ? delay+"\n" : "")+"Eğitim programının kesintisiz şekilde devam edebilmesi ve öğrencimizin gün/saat planlamasının korunabilmesi için ödemenizin bu hafta içerisinde tamamlanmasını rica ederiz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
 }
 function msgÖdemeHatirlatma3(student) {
   const delay = paymentOverdueMessageLine(student);
-  return "Merhaba,\n\nDers ödemesi hâlâ tarafımıza ulaşmamıştır."+(delay ? "\n"+delay : "")+"\n\nDüzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır. Bu nedenle ödemenin belirtilen süre içerisinde tamamlanmaması durumunda programınız dondurulacak, ayrılan gün ve saat bekleme listesindeki öğrenciler için kullanıma açılacaktır.\n\nLütfen ödemenizi en kısa sürede gerçekleştiriniz.\n\nTeşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
+  return "Merhaba,"+(delay ? "\n\n"+delay : "")+"\n\nDüzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır. Bu nedenle ödemenin belirtilen süre içerisinde tamamlanmaması durumunda programınız dondurulacak, ayrılan gün ve saat bekleme listesindeki öğrenciler için kullanıma açılacaktır.\n\nLütfen ödemenizi en kısa sürede gerçekleştiriniz.\n\nTeşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
 }
 function msgDondurmaUyarisi(student) {
   const delay = paymentOverdueMessageLine(student);
@@ -2681,8 +2696,6 @@ function msgDersDegerlendirmesi(student, record, type="normal") {
   const date = isTelafi ? (telafiDoneAt(record) || telafiPlannedAt(record)) : record?.date;
   const breakdown = record?.lessonScoreBreakdown || {};
   const lines = [
-    "Merhaba,",
-    "",
     student.name+" için "+(isTelafi ? "telafi dersi" : "bugünkü ders")+" değerlendirmesi:",
     date ? "Ders tarihi: "+fmtMed(date) : "",
     "",
@@ -2695,7 +2708,7 @@ function msgDersDegerlendirmesi(student, record, type="normal") {
   else lines.push("Önceki ödev: "+homeworkStatusLabel(record?.evaluatedHomeworkStatus)+" ("+(breakdown.homework ?? 0)+"/40)");
   lines.push("", "Ders Verim Puanı: "+fmtNumber(storedLessonScore(record) ?? 0)+"/100");
   if (record?.note || record?.doneNote) lines.push("", "Öğretmen notu: "+(record.note || record.doneNote));
-  lines.push("", "Gelecek ders ödevi: "+(record?.homework || "-"), "", "Bodrum Sonsuz Sanat");
+  lines.push("", "Gelecek ders ödevi: "+(record?.homework || "-"));
   return lines.join("\n");
 }
 
@@ -5097,10 +5110,10 @@ export default function App() {
                 const np = calcNextPayment(s.schedule);
                 const ac = s.telafi_records.filter(r=>!r.done).length;
                 const warn = ac===5 && !s.frozen;
-                const nextL = s.schedule.find(l=>l.status==="upcoming");
                 const payDue = isÖdemeBekleyen(s);
-                const payHabit = paymentHabitStats(s);
-                const att = attendanceStats(s);
+                const lessonSlots = getStudentSlots(s);
+                const lessonDays = lessonSlots.map(slot=>slot.day).join(", ");
+                const lessonTimes = lessonSlots.map(slot=>slot.time).join(", ");
                 const ekCount = (s.ek_dersler||[]).length;
                 const unpaidEkCount = unpaidEkDersler(s).length;
                 const stripe = left ? "#be123c" : s.frozen ? "#3b82f6" : warn ? "#f59e0b" : payDue ? "#fb923c" : "#10b981";
@@ -5118,22 +5131,19 @@ export default function App() {
                           {ekCount>0 ? <TonePill tone="special">+{ekCount} ek</TonePill> : null}
                           {unpaidEkCount>0 ? <TonePill tone="warn">{unpaidEkCount} ek ödenmedi</TonePill> : null}
                         </div>
-                        <p style={{ fontSize:12, color:"#64748b", margin:"4px 0 3px", fontWeight:700 }}>
-                          {s.instrument} · {studentScheduleLabel(s)} · {lessonDurationLabel(s)} · Öğretmen: {studentTeacherName(s)}
-                          {s.ucret ? <span style={{ marginLeft:8, color:"#059669", fontWeight:700 }}>{s.ucret.toLocaleString("tr-TR")} TL</span> : null}
-                        </p>
-                        {s.veli_adi ? <p style={{ fontSize:11, color:"#888", margin:"0 0 4px" }}>Veli: {s.veli_adi}</p> : null}
-                        {nextL ? <p style={{ fontSize:12, color:"#0369a1", fontWeight:600, margin:"0 0 6px", background:"#f0f9ff", display:"inline-block", borderRadius:6, padding:"2px 8px" }}>{fmtDate(nextL.date)}</p> : null}
-                        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:4 }}>
-                          <TonePill>{bal} ders kaldı</TonePill>
-                          {np ? <TonePill tone={payDue?"warn":"neutral"}>{fmtShort(np)} ödeme</TonePill> : null}
-                          {(() => { const done = s.schedule.filter(l=>l.status==="completed").length; const total = s.schedule.filter(l=>l.status!=="upcoming").length; if(total===0) return null; const pct = Math.round(done/total*100); const color = pct>=80?"#059669":pct>=60?"#d97706":"#dc2626"; return <span style={{ fontSize:12, color }}><strong>{done}/{total}</strong> <strong>{pct}%</strong> devam</span>; })()}
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:"4px 14px", marginTop:6, fontSize:12, color:"#64748b", lineHeight:1.45, textAlign:"left" }}>
+                          <span><strong>Enstrüman:</strong> {s.instrument}</span>
+                          <span><strong>Ders günü:</strong> {lessonDays}</span>
+                          <span><strong>Saat:</strong> {lessonTimes}</span>
+                          <span><strong>Ders süresi:</strong> {lessonDurationLabel(s)}</span>
+                          <span><strong>Öğretmen:</strong> {studentTeacherName(s)}</span>
+                          <span style={{ color:"#059669" }}><strong>Ücret:</strong> {s.ucret ? Number(s.ucret).toLocaleString("tr-TR")+" TL" : "-"}</span>
+                        </div>
+                        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:7 }}>
+                          <TonePill>Pakette kalan: {bal} ders</TonePill>
+                          {np ? <TonePill tone={payDue?"warn":"neutral"}>Gelecek ödeme: {fmtShort(np)}</TonePill> : null}
                         </div>
                         {ac>0 ? <div style={{ marginTop:4 }}><span style={{ fontSize:12, color:ac>4?"#d97706":"#2563eb" }}><strong>{ac}/6</strong> aktif telafi</span></div> : null}
-                        {(att || payHabit) ? <div style={{ marginTop:4, display:"flex", gap:8, flexWrap:"wrap" }}>
-                          {att ? <span style={{ fontSize:12, color:"#047857" }}><strong>Devam {scoreLabel(att.score)}</strong></span> : null}
-                          {payHabit ? <span style={{ fontSize:12, color:payHabit.avgDelay>0?"#be123c":"#059669" }}><strong>Ödeme {scoreLabel(payHabit.score)}</strong> · {paymentHabitLabel(payHabit)}</span> : null}
-                        </div> : null}
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
                       <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:10, flexShrink:0 }}>
@@ -5165,9 +5175,9 @@ export default function App() {
         ))}
       </nav>
 
-      {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
+      {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
