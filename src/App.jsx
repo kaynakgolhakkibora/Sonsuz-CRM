@@ -328,6 +328,7 @@ const PIECE_RESULT_OPTIONS = [
   { value:"partial", label:"Kısmen çıktı", score:50 },
   { value:"none", label:"Çıkmadı", score:0 },
 ];
+const PROGRESS_CHART_START_AT = new Date("2026-08-17T00:00:00+03:00").getTime();
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -1155,34 +1156,23 @@ function lessonEngagementStats(student, info) {
   };
 }
 
-function lessonPerformanceScore(student, lesson) {
-  if (!lesson || lesson.status !== "completed") return null;
-  const storedScore = storedLessonScore(lesson);
-  if (storedScore !== null) return clamp(storedScore / 10, 0, 10);
-  const duration = getLessonDuration(student, lesson);
-  if (!duration) return null;
-  const active = parseInt(lesson.activeMinutes) || 0;
-  const focus = parseInt(lesson.focusMinutes) || 0;
-  const windowBonus = lesson.productiveWindow || lesson.productive_window ? 1 : 0;
-  const sectionBonus = lesson.focusSection || lesson.focus_section ? 1 : 0;
-  if (!active && !focus && !windowBonus && !sectionBonus) return null;
-  const score =
-    (clamp(active / duration, 0, 1) * 6) +
-    (clamp(focus / duration, 0, 1) * 3) +
-    (windowBonus * 0.6) +
-    (sectionBonus * 0.4);
-  return clamp(score, 0, 10);
-}
-
 function performanceSeries(student) {
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-  sixMonthsAgo.setHours(0,0,0,0);
-  return (student.schedule || [])
-    .filter(l => l.status === "completed")
-    .sort((a,b)=>new Date(a.date)-new Date(b.date))
-    .map((lesson, i) => ({ lesson, index:i+1, score:lessonPerformanceScore(student, lesson) }))
-    .filter(p => p.score !== null && new Date(p.lesson.date) >= sixMonthsAgo);
+  const monthly = new Map();
+  (student.package_summary_logs || []).forEach(log => {
+    const evaluatedAt = new Date(log?.evaluatedAt || "");
+    const score = Number(log?.evaluation?.periodScore);
+    if (!Number.isFinite(score) || isNaN(evaluatedAt.getTime()) || evaluatedAt.getTime() < PROGRESS_CHART_START_AT) return;
+    const periodDate = log.packageEnd ? new Date(log.packageEnd+"T12:00:00") : evaluatedAt;
+    if (isNaN(periodDate.getTime())) return;
+    const key = periodDate.getFullYear()+"-"+String(periodDate.getMonth()+1).padStart(2,"0");
+    const current = monthly.get(key) || { key, date:periodDate, scores:[] };
+    current.scores.push(clamp(score, 0, 100));
+    monthly.set(key, current);
+  });
+  return [...monthly.values()]
+    .sort((a,b)=>a.date-b.date)
+    .map(item => ({ ...item, score:roundedScore(item.scores.reduce((sum,value)=>sum+value,0) / item.scores.length) }))
+    .slice(-12);
 }
 
 function monthShort(date) {
@@ -1191,8 +1181,8 @@ function monthShort(date) {
 
 function monthsCoveredText(points) {
   if (!points.length) return "mevcut";
-  const first = new Date(points[0].lesson.date);
-  const last = new Date(points[points.length - 1].lesson.date);
+  const first = new Date(points[0].date);
+  const last = new Date(points[points.length - 1].date);
   const months = Math.max(1, (last.getFullYear() - first.getFullYear()) * 12 + last.getMonth() - first.getMonth() + 1);
   return months >= 6 ? "son 6 ayda" : "son " + months + " ayda";
 }
@@ -1419,118 +1409,134 @@ function Sheet({ title, subtitle, onClose, children }) {
 
 function ProgressChart({ student }) {
   const points = performanceSeries(student);
-  if (points.length < 2) {
+  if (!points.length) {
     return (
       <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"14px", marginBottom:14 }}>
         <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Gelişim Grafiği</p>
-        <p style={{ margin:"8px 0 0", fontSize:13, color:"#94a3b8", fontWeight:700 }}>Grafik için en az 2 verimli ders kaydı gerekiyor.</p>
+        <p style={{ margin:"8px 0 0", fontSize:13, color:"#94a3b8", fontWeight:700 }}>Grafik verileri 17 Ağustos 2026 tarihinden itibaren oluşacaktır. İlk yeni dönem değerlendirmesi henüz tamamlanmadı.</p>
       </div>
     );
   }
-  const width = 330;
-  const height = 170;
-  const padL = 34;
-  const padR = 12;
-  const padT = 16;
-  const padB = 30;
+  const width = 640;
+  const height = 360;
+  const padL = 64;
+  const padR = 22;
+  const padT = 58;
+  const padB = 62;
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
-  const dates = points.map(p => new Date(p.lesson.date).getTime());
-  const minDate = Math.min(...dates);
-  const maxDate = Math.max(...dates);
-  const xForDate = (date) => {
-    const time = new Date(date).getTime();
-    return padL + (maxDate === minDate ? innerW / 2 : ((time - minDate) / (maxDate - minDate)) * innerW);
-  };
-  const yFor = (score) => padT + (1 - clamp(score, 0, 10) / 10) * innerH;
-  const path = points.map((p,i) => (i === 0 ? "M" : "L") + xForDate(p.lesson.date).toFixed(1) + " " + yFor(p.score).toFixed(1)).join(" ");
-  const first = points[0].score;
+  const slotW = innerW / points.length;
+  const barW = Math.min(62, Math.max(20, slotW * .5));
+  const xFor = (index) => padL + (slotW * index) + ((slotW - barW) / 2);
+  const yFor = (score) => padT + (1 - clamp(score, 0, 100) / 100) * innerH;
   const last = points[points.length - 1].score;
-  const trend = last > first + 0.4 ? "Yükseliyor" : last < first - 0.4 ? "Düşüyor" : "Dengeli";
   const chartId = "progress-chart-" + student.id;
-  const monthLabels = [];
-  points.forEach(p => {
-    const label = monthShort(p.lesson.date);
-    if (!monthLabels.some(item => item.label === label)) monthLabels.push({ label, date:p.lesson.date });
-  });
-  const shownMonths = monthLabels.slice(-6);
-  const sendProgressText = () => {
-    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
-    const text = "Merhaba,\n\n" + student.name + " için gelişim grafiğini sizinle paylaşıyorum.\n\nGrafik, öğrencimizin kendi ders verileri üzerinden hazırlanmıştır; başka öğrencilerle kıyaslama içermez.\n\nBodrum Sonsuz Sanat";
-    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
-    else alert("Telefon numarası yok");
-  };
-  const downloadPng = () => downloadSvgAsPng(chartId, (student.name || "ogrenci").replace(/\s+/g, "-").toLowerCase()+"-gelisim-grafigi.png");
+  const filename = (student.name || "ogrenci").replace(/\s+/g, "-").toLowerCase()+"-gelisim-grafigi.png";
+  const downloadPng = () => downloadSvgAsPng(chartId, filename, 4);
+  const sendProgressPng = () => shareSvgAsPng(chartId, filename, student);
 
   return (
     <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10, marginBottom:8 }}>
         <div>
           <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Gelişim Grafiği</p>
-          <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontWeight:700 }}>Kendi ders verileri üzerinden</p>
+          <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontWeight:700 }}>Aylık dönem değerlendirme puanı</p>
         </div>
-        <p style={{ margin:0, fontSize:13, fontWeight:800, color:trend==="Yükseliyor"?"#059669":trend==="Düşüyor"?"#be123c":"#475569" }}>{trend}</p>
+        <p style={{ margin:0, fontSize:13, fontWeight:800, color:"#6d28d9" }}>Son puan: {fmtNumber(last)}/100</p>
       </div>
       <svg id={chartId} viewBox={`0 0 ${width} ${height}`} style={{ width:"100%", height:"auto", display:"block", background:"#fff" }} role="img" aria-label="Öğrenci gelişim grafiği" xmlns="http://www.w3.org/2000/svg">
         <rect x="0" y="0" width={width} height={height} fill="#ffffff" />
-        {[0,2,4,6,8,10].map(tick => {
+        <text x={padL} y="24" fontSize="18" fontWeight="800" fill="#20202a" fontFamily="Arial, sans-serif">{student.name}</text>
+        <text x={width-padR} y="24" textAnchor="end" fontSize="13" fontWeight="700" fill="#6d28d9" fontFamily="Arial, sans-serif">Son puan: {fmtNumber(last)}/100</text>
+        {[0,20,40,60,80,100].map(tick => {
           const y = yFor(tick);
           return (
             <g key={tick}>
-              <line x1={padL} x2={width-padR} y1={y} y2={y} stroke="#f1f5f9" strokeWidth="1" />
-              <text x={padL-8} y={y+4} textAnchor="end" fontSize="10" fill="#64748b">{tick}</text>
+              <line x1={padL} x2={width-padR} y1={y} y2={y} stroke={tick===0?"#bdb5c8":"#eeeaf2"} strokeWidth={tick===0?"1.5":"1"} />
+              <text x={padL-10} y={y+4} textAnchor="end" fontSize="12" fill="#716a7d" fontFamily="Arial, sans-serif">{tick}</text>
             </g>
           );
         })}
         <line x1={padL} x2={padL} y1={padT} y2={height-padB} stroke="#cbd5e1" strokeWidth="1.5" />
         <line x1={padL} x2={width-padR} y1={height-padB} y2={height-padB} stroke="#cbd5e1" strokeWidth="1.5" />
-        <path d={path} fill="none" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
         {points.map((p,i) => (
-          <circle key={p.lesson.id || i} cx={xForDate(p.lesson.date)} cy={yFor(p.score)} r="3.5" fill="#2563eb" stroke="#fff" strokeWidth="1.5" />
+          <g key={p.key}>
+            <rect x={xFor(i)} y={yFor(p.score)} width={barW} height={Math.max(0, height-padB-yFor(p.score))} rx="7" fill="#7c3aed" />
+            <text x={xFor(i)+(barW/2)} y={yFor(p.score)-10} textAnchor="middle" fontSize="12" fontWeight="800" fill="#4c1d95" fontFamily="Arial, sans-serif">{fmtNumber(p.score)}</text>
+            <text x={xFor(i)+(barW/2)} y={height-padB+22} textAnchor="middle" fontSize="12" fontWeight="700" fill="#554e61" fontFamily="Arial, sans-serif">{monthShort(p.date)}</text>
+          </g>
         ))}
-        {shownMonths.map((item, i) => (
-          <text key={item.label+"-"+i} x={xForDate(item.date)} y={height-8} textAnchor={i === 0 ? "start" : i === shownMonths.length - 1 ? "end" : "middle"} fontSize="10" fill="#64748b">{item.label}</text>
-        ))}
+        <text x="17" y={padT+(innerH/2)} transform={`rotate(-90 17 ${padT+(innerH/2)})`} textAnchor="middle" fontSize="12" fontWeight="700" fill="#554e61" fontFamily="Arial, sans-serif">Puan (0–100)</text>
+        <text x={padL+(innerW/2)} y={height-9} textAnchor="middle" fontSize="12" fontWeight="700" fill="#554e61" fontFamily="Arial, sans-serif">Aylar</text>
       </svg>
-      <p style={{ margin:"8px 0 0", fontSize:12, color:"#475569", fontWeight:700 }}>Son skor: {scoreLabel(last)} · İlk skor: {scoreLabel(first)}</p>
-      <p style={{ margin:"4px 0 10px", fontSize:11, color:"#64748b", fontWeight:700 }}>Grafik {monthsCoveredText(points)} girilen ders verileri üzerinden hesaplanmıştır.</p>
+      <p style={{ margin:"4px 0 10px", fontSize:11, color:"#64748b", fontWeight:700, textAlign:"center" }}>Her sütun, o ay tamamlanan dönem değerlendirmesini gösterir.</p>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-        <button onClick={downloadPng} style={{ background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:10, padding:"9px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>PNG İndir</button>
-        <button onClick={sendProgressText} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:10, padding:"9px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>WhatsApp</button>
+        <button onClick={downloadPng} style={{ background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:10, padding:"9px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Yüksek Kalite PNG İndir</button>
+        <button onClick={sendProgressPng} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:10, padding:"9px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>WhatsApp'tan Gönder</button>
       </div>
     </div>
   );
 }
 
-function downloadSvgAsPng(svgId, filename) {
+function svgAsPngBlob(svgId, scale=4) {
   const svg = document.getElementById(svgId);
-  if (!svg) return;
-  const xml = new XMLSerializer().serializeToString(svg);
+  if (!svg) return Promise.resolve(null);
+  const clone = svg.cloneNode(true);
+  const viewBox = svg.viewBox?.baseVal;
+  const width = viewBox?.width || 640;
+  const height = viewBox?.height || 360;
+  clone.setAttribute("width", String(width * scale));
+  clone.setAttribute("height", String(height * scale));
+  const xml = new XMLSerializer().serializeToString(clone);
   const svgBlob = new Blob([xml], { type:"image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(svgBlob);
-  const img = new Image();
-  img.onload = () => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 990;
-    canvas.height = 510;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    URL.revokeObjectURL(url);
-    canvas.toBlob(blob => {
-      if (!blob) return;
-      const pngUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = pngUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(pngUrl);
-    }, "image/png");
-  };
-  img.src = url;
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(blob => resolve(blob), "image/png", 1);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+function savePngBlob(blob, filename) {
+  if (!blob) return;
+  const pngUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = pngUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(pngUrl), 1000);
+}
+
+async function downloadSvgAsPng(svgId, filename, scale=4) {
+  savePngBlob(await svgAsPngBlob(svgId, scale), filename);
+}
+
+async function shareSvgAsPng(svgId, filename, student) {
+  const blob = await svgAsPngBlob(svgId, 4);
+  if (!blob) return;
+  const text = "Merhaba,\n\n"+student.name+" için gelişim grafiğini sizinle paylaşıyorum.\n\nBodrum Sonsuz Sanat";
+  const file = new File([blob], filename, { type:"image/png" });
+  if (navigator.share && navigator.canShare?.({ files:[file] })) {
+    try { await navigator.share({ files:[file], text, title:student.name+" Gelişim Grafiği" }); } catch {}
+    return;
+  }
+  savePngBlob(blob, filename);
+  const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+  if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text+"\n\nYüksek kaliteli grafik görselini bu mesaja ekleyebilirsiniz."), "_blank");
+  else alert("Görsel indirildi. Öğrencinin WhatsApp telefon numarası kayıtlı değil.");
 }
 
 const INP = { width:"100%", border:"1px solid #ded9d3", borderRadius:11, padding:"12px 13px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#211e28" };
