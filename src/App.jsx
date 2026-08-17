@@ -1542,7 +1542,7 @@ async function shareSvgAsPng(svgId, filename, student) {
 const INP = { width:"100%", border:"1px solid #ded9d3", borderRadius:11, padding:"12px 13px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#211e28" };
 const LBL = { display:"block", fontSize:11, fontWeight:750, color:"#756f7a", letterSpacing:.3, marginBottom:6, marginTop:15 };
 
-function ActionSheet({ student, lessonId, onClose, onAction }) {
+function ActionSheet({ student, lessonId, onClose, onAction, onEvaluationMessage }) {
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
   const previousHomework = homeworkForLessonCheck(student, lesson);
   const lessonCheckRef = homeworkCheckRef("lesson", lesson?.id);
@@ -1553,7 +1553,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
   const [activeMinutes, setActiveMinutes] = useState(lesson?.activeMinutes ?? lesson?.active_minutes ?? "");
   const [taskFocusMinutes, setTaskFocusMinutes] = useState(lesson?.taskFocusMinutes ?? lesson?.task_focus_minutes ?? lesson?.focusMinutes ?? lesson?.focus_minutes ?? "");
   const [redirectionCount, setRedirectionCount] = useState(lesson?.redirectionCount ?? lesson?.redirection_count ?? "");
-  const [lessonFocus, setLessonFocus] = useState(lesson?.lessonFocus || lesson?.lesson_focus || LESSON_FOCUS_OPTIONS[0]);
+  const [lessonFocus, setLessonFocus] = useState(lesson?.lessonFocus || lesson?.lesson_focus || "");
   const [homework, setHomework] = useState(lesson?.homework || "");
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === lessonCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
   const [formError, setFormError] = useState("");
@@ -1617,7 +1617,10 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
             <p style={{ margin:"9px 0 0", fontSize:12, color:"#64748b" }}>Yanlış işaretlendiyse aşağıdan düzeltebilirsin.</p>
           </div>
         ) : null}
-        <Btn bg="#10b981" onClick={() => reset("attended")}>Katıldı</Btn>
+        {lesson?.status === "completed" && storedLessonScore(lesson) !== null ? <>
+          <Btn bg="#10b981" onClick={() => reset("attended")}>Ders Verilerini Düzenle</Btn>
+          <Btn bg="#25D366" onClick={() => onEvaluationMessage(lesson)}>WhatsApp Değerlendirmesini Tekrar Aç</Btn>
+        </> : <Btn bg="#10b981" onClick={() => reset("attended")}>Katıldı</Btn>}
         <Btn bg="#1f2937" onClick={() => reset("yapildi")}>Yapıldı Say</Btn>
         <Btn bg="#3b82f6" onClick={() => reset("telafi")}>Telafi Hakkı Oluştur</Btn>
         {lesson && lesson.status !== "upcoming" ? <Btn bg="#6b7280" onClick={() => act("reset-upcoming")}>Planlandıya Geri Al</Btn> : null}
@@ -1648,11 +1651,12 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
         <label style={LBL}>Yeniden Yönlendirme Sayısı</label>
         <input style={INP} type="number" min={0} step={1} value={redirectionCount} onChange={e=>{ setRedirectionCount(e.target.value); setFormError(""); }} placeholder="Örn. 2" />
         <label style={LBL}>Dersin Temel Odağı</label>
-        <select style={INP} value={lessonFocus} onChange={e=>setLessonFocus(e.target.value)}>
+        <select style={INP} value={lessonFocus} onChange={e=>{ setLessonFocus(e.target.value); setFormError(""); }}>
+          <option value="">Seçin</option>
           {LESSON_FOCUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <label style={LBL}>Öğretmen Notu</label>
-        <NoteArea value={note} onChange={setNote} placeholder="Kısa not" />
+        <NoteArea value={note} onChange={value=>{ setNote(value); setFormError(""); }} placeholder="Kısa not" />
         <label style={LBL}>Gelecek Ders İçin Ödev</label>
         <NoteArea value={homework} onChange={value=>{ setHomework(value); setFormError(""); }} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
         {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
@@ -1662,6 +1666,8 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
           if (activeMinutes === "" || parseInt(activeMinutes) < 0 || parseInt(activeMinutes) > duration) { setFormError("Geçerli aktif ders süresi girin."); return; }
           if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > duration) { setFormError("Geçerli görev odağı süresi girin."); return; }
           if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
+          if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
+          if (!note.trim()) { setFormError("Öğretmen notunu girin."); return; }
           if (!homework.trim()) { setFormError("Gelecek ders ödevini girin."); return; }
           const scoreBreakdown = calculateLessonScore({
             homeworkStatus,
@@ -1671,7 +1677,7 @@ function ActionSheet({ student, lessonId, onClose, onAction }) {
             redirectionCount,
           });
           onAction("attended", {
-            note,
+            note:note.trim(),
             activeMinutes:parseInt(activeMinutes)||0,
             taskFocusMinutes:parseInt(taskFocusMinutes)||0,
             redirectionCount:parseInt(redirectionCount)||0,
@@ -1747,7 +1753,7 @@ function ResumeProgramSheet({ student, onClose, onResume }) {
   );
 }
 
-function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
+function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvaluationMessage }) {
   const plannedAt = telafiPlannedAt(record);
   const telafiCheckRef = homeworkCheckRef("telafi", record?.id);
   const previousHomework = homeworkForTelafiCheck(student, record);
@@ -1764,7 +1770,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
   const [activeMinutes, setActiveMinutes] = useState(record?.activeMinutes ?? "");
   const [taskFocusMinutes, setTaskFocusMinutes] = useState(record?.taskFocusMinutes ?? record?.task_focus_minutes ?? record?.focusMinutes ?? "");
   const [redirectionCount, setRedirectionCount] = useState(record?.redirectionCount ?? record?.redirection_count ?? "");
-  const [lessonFocus, setLessonFocus] = useState(record?.lessonFocus || record?.lesson_focus || LESSON_FOCUS_OPTIONS[0]);
+  const [lessonFocus, setLessonFocus] = useState(record?.lessonFocus || record?.lesson_focus || "");
   const [homework, setHomework] = useState(record?.homework || "");
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === telafiCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
   const [formError, setFormError] = useState("");
@@ -1807,8 +1813,9 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
           {record.plannedNote ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>{record.plannedNote}</p> : null}
         </div>
       ) : null}
-      {record.done
-        ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px" }}>
+      {record.done && step === "main"
+        ? <>
+          <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
             <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>Telafi Yapıldı</p>
             {telafiDoneAt(record) && <p style={{ margin:"4px 0 0", fontSize:13, color:"#16a34a" }}>{telafiDoneDateText(record)}</p>}
             {telafiMetricText(record) ? <p style={{ margin:"4px 0 0", fontSize:13, color:"#166534" }}>{telafiMetricText(record)}</p> : null}
@@ -1826,6 +1833,11 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
               <p style={{ margin:"5px 0 0", fontSize:11, color:"#6d28d9", fontWeight:800 }}>{homeworkStatusLabel(record.homeworkStatus)}</p>
             </div> : null}
           </div>
+          {storedLessonScore(record) !== null ? <>
+            <Btn bg="#10b981" onClick={() => setStep("attended")}>Telafi Verilerini Düzenle</Btn>
+            <Btn bg="#25D366" onClick={() => onEvaluationMessage(record)}>WhatsApp Değerlendirmesini Tekrar Aç</Btn>
+          </> : null}
+          </>
         : step === "plan"
           ? <>
               <label style={{ ...LBL, marginTop:0 }}>Telafi Tarihi</label>
@@ -1861,11 +1873,12 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
                 <label style={LBL}>Yeniden Yönlendirme Sayısı</label>
                 <input style={INP} type="number" min={0} step={1} value={redirectionCount} onChange={e=>{ setRedirectionCount(e.target.value); setFormError(""); }} placeholder="Örn. 2" />
                 <label style={LBL}>Dersin Temel Odağı</label>
-                <select style={INP} value={lessonFocus} onChange={e=>setLessonFocus(e.target.value)}>
+                <select style={INP} value={lessonFocus} onChange={e=>{ setLessonFocus(e.target.value); setFormError(""); }}>
+                  <option value="">Seçin</option>
                   {LESSON_FOCUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <label style={LBL}>Öğretmen Notu</label>
-                <NoteArea value={doneNote} onChange={setDoneNote} placeholder="Kısa not" />
+                <NoteArea value={doneNote} onChange={value=>{ setDoneNote(value); setFormError(""); }} placeholder="Kısa not" />
                 <label style={LBL}>Gelecek Ders İçin Ödev</label>
                 <NoteArea value={homework} onChange={value=>{ setHomework(value); setFormError(""); }} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
                 {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
@@ -1875,12 +1888,14 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage }) {
                   if (activeMinutes === "" || parseInt(activeMinutes) < 0 || parseInt(activeMinutes) > lessonDuration) { setFormError("Geçerli aktif ders süresi girin."); return; }
                   if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > lessonDuration) { setFormError("Geçerli görev odağı süresi girin."); return; }
                   if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
+                  if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
+                  if (!doneNote.trim()) { setFormError("Öğretmen notunu girin."); return; }
                   if (!homework.trim()) { setFormError("Gelecek ders ödevini girin."); return; }
                   const scoreBreakdown = calculateLessonScore({ homeworkStatus, homeworkApplicable:!!homeworkToEvaluate, activeMinutes, taskFocusMinutes, redirectionCount });
                   onSave(record.id, {
                     action: "attended",
                     doneAt: plannedAt || `${date}T${time}:00`,
-                    doneNote,
+                    doneNote:doneNote.trim(),
                     activeMinutes: parseInt(activeMinutes) || 0,
                     taskFocusMinutes: parseInt(taskFocusMinutes) || 0,
                     redirectionCount: parseInt(redirectionCount) || 0,
@@ -2149,7 +2164,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
   );
 }
 
-function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -2417,7 +2432,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
           <Btn bg="#ef4444" onClick={async() => { if(window.confirm(student.name+" öğrenci ekranlarından kaldırılsın mı? Geçmiş ders ve ödeme kayıtları finans geçmişinde korunacaktır.")){ const deleted=await onDelete(student.id); if(deleted) onClose(); } }}>Öğrenciyi Sil</Btn>
         </div>
       </Sheet>
-      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { onTelafiDone(student.id, id, payload); setTelafiSel(null); }} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} /> : null}
+      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { onTelafiDone(student.id, id, payload); setTelafiSel(null); }} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => { onMoveOne(student.id, lid, date, time); setShiftSel(null); }} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
@@ -5150,9 +5165,9 @@ export default function App() {
         ))}
       </nav>
 
-      {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} /> : null}
+      {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid)=>{ setDetailSt(null); setDetailInitialTab("takvim"); setTimeout(()=>setActionModal({student:st,lessonId:lid}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
