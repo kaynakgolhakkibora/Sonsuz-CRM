@@ -5149,14 +5149,10 @@ export default function App() {
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {filtered.map(s => {
                 const left = isStudentLeft(s);
-                const bal = calcBalance(s.schedule);
-                const np = calcNextPayment(s.schedule);
                 const ac = s.telafi_records.filter(r=>!r.done).length;
                 const warn = ac===5 && !s.frozen;
                 const payDue = isÖdemeBekleyen(s);
-                const lessonSlots = getStudentSlots(s);
-                const lessonDays = lessonSlots.map(slot=>slot.day).join(", ");
-                const lessonTimes = lessonSlots.map(slot=>slot.time).join(", ");
+                const age = studentAge(s);
                 const ekCount = (s.ek_dersler||[]).length;
                 const unpaidEkCount = unpaidEkDersler(s).length;
                 const stripe = left ? "#be123c" : s.frozen ? "#3b82f6" : warn ? "#f59e0b" : payDue ? "#fb923c" : "#10b981";
@@ -5174,17 +5170,10 @@ export default function App() {
                           {ekCount>0 ? <TonePill tone="special">+{ekCount} ek</TonePill> : null}
                           {unpaidEkCount>0 ? <TonePill tone="warn">{unpaidEkCount} ek ödenmedi</TonePill> : null}
                         </div>
-                        <div style={{ display:"flex", flexWrap:"wrap", gap:"4px 14px", marginTop:6, fontSize:12, color:"#64748b", lineHeight:1.45, textAlign:"left" }}>
-                          <span><strong>Enstrüman:</strong> {s.instrument}</span>
-                          <span><strong>Ders günü:</strong> {lessonDays}</span>
-                          <span><strong>Saat:</strong> {lessonTimes}</span>
-                          <span><strong>Ders süresi:</strong> {lessonDurationLabel(s)}</span>
-                          <span><strong>Öğretmen:</strong> {studentTeacherName(s)}</span>
+                        <div style={{ display:"flex", flexDirection:"column", gap:3, marginTop:8, fontSize:12, color:"#64748b", lineHeight:1.45, textAlign:"left" }}>
+                          <span><strong>Yaş:</strong> {age === null ? "-" : age}</span>
                           <span style={{ color:"#059669" }}><strong>Ücret:</strong> {s.ucret ? Number(s.ucret).toLocaleString("tr-TR")+" TL" : "-"}</span>
-                        </div>
-                        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:7 }}>
-                          <TonePill>Pakette kalan: {bal} ders</TonePill>
-                          {np ? <TonePill tone={payDue?"warn":"neutral"}>Gelecek ödeme: {fmtShort(np)}</TonePill> : null}
+                          <span><strong>Enstrüman:</strong> {s.instrument || "-"}</span>
                         </div>
                         {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
