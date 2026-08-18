@@ -1120,6 +1120,23 @@ function periodEvaluationScore(attendanceScore, lessonAverage, pieceScore) {
   return roundedScore(((Number(attendanceScore)||0) + (Number(lessonAverage)||0) + (Number(pieceScore)||0)) / 3);
 }
 
+function studentPieceHistory(student) {
+  return (student.package_summary_logs || [])
+    .map(log => {
+      const name = String(log?.evaluation?.pieceName || "").trim();
+      if (!name) return null;
+      return {
+        name,
+        result:log.evaluation.pieceLabel || "Sonuç belirtilmedi",
+        score:Number(log.evaluation.pieceScore),
+        period:log.packageStart && log.packageEnd ? fmtShort(log.packageStart)+" - "+fmtShort(log.packageEnd) : "",
+        date:new Date(log.packageEnd ? log.packageEnd+"T12:00:00" : (log.evaluatedAt || 0)),
+      };
+    })
+    .filter(Boolean)
+    .sort((a,b)=>b.date-a.date);
+}
+
 function invalidatePeriodEvaluationForLesson(student, lessonId) {
   if (!student || !lessonId) return student;
   const info = [...customPackageInfos(student), ...regularPackageInfos(student)].find(item => (item.lessonIds || []).includes(lessonId));
@@ -2199,6 +2216,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
   const currentOrLastInfo = currentPaymentDueInfo(student) || nextPayablePackageInfo(student) || lastCompletedPackageInfo(student);
   const startInfo = lessonStartInfo(student);
   const left = isStudentLeft(student);
+  const pieceHistory = studentPieceHistory(student);
 
   return (
     <>
@@ -2244,6 +2262,22 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
           </div>
         ) : null}
         <ProgressChart student={student} />
+        {pieceHistory.length > 0 ? (
+          <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
+            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>PARÇA GEÇMİŞİ</p>
+            {pieceHistory.map((piece,index) => (
+              <div key={piece.name+"|"+piece.date.getTime()+"|"+index} style={{ borderBottom:index<pieceHistory.length-1?"1px solid #f0f0f0":"none", padding:"8px 0" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
+                  <div style={{ minWidth:0 }}>
+                    <p style={{ margin:0, fontSize:13, fontWeight:800, color:"#111" }}>{piece.name}</p>
+                    {piece.period ? <p style={{ margin:"2px 0 0", fontSize:11, color:"#94a3b8" }}>{piece.period}</p> : null}
+                  </div>
+                  <p style={{ margin:0, fontSize:12, color:piece.score===100?"#047857":piece.score===50?"#b45309":"#64748b", fontWeight:700, textAlign:"right", flexShrink:0 }}>{piece.result}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Ödeme Geçmişi</p>
@@ -2728,6 +2762,7 @@ function msgDonemDegerlendirmesi(student, info, log) {
     "",
     "Derse katılım: "+fmtNumber(evaluation.attendanceScore)+"/100 ("+evaluation.attendedLessonCount+"/"+evaluation.expectedLessonCount+" ders)",
     "Dönem derslerinin ortalaması: "+fmtNumber(evaluation.lessonAverage)+"/100",
+    ...(evaluation.pieceName ? ["Parça: "+evaluation.pieceName] : []),
     "Parça sonucu: "+evaluation.pieceLabel+" ("+evaluation.pieceScore+"/100)",
     "",
     "Dönem Değerlendirme Puanı: "+fmtNumber(evaluation.periodScore)+"/100",
@@ -2759,6 +2794,7 @@ function WhatsAppPreviewSheet({ title, subtitle, text, onClose, onSent }) {
 function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
   const stats = packageEvaluationStats(student, info);
   const existing = periodEvaluationInfo(student, info)?.evaluation;
+  const [pieceName, setPieceName] = useState(existing?.pieceName || "");
   const [pieceResult, setPieceResult] = useState(existing?.pieceResult || "");
   const [error, setError] = useState("");
   const piece = pieceResultOption(pieceResult);
@@ -2770,7 +2806,9 @@ function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
     </div>
     {stats ? <p style={{ margin:"0 0 14px", fontSize:12, color:"#64748b" }}>{stats.attendedLessons.length}/{stats.expectedLessonCount} normal derse katıldı · Ortalama {stats.scoredLessons.length} puanlı normal dersten hesaplandı. Telafi dersleri dahil edilmedi.</p> : null}
     {!existing && stats && !stats.newEvaluationEligible ? <div style={{ background:"#f8fafc", border:"1px solid #cbd5e1", borderRadius:11, padding:"10px 12px", marginBottom:14, color:"#475569", fontSize:12, fontWeight:700 }}>Bu dönem v73 öncesindeki dersleri içerdiği için yeni puanlama sistemine alınmaz. Eski dersleri yeniden değerlendirmeniz gerekmez.</div> : null}
-    <label style={{ ...LBL, marginTop:0 }}>Net Bir Parça Çıktı mı?</label>
+    <label style={{ ...LBL, marginTop:0 }}>Parçanın Adı</label>
+    <input style={INP} value={pieceName} maxLength={120} onChange={event=>{ setPieceName(event.target.value); setError(""); }} placeholder="Örn. Für Elise" />
+    <label style={LBL}>Net Bir Parça Çıktı mı?</label>
     <select style={INP} value={pieceResult} onChange={event=>{ setPieceResult(event.target.value); setError(""); }}>
       <option value="">Seçin</option>
       {PIECE_RESULT_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label} · {option.score}/100</option>)}
@@ -2778,6 +2816,7 @@ function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
     {total !== null ? <div style={{ marginTop:14, background:"#ecfdf5", border:"1px solid #a7f3d0", borderRadius:12, padding:"12px 14px" }}><p style={{ margin:0, fontSize:11, color:"#047857", fontWeight:800 }}>DÖNEM DEĞERLENDİRME PUANI</p><p style={{ margin:"4px 0 0", fontSize:24, color:"#065f46", fontWeight:900 }}>{fmtNumber(total)}/100</p></div> : null}
     {error ? <p style={{ margin:"9px 0 0", color:"#dc2626", fontSize:12, fontWeight:800 }}>{error}</p> : null}
     <div style={{ marginTop:14 }}><Btn bg="#7e22ce" onClick={()=>{
+      if (!pieceName.trim()) { setError("Parçanın adını yazın."); return; }
       if (!piece) { setError("Parça sonucunu seçin."); return; }
       if (!stats || (!existing && !stats.newEvaluationEligible)) { setError("Bu dönem yeni puanlama kapsamına alınmıyor."); return; }
       onSave({
@@ -2786,6 +2825,7 @@ function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
         expectedLessonCount:stats.expectedLessonCount,
         lessonAverage:stats.lessonAverage,
         scoredLessonCount:stats.scoredLessons.length,
+        pieceName:pieceName.trim(),
         pieceResult:piece.value,
         pieceLabel:piece.label,
         pieceScore:piece.score,
