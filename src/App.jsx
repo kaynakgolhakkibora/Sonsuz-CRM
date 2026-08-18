@@ -5175,7 +5175,6 @@ export default function App() {
                           <span style={{ color:"#059669" }}><strong>Ücret:</strong> {s.ucret ? Number(s.ucret).toLocaleString("tr-TR")+" TL" : "-"}</span>
                           <span><strong>Enstrüman:</strong> {s.instrument || "-"}</span>
                         </div>
-                        {s.no_show>0 ? <div><span style={{ fontSize:12, color:"#dc2626" }}><strong>{s.no_show}</strong> no-show</span></div> : null}
                       </div>
                       <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:10, flexShrink:0 }}>
                         <button onClick={()=>s.frozen ? setDetailSt(s) : setActionModal({student:s,lessonId:null})} style={{ background:left?"#ffe4e6":s.frozen?"#e0f2fe":"#111", color:left?"#be123c":s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>{left ? "Görüntüle" : s.frozen ? "Devam" : "İşlem"}</button>
