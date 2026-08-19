@@ -11,6 +11,8 @@ const LIFECYCLE_TRACKING_START = "2026-08-01";
 const WHATSAPP_GROUP_URL = "https://chat.whatsapp.com/H30hg6FbqWzGN5rYfKA0Ks";
 const NEWSLETTER_URL = "https://bodrumsonsuzsanat.com/#bulten";
 const GOOGLE_REVIEW_URL = "https://g.page/r/CSo8oia25vGSEBI/review";
+const CURRENT_BRANCH_CODE = "bodrum";
+const MONTHLY_REPORT_START = "2026-08-01";
 
 const DAY_IDX = { "Pazartesi":1, "Sali":2, "Carsamba":3, "Persembe":4, "Cuma":5, "Cumartesi":6, "Pazar":0 };
 const TR_DAYS_MAP = { "Pazartesi":"Pazartesi", "Salı":"Sali", "Çarşamba":"Carsamba", "Perşembe":"Persembe", "Cuma":"Cuma", "Cumartesi":"Cumartesi", "Pazar":"Pazar" };
@@ -3520,7 +3522,376 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
   );
 }
 
-function AylikOzet({ students, teachers, onTeacherAdd, onTeacherToggle }) {
+function previousCalendarMonth(reference = new Date()) {
+  return new Date(reference.getFullYear(), reference.getMonth()-1, 1);
+}
+
+function monthReportKey(date) {
+  return date.getFullYear()+"-"+String(date.getMonth()+1).padStart(2,"0");
+}
+
+function monthReportDate(date) {
+  return monthReportKey(date)+"-01";
+}
+
+function monthReportLabel(date) {
+  const label = date.toLocaleDateString("tr-TR", { month:"long", year:"numeric" });
+  return label.charAt(0).toLocaleUpperCase("tr-TR")+label.slice(1);
+}
+
+function reportMonthsToEnsure(existingReports, reference = new Date()) {
+  const end = previousCalendarMonth(reference);
+  const cursor = new Date(MONTHLY_REPORT_START+"T12:00:00");
+  const existing = new Set((existingReports || []).map(row=>String(row.report_month || "").slice(0,7)));
+  const months = [];
+  while (monthReportKey(cursor) <= monthReportKey(end)) {
+    if (!existing.has(monthReportKey(cursor))) months.push(new Date(cursor));
+    cursor.setMonth(cursor.getMonth()+1);
+  }
+  return months;
+}
+
+function studentWasActiveAt(student,cutoff) {
+  const cutoffTime = new Date(cutoff).getTime();
+  const startValue = student.lesson_start_date || student.lessonStartDate || student.created_at;
+  if (startValue && new Date(startValue).getTime()>cutoffTime) return false;
+  const events = [...(student.status_history || [])]
+    .filter(event=>event?.at && new Date(event.at).getTime()<=cutoffTime && ["frozen","active","left","deleted"].includes(event.type))
+    .sort((a,b)=>new Date(a.at)-new Date(b.at));
+  if (events.length) return events[events.length-1].type === "active";
+  if (student.left_at && new Date(student.left_at).getTime()<=cutoffTime) return false;
+  return !student.frozen && !isStudentDeleted(student);
+}
+
+function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth, branch) {
+  const payments = [];
+  const normalLessons = [];
+  const noShows = [];
+  const lastMinutes = [];
+  const completedMakeups = [];
+  const createdMakeups = [];
+  const expiredMakeups = [];
+  const extraLessons = [];
+  const lessonScores = [];
+  const periodEvaluations = [];
+  const pieces = [];
+  const frozenIds = new Set();
+  const leftIds = new Set();
+  const teacherCounts = {};
+  const monthEnd = new Date(targetMonth.getFullYear(),targetMonth.getMonth()+1,0,23,59,59,999);
+
+  const addTeacherLesson = name => {
+    const teacherName = name || "Öğretmen belirtilmemiş";
+    teacherCounts[teacherName] = (teacherCounts[teacherName] || 0) + 1;
+  };
+
+  (students || []).forEach(student => {
+    (student.odemeler || []).forEach(payment => {
+      if (!inMonth(payment.tarih,targetMonth)) return;
+      const amount = typeof payment.tutar === "number" ? payment.tutar : (Number(student.ucret) || 0);
+      payments.push({ amount, student:student.name, date:payment.tarih });
+    });
+
+    (student.schedule || []).forEach(lesson => {
+      if (!inMonth(lesson.date,targetMonth)) return;
+      if (lesson.status === "completed") {
+        normalLessons.push(lesson);
+        addTeacherLesson(teacherForDate(student,lesson.date,lesson));
+        const score = storedLessonScore(lesson);
+        if (score !== null) lessonScores.push(score);
+      }
+      if (lesson.status === "noshow") noShows.push(lesson);
+      if (lesson.status === "lastminute") lastMinutes.push(lesson);
+    });
+
+    (student.telafi_records || []).forEach(record => {
+      if (record.createdAt && inMonth(record.createdAt,targetMonth)) createdMakeups.push(record);
+      const doneAt = telafiDoneAt(record);
+      if (record.done && record.doneStatus !== "counted" && doneAt && inMonth(doneAt,targetMonth)) {
+        completedMakeups.push(record);
+        addTeacherLesson(teacherForDate(student,doneAt,record));
+      }
+      if (!record.done && record.expiry && inMonth(record.expiry,targetMonth) && new Date(record.expiry) <= monthEnd) expiredMakeups.push(record);
+    });
+
+    (student.ek_dersler || []).forEach(extra => {
+      if (extra.status !== "done" || !inMonth(extra.date,targetMonth)) return;
+      extraLessons.push(extra);
+      addTeacherLesson(teacherForDate(student,extra.date,extra));
+    });
+
+    (student.status_history || []).forEach(event => {
+      if (!inMonth(event.at,targetMonth)) return;
+      if (event.type === "frozen") frozenIds.add(student.id);
+      if (event.type === "left") leftIds.add(student.id);
+    });
+
+    (student.package_summary_logs || []).forEach(log => {
+      if (!log?.evaluation) return;
+      const evaluationDate = log.packageEnd || log.evaluatedAt;
+      if (!inMonth(evaluationDate,targetMonth)) return;
+      periodEvaluations.push(log.evaluation);
+      if (log.evaluation.pieceName) pieces.push({ student:student.name, name:log.evaluation.pieceName, result:log.evaluation.pieceLabel || "" });
+    });
+  });
+
+  const monthExpenses = (expenses || []).filter(expense=>expenseAppliesToMonth(expense,targetMonth));
+  const expenseCategories = monthExpenses.reduce((acc,expense) => {
+    const category = expense.category || "Diğer";
+    acc[category] = (acc[category] || 0) + (Number(expense.amount) || 0);
+    return acc;
+  },{});
+  const revenue = payments.reduce((sum,payment)=>sum+payment.amount,0);
+  const expenseTotal = monthExpenses.reduce((sum,expense)=>sum+(Number(expense.amount)||0),0);
+  const operational = (students || []).filter(student=>!isStudentDeleted(student));
+  const activeStudents = operational.filter(student=>studentWasActiveAt(student,monthEnd));
+  const newStudents = operational.filter(student=>inMonth(student.lesson_start_date || student.lessonStartDate,targetMonth));
+  const lessonAverage = lessonScores.length ? roundedScore(lessonScores.reduce((sum,score)=>sum+score,0)/lessonScores.length) : null;
+  const periodAverage = periodEvaluations.length ? roundedScore(periodEvaluations.reduce((sum,evaluation)=>sum+(Number(evaluation.periodScore)||0),0)/periodEvaluations.length) : null;
+
+  return {
+    schemaVersion:1,
+    branchCode:branch?.code || CURRENT_BRANCH_CODE,
+    branchName:branch?.name || "Bodrum Sonsuz Sanat",
+    key:monthReportKey(targetMonth),
+    label:monthReportLabel(targetMonth),
+    periodStart:monthReportDate(targetMonth),
+    periodEnd:localDateKey(monthEnd),
+    generatedAt:new Date().toISOString(),
+    revenue,
+    expenseTotal,
+    netProfit:revenue-expenseTotal,
+    paymentCount:payments.length,
+    expenseCount:monthExpenses.length,
+    expenseCategories:Object.entries(expenseCategories).sort((a,b)=>b[1]-a[1]),
+    activeStudentCount:activeStudents.length,
+    newStudentCount:newStudents.length,
+    frozenCount:frozenIds.size,
+    leftCount:leftIds.size,
+    normalLessonCount:normalLessons.length,
+    makeupCreatedCount:createdMakeups.length,
+    makeupCompletedCount:completedMakeups.length,
+    makeupExpiredCount:expiredMakeups.length,
+    extraLessonCount:extraLessons.length,
+    noShowCount:noShows.length,
+    lastMinuteCount:lastMinutes.length,
+    lessonScoreCount:lessonScores.length,
+    lessonAverage,
+    periodCount:periodEvaluations.length,
+    periodAverage,
+    pieces,
+    teacherRows:Object.entries(teacherCounts).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],"tr")),
+  };
+}
+
+function reportFromRow(row) {
+  return { ...(row?.report_data || {}), id:row?.id, reportMonth:row?.report_month, downloadedAt:row?.downloaded_at || null };
+}
+
+function concatPdfBytes(parts) {
+  const total = parts.reduce((sum,part)=>sum+part.length,0);
+  const output = new Uint8Array(total);
+  let offset = 0;
+  parts.forEach(part=>{ output.set(part,offset); offset += part.length; });
+  return output;
+}
+
+function jpegImagePdfBytes(jpegBytes,width,height) {
+  const encode = value=>new TextEncoder().encode(value);
+  const objects = [];
+  const content = "q\n595.28 0 0 841.89 0 0 cm\n/Im0 Do\nQ\n";
+  objects[1] = encode("<< /Type /Catalog /Pages 2 0 R >>");
+  objects[2] = encode("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+  objects[3] = encode("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>");
+  objects[4] = concatPdfBytes([encode(`<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`),jpegBytes,encode("\nendstream")]);
+  objects[5] = encode(`<< /Length ${content.length} >>\nstream\n${content}endstream`);
+  const parts = [encode("%PDF-1.4\n%1234\n")];
+  const offsets = [0];
+  let length = parts[0].length;
+  for (let i=1;i<=5;i++) {
+    offsets[i] = length;
+    const bytes = concatPdfBytes([encode(`${i} 0 obj\n`),objects[i],encode("\nendobj\n")]);
+    parts.push(bytes);
+    length += bytes.length;
+  }
+  const xrefOffset = length;
+  const xref = ["xref","0 6","0000000000 65535 f "];
+  for (let i=1;i<=5;i++) xref.push(String(offsets[i]).padStart(10,"0")+" 00000 n ");
+  parts.push(encode(xref.join("\n")+`\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`));
+  return concatPdfBytes(parts);
+}
+
+function roundedCanvasRect(ctx,x,y,width,height,radius,fill) {
+  ctx.beginPath();
+  ctx.roundRect(x,y,width,height,radius);
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function wrapCanvasText(ctx,text,maxWidth) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  words.forEach(word=>{
+    const candidate = line ? line+" "+word : word;
+    if (line && ctx.measureText(candidate).width > maxWidth) { lines.push(line); line = word; }
+    else line = candidate;
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : ["—"];
+}
+
+function monthlyReportCanvas(report) {
+  const scale = 2;
+  const width = 1240;
+  const height = 1754;
+  const canvas = document.createElement("canvas");
+  canvas.width = width*scale;
+  canvas.height = height*scale;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale,scale);
+  ctx.fillStyle = "#f7f5fb";
+  ctx.fillRect(0,0,width,height);
+  const margin = 72;
+  const contentWidth = width-margin*2;
+  let y = 70;
+
+  ctx.fillStyle = "#6d28d9";
+  ctx.font = "800 25px Arial";
+  ctx.fillText(String(report.branchName || "SONSUZ SANAT").toLocaleUpperCase("tr-TR"),margin,y);
+  y += 56;
+  ctx.fillStyle = "#17131d";
+  ctx.font = "900 52px Arial";
+  ctx.fillText("Ay Sonu Yönetim Raporu",margin,y);
+  y += 42;
+  ctx.fillStyle = "#6b6474";
+  ctx.font = "600 24px Arial";
+  ctx.fillText(report.label+" · Oluşturulma: "+fmtMed(report.generatedAt),margin,y);
+  y += 52;
+
+  const cardGap = 16;
+  const cardWidth = (contentWidth-cardGap*3)/4;
+  const cards = [
+    ["TAHSİLAT",report.revenue.toLocaleString("tr-TR")+" TL","#dcfce7","#047857"],
+    ["GİDER",report.expenseTotal.toLocaleString("tr-TR")+" TL","#fee2e2","#b91c1c"],
+    ["NET KÂR",report.netProfit.toLocaleString("tr-TR")+" TL",report.netProfit>=0?"#ede9fe":"#ffe4e6",report.netProfit>=0?"#6d28d9":"#be123c"],
+    ["AY SONU AKTİF",String(report.activeStudentCount),"#e0f2fe","#0369a1"],
+  ];
+  cards.forEach((card,index)=>{
+    const x = margin+index*(cardWidth+cardGap);
+    roundedCanvasRect(ctx,x,y,cardWidth,128,18,card[2]);
+    ctx.fillStyle = card[3];
+    ctx.font = "800 18px Arial";
+    ctx.fillText(card[0],x+20,y+34);
+    ctx.font = "900 27px Arial";
+    wrapCanvasText(ctx,card[1],cardWidth-40).slice(0,2).forEach((line,lineIndex)=>ctx.fillText(line,x+20,y+72+lineIndex*30));
+  });
+  y += 158;
+
+  const drawSection = (title,rows,accent="#6d28d9")=>{
+    ctx.font = "600 19px Arial";
+    const prepared = rows.flatMap(row=>wrapCanvasText(ctx,row,contentWidth-78));
+    const sectionHeight = 64+prepared.length*29+20;
+    roundedCanvasRect(ctx,margin,y,contentWidth,sectionHeight,18,"#ffffff");
+    ctx.fillStyle = accent;
+    ctx.font = "900 22px Arial";
+    ctx.fillText(title,margin+28,y+38);
+    ctx.fillStyle = "#3f3947";
+    ctx.font = "600 19px Arial";
+    prepared.forEach((line,index)=>ctx.fillText("• "+line,margin+30,y+76+index*29));
+    y += sectionHeight+16;
+  };
+
+  drawSection("Finans",[
+    `${report.paymentCount} ödeme · ${report.expenseCount} gider kaydı`,
+    report.expenseCategories.length ? "Gider dağılımı: "+report.expenseCategories.map(([category,amount])=>category+" "+amount.toLocaleString("tr-TR")+" TL").join(" · ") : "Bu ay gider kaydı yok",
+  ],"#047857");
+  drawSection("Dersler",[
+    `${report.normalLessonCount} normal ders · ${report.makeupCompletedCount} telafi · ${report.extraLessonCount} ek ders`,
+    `${report.noShowCount} no-show · ${report.lastMinuteCount} son dakika iptali`,
+    `${report.makeupCreatedCount} telafi hakkı oluşturuldu · ${report.makeupExpiredCount} telafi hakkının süresi doldu`,
+  ],"#0369a1");
+  drawSection("Öğrenciler ve Takip",[
+    `${report.newStudentCount} yeni kayıt · ${report.frozenCount} donduran · ${report.leftCount} ayrılan`,
+    `Ay sonunda ${report.activeStudentCount} aktif öğrenci`,
+  ],"#7e22ce");
+  const pieceSummary = report.pieces.length
+    ? "Tamamlanan parçalar: "+report.pieces.slice(0,12).map(piece=>piece.student+" — "+piece.name+(piece.result?" ("+piece.result+")":"")).join(" · ")+(report.pieces.length>12?` · ve ${report.pieces.length-12} kayıt daha`:"")
+    : "Bu ay kaydedilmiş dönem parçası yok";
+  drawSection("Eğitim",[
+    `Ders puanı ortalaması: ${report.lessonAverage===null?"—":fmtNumber(report.lessonAverage)+"/100"} (${report.lessonScoreCount} değerlendirme)`,
+    `Dönem puanı ortalaması: ${report.periodAverage===null?"—":fmtNumber(report.periodAverage)+"/100"} (${report.periodCount} dönem)`,
+    pieceSummary,
+  ],"#b45309");
+  const teacherSummary = report.teacherRows.length ? report.teacherRows.slice(0,12).map(([name,count])=>name+": "+count+" ders") : ["Bu ay yapılmış ders yok"];
+  if (report.teacherRows.length>12) teacherSummary.push(`ve ${report.teacherRows.length-12} öğretmen daha`);
+  drawSection("Öğretmen Ders Dağılımı",teacherSummary,"#475569");
+
+  ctx.fillStyle = "#8b8492";
+  ctx.font = "600 17px Arial";
+  ctx.fillText("Bu rapor Sonsuz Sanat CRM kayıtlarının değişmez aylık fotoğrafıdır.",margin,height-48);
+  return canvas;
+}
+
+async function downloadMonthlyReportPdf(report) {
+  const canvas = monthlyReportCanvas(report);
+  const jpegBlob = await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error("PDF görseli oluşturulamadı")),"image/jpeg",0.98));
+  const jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
+  const pdfBytes = jpegImagePdfBytes(jpegBytes,canvas.width,canvas.height);
+  const url = URL.createObjectURL(new Blob([pdfBytes],{ type:"application/pdf" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `Sonsuz-Sanat-${report.branchCode || CURRENT_BRANCH_CODE}-Ay-Sonu-Raporu-${report.key}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+
+function MonthlyReportPreviewSheet({ report, onClose, onDownload, downloading }) {
+  return <Sheet title="Ay Sonu Raporu" subtitle={`${report.branchName} · ${report.label}`} onClose={onClose}>
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(2,minmax(0,1fr))", gap:8, marginBottom:12 }}>
+      <MiniMetric label="Tahsilat" value={report.revenue.toLocaleString("tr-TR")+" TL"} tone="good" />
+      <MiniMetric label="Gider" value={report.expenseTotal.toLocaleString("tr-TR")+" TL"} tone="danger" />
+      <MiniMetric label="Net Kâr" value={report.netProfit.toLocaleString("tr-TR")+" TL"} tone="special" />
+      <MiniMetric label="Ay Sonu Aktif" value={report.activeStudentCount} tone="info" />
+    </div>
+    <div style={{ ...SECTION, padding:"13px 14px" }}><p style={{ margin:"0 0 7px", fontSize:12, fontWeight:800 }}>Dersler</p><p style={{ margin:0, fontSize:12, color:"#64748b", lineHeight:1.6 }}>{report.normalLessonCount} normal · {report.makeupCompletedCount} telafi · {report.extraLessonCount} ek ders · {report.noShowCount} no-show</p></div>
+    <div style={{ ...SECTION, padding:"13px 14px" }}><p style={{ margin:"0 0 7px", fontSize:12, fontWeight:800 }}>Öğrenciler</p><p style={{ margin:0, fontSize:12, color:"#64748b", lineHeight:1.6 }}>{report.newStudentCount} yeni kayıt · {report.frozenCount} donduran · {report.leftCount} ayrılan</p></div>
+    <div style={{ ...SECTION, padding:"13px 14px" }}><p style={{ margin:"0 0 7px", fontSize:12, fontWeight:800 }}>Eğitim</p><p style={{ margin:0, fontSize:12, color:"#64748b", lineHeight:1.6 }}>Ders ortalaması: {report.lessonAverage===null?"—":fmtNumber(report.lessonAverage)+"/100"} · Dönem ortalaması: {report.periodAverage===null?"—":fmtNumber(report.periodAverage)+"/100"} · {report.pieces.length} parça kaydı</p></div>
+    <Btn bg="#6d28d9" onClick={()=>onDownload(report)} disabled={downloading}>{downloading ? "PDF hazırlanıyor..." : "PDF İndir"}</Btn>
+    <Btn bg="#111" outline onClick={onClose}>Kapat</Btn>
+  </Sheet>;
+}
+
+function PendingMonthlyReports({ reports, onDownload, downloadingId }) {
+  const [preview,setPreview] = useState(null);
+  if (!reports.length) return null;
+  return <>
+    <AçılırBugünBölümü title={`Ay Sonu Raporu (${reports.length})`} color="#6d28d9" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+      {reports.map(report=><div key={report.id} style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
+        <div><p style={{ margin:0, fontWeight:800, fontSize:14 }}>{report.label}</p><p style={{ margin:"2px 0 0", color:"#7e22ce", fontSize:12 }}>Yönetim raporu hazır · PDF indirilmedi</p></div>
+        <div style={{ display:"flex", gap:6 }}><button onClick={()=>setPreview(report)} style={{ border:"none", borderRadius:8, padding:"7px 9px", background:"#ede9fe", color:"#5b21b6", fontWeight:800, cursor:"pointer" }}>Önizle</button><button disabled={downloadingId===report.id} onClick={()=>onDownload(report)} style={{ border:"none", borderRadius:8, padding:"7px 10px", background:"#6d28d9", color:"#fff", fontWeight:800, cursor:downloadingId===report.id?"wait":"pointer", opacity:downloadingId===report.id ? .7 : 1 }}>{downloadingId===report.id?"Hazırlanıyor...":"PDF İndir"}</button></div>
+      </div>)}
+    </AçılırBugünBölümü>
+    {preview ? <MonthlyReportPreviewSheet report={preview} onClose={()=>setPreview(null)} onDownload={onDownload} downloading={downloadingId===preview.id} /> : null}
+  </>;
+}
+
+function MonthlyReportsArchive({ reports, onDownload, downloadingId }) {
+  const [preview,setPreview] = useState(null);
+  return <div style={{ ...SECTION, padding:"15px 16px" }}>
+    <p style={{ margin:"0 0 4px", fontSize:13, fontWeight:800, color:"#111" }}>Ay Sonu Raporları</p>
+    <p style={{ margin:"0 0 10px", fontSize:11, color:"#888" }}>Oluşturulan raporlar burada değişmeden saklanır.</p>
+    {reports.length===0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Henüz aylık rapor oluşmadı.</p> : reports.map((report,index)=><div key={report.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"9px 0", borderBottom:index<reports.length-1?"1px solid #f1f5f9":"none" }}>
+      <div><strong style={{ fontSize:13 }}>{report.label}</strong><p style={{ margin:"2px 0 0", fontSize:11, color:report.downloadedAt?"#059669":"#c2410c", fontWeight:700 }}>{report.downloadedAt?"PDF indirildi · "+fmtMed(report.downloadedAt):"İndirme bekliyor"}</p></div>
+      <div style={{ display:"flex", gap:6 }}><button onClick={()=>setPreview(report)} style={{ border:"none", borderRadius:8, padding:"6px 8px", background:"#f3f4f6", color:"#374151", fontSize:11, fontWeight:800, cursor:"pointer" }}>Görüntüle</button><button disabled={downloadingId===report.id} onClick={()=>onDownload(report)} style={{ border:"none", borderRadius:8, padding:"6px 9px", background:"#6d28d9", color:"#fff", fontSize:11, fontWeight:800, cursor:downloadingId===report.id?"wait":"pointer" }}>{downloadingId===report.id?"Hazırlanıyor...":"PDF"}</button></div>
+    </div>)}
+    {preview ? <MonthlyReportPreviewSheet report={preview} onClose={()=>setPreview(null)} onDownload={onDownload} downloading={downloadingId===preview.id} /> : null}
+  </div>;
+}
+
+function AylikOzet({ students, teachers, monthlyReports, onMonthlyReportDownload, downloadingReportId, onTeacherAdd, onTeacherToggle }) {
   const [ayOffset, setAyOffset] = useState(0);
   const [yeniOgretmen, setYeniOgretmen] = useState("");
   const simdi = new Date();
@@ -3582,6 +3953,7 @@ function AylikOzet({ students, teachers, onTeacherAdd, onTeacherToggle }) {
 
   return (
     <div>
+      <MonthlyReportsArchive reports={monthlyReports} onDownload={onMonthlyReportDownload} downloadingId={downloadingReportId} />
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
         <button onClick={()=>setAyOffset(o=>o-1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>‹</button>
         <div style={{ textAlign:"center" }}>
@@ -3797,6 +4169,10 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [monthlyReports, setMonthlyReports] = useState([]);
+  const [downloadingReportId, setDownloadingReportId] = useState(null);
+  const [loadedSources, setLoadedSources] = useState({ students:false, teachers:false, expenses:false });
+  const reportInitializationRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [actionModal, setActionModal] = useState(null);
   const [lessonEvaluationPrompt, setLessonEvaluationPrompt] = useState(null);
@@ -3849,7 +4225,10 @@ export default function App() {
 
   const loadStudents = async () => {
     const { data, error } = await supabase.from("students").select("*").order("created_at");
-    if (!error && data) setStudents(data.map(s => ({ ...s, record_version: typeof s.record_version === "number" ? s.record_version : 0 })));
+    if (!error && data) {
+      setStudents(data.map(s => ({ ...s, record_version: typeof s.record_version === "number" ? s.record_version : 0 })));
+      setLoadedSources(current=>({ ...current, students:true }));
+    }
     if (error) {
       console.error("Veri yükleme hatası:", error);
       pop("Veriler yüklenemedi. Bağlantı veya Supabase yetkisini kontrol et.", 6000);
@@ -3859,7 +4238,10 @@ export default function App() {
 
   const loadTeachers = async () => {
     const { data, error } = await supabase.from("teachers").select("*").order("name");
-    if (!error && data) setTeachers(data);
+    if (!error && data) {
+      setTeachers(data);
+      setLoadedSources(current=>({ ...current, teachers:true }));
+    }
     if (error) {
       console.error("Öğretmen listesi yükleme hatası:", error);
       pop("Öğretmen listesi yüklenemedi. v58 Supabase SQL dosyasını kontrol edin.", 8000);
@@ -3868,7 +4250,10 @@ export default function App() {
 
   const loadExpenses = async () => {
     const { data, error } = await supabase.from("expenses").select("*").order("expense_date");
-    if (!error && data) setExpenses(data);
+    if (!error && data) {
+      setExpenses(data);
+      setLoadedSources(current=>({ ...current, expenses:true }));
+    }
     if (error) {
       console.error("Gider listesi yükleme hatası:", error);
       pop("Giderler yüklenemedi. v61 Supabase SQL dosyasını çalıştırdığınızdan emin olun.", 8000);
@@ -3876,6 +4261,79 @@ export default function App() {
   };
 
   useEffect(() => { loadStudents(); loadTeachers(); loadExpenses(); document.title = "Sonsuz Sanat CRM"; }, []);
+
+  useEffect(() => {
+    if (!giris || !loadedSources.students || !loadedSources.teachers || !loadedSources.expenses || reportInitializationRef.current) return;
+    reportInitializationRef.current = true;
+    const initialize = async () => {
+      const branchResult = await supabase.from("branches").select("id,code,name").eq("code",CURRENT_BRANCH_CODE).single();
+      if (branchResult.error || !branchResult.data?.id) {
+        console.error("Aylık rapor şube kaydı yüklenemedi:",branchResult.error);
+        pop("Ay sonu raporu kurulumu eksik. v83 Supabase SQL dosyasını çalıştırın.",9000);
+        return;
+      }
+      const branch = branchResult.data;
+      const reportResult = await supabase.from("monthly_reports").select("*").eq("branch_id",branch.id).order("report_month",{ ascending:false });
+      if (reportResult.error) {
+        console.error("Aylık rapor arşivi yüklenemedi:",reportResult.error);
+        pop("Ay sonu rapor arşivi yüklenemedi. v83 Supabase SQL dosyasını kontrol edin.",9000);
+        return;
+      }
+      let rows = reportResult.data || [];
+      const missingMonths = reportMonthsToEnsure(rows);
+      for (const targetMonth of missingMonths) {
+        const snapshot = buildMonthlyInstitutionReport(students,teachers,expenses,targetMonth,branch);
+        const insertResult = await supabase.from("monthly_reports").insert({ branch_id:branch.id, report_month:monthReportDate(targetMonth), report_data:snapshot }).select("*").single();
+        if (insertResult.error) {
+          const duplicate = String(insertResult.error.code || "") === "23505";
+          if (!duplicate) {
+            console.error("Aylık rapor oluşturulamadı:",insertResult.error);
+            pop(snapshot.label+" raporu veritabanında doğrulanamadı.",9000);
+          }
+        } else if (insertResult.data) rows = [insertResult.data,...rows];
+      }
+      const refreshed = await supabase.from("monthly_reports").select("*").eq("branch_id",branch.id).order("report_month",{ ascending:false });
+      if (refreshed.error) {
+        console.error("Aylık rapor arşivi doğrulanamadı:",refreshed.error);
+        pop("Ay sonu rapor arşivi doğrulanamadı.",9000);
+        return;
+      }
+      setMonthlyReports((refreshed.data || []).map(reportFromRow));
+    };
+    initialize().catch(error=>{
+      console.error("Aylık rapor başlatma hatası:",error);
+      pop("Ay sonu raporu hazırlanamadı.",9000);
+    });
+  },[giris,loadedSources.students,loadedSources.teachers,loadedSources.expenses,students,teachers,expenses]);
+
+  const handleMonthlyReportDownload = async report => {
+    if (!report?.id || downloadingReportId) return;
+    setDownloadingReportId(report.id);
+    try {
+      await downloadMonthlyReportPdf(report);
+      if (!report.downloadedAt) {
+        const downloadedAt = new Date().toISOString();
+        const result = await supabase.from("monthly_reports").update({ downloaded_at:downloadedAt, updated_at:downloadedAt }).eq("id",report.id).is("downloaded_at",null).select("*").single();
+        if (result.error || !result.data?.downloaded_at) {
+          const existing = await supabase.from("monthly_reports").select("*").eq("id",report.id).single();
+          if (existing.data?.downloaded_at) setMonthlyReports(current=>current.map(item=>item.id===report.id?reportFromRow(existing.data):item));
+          else {
+            console.error("PDF indirme kaydı doğrulanamadı:",result.error || existing.error);
+            pop("PDF hazırlandı; indirme kaydı doğrulanamadığı için Bugün uyarısı korunuyor.",9000);
+            return;
+          }
+        } else {
+          setMonthlyReports(current=>current.map(item=>item.id===report.id?reportFromRow(result.data):item));
+        }
+      }
+      pop("Ay sonu raporu PDF olarak indirildi");
+    } catch (error) {
+      console.error("PDF oluşturma hatası:",error);
+      pop("PDF oluşturulamadı: "+(error?.message || "Bilinmeyen hata"),9000);
+    } finally {
+      setDownloadingReportId(null);
+    }
+  };
 
   const studentPayload = (student, recordVersion, writeId) => {
     const slots = getStudentSlots(student);
@@ -4914,6 +5372,7 @@ export default function App() {
 
   const stats = { total:operationalStudents.length, active:operationalStudents.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:operationalStudents.filter(s=>s.frozen && !isStudentLeft(s)).length, left:operationalStudents.filter(isStudentLeft).length, telafi:operationalStudents.filter(s=>s.telafi_records.some(r=>!r.done)).length, odeme:todayPayments.length, zam:raiseDueList.length };
   const telafiWarnList = operationalStudents.filter(s => s.telafi_records.filter(r=>!r.done).length===5 && !s.frozen);
+  const pendingMonthlyReports = monthlyReports.filter(report=>!report.downloadedAt);
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:<StudentsNavIcon />, badge:stats.active },
@@ -5044,6 +5503,7 @@ export default function App() {
         ) : null}
         {mainTab === "bugün" ? (
           <div>
+            <PendingMonthlyReports reports={pendingMonthlyReports} onDownload={handleMonthlyReportDownload} downloadingId={downloadingReportId} />
             {(() => {
               const bugün = new Date();
               const bugünMD = (bugün.getMonth()+1)+"-"+bugün.getDate();
@@ -5099,7 +5559,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            {pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -5112,7 +5572,7 @@ export default function App() {
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} onStudentClick={setDetailSt} /> : null}
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
-        {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
+        {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
         {mainTab === "liste" ? (
           <div>
             {telafiWarnList.length > 0 ? (
