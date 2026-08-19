@@ -5581,12 +5581,6 @@ export default function App() {
                 {telafiWarnList.map(s=>(<p key={s.id} style={{ margin:"4px 0 0", fontSize:13, color:"#78350f" }}>· {s.name} 5/6 telafi</p>))}
               </div>
             ) : null}
-            {raiseDueList.length > 0 ? (
-              <div style={{ background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-                <p style={{ margin:0, fontWeight:700, fontSize:13, color:"#c2410c" }}>Zam zamanı gelen öğrenciler:</p>
-                {raiseDueList.slice(0,5).map(s=>(<p key={s.id} style={{ margin:"4px 0 0", fontSize:13, color:"#9a3412" }}>· {s.name}</p>))}
-              </div>
-            ) : null}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8, marginBottom:14 }}>
               {[
                 { key:"all", label:"Toplam", val:stats.total, bg:"#fff", color:"#111" },
