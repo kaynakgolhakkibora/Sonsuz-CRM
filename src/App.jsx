@@ -1421,7 +1421,7 @@ const MIZAN_UI_CSS = `
   .crm-student-info-item{min-width:0;padding:8px 13px;border-left:1px solid #ece8e4;font-size:12px;line-height:1.4}
   .crm-student-info-item:nth-child(3n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+4){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}
   .crm-student-info-label{display:block;margin-bottom:3px;color:#7b7680;font-size:10px;font-weight:850;letter-spacing:.05em;text-transform:uppercase}.crm-student-info-value{display:block;color:#1c1921;font-weight:750;overflow-wrap:anywhere}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(7,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(2,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(8,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(2,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -4334,6 +4334,13 @@ export default function App() {
         setGiris(false);
         setAuthError("");
         setAuthReady(true);
+      } else if (event === "SIGNED_OUT") {
+        sessionStorage.removeItem(CRM_AUTH_KEY);
+        sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
+        sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
+        setAuthMode("supabase");
+        setGiris(false);
+        setAuthReady(true);
       }
     });
     return () => {
@@ -4413,6 +4420,33 @@ export default function App() {
       return;
     }
     setSifreHata(true);
+  };
+
+  const handleSecureLogout = async () => {
+    if (authBusy) return;
+    setAuthBusy(true);
+    setAuthError("");
+    const supabaseLogin = sessionStorage.getItem(CRM_AUTH_METHOD_KEY) === "supabase" || !!authSession;
+    if (supabaseLogin) {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        setAuthError(authErrorMessage(error));
+        pop("Güvenli çıkış tamamlanamadı. Tekrar deneyin.", 6000);
+        setAuthBusy(false);
+        return;
+      }
+    }
+    sessionStorage.removeItem(CRM_AUTH_KEY);
+    sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
+    sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
+    setAuthSession(null);
+    setAuthMode("supabase");
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthPasswordAgain("");
+    setSifre("");
+    setGiris(false);
+    setAuthBusy(false);
   };
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
@@ -5751,6 +5785,7 @@ export default function App() {
           <div className="crm-tip"><strong>Bugünün özeti</strong>{stats.active} aktif öğrenci · {stats.odeme} ödeme bekliyor · {telafiWarnList.length} telafi uyarısı.</div>
           <button className="crm-side-action" onClick={handleCalendarLinkCopy}>⌁ Takvim linkini kopyala</button>
           <button className="crm-side-action" onClick={handleGoogleCalendarExport}>⇧ Google Takvim'e aktar</button>
+          <button className="crm-side-action" disabled={authBusy} onClick={handleSecureLogout}>↪ Güvenli çıkış</button>
         </div>
       </aside>
 
@@ -5936,6 +5971,9 @@ export default function App() {
             <span>{t.icon}</span>{t.label}
           </button>
         ))}
+        <button disabled={authBusy} onClick={handleSecureLogout}>
+          <span>↪</span>Çıkış
+        </button>
       </nav>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
