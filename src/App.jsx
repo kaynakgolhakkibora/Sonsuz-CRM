@@ -3,9 +3,16 @@ import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://wuizpkfueudglmgdsavu.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1aXpwa2Z1ZXVkZ2xtZ2RzYXZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMTg4OTUsImV4cCI6MjA5NDc5NDg5NX0.p1-d04TxeQfa_sg6QfoL8eAD4A9DULCwaS3GEiUcqmk";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const CRM_AUTH_KEY = "crm_auth";
 const CRM_AUTH_METHOD_KEY = "crm_auth_method";
+const CRM_PASSWORD_SETUP_PENDING_KEY = "crm_password_setup_pending";
+const INITIAL_AUTH_LINK_TYPE = typeof window === "undefined"
+  ? ""
+  : new URLSearchParams(window.location.hash.replace(/^#/, "")).get("type") || "";
+if (typeof window !== "undefined" && ["invite", "recovery"].includes(INITIAL_AUTH_LINK_TYPE)) {
+  sessionStorage.setItem(CRM_PASSWORD_SETUP_PENDING_KEY, "ok");
+}
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -22,8 +29,9 @@ function authHashParams() {
 }
 
 function isPasswordSetupLink() {
-  const type = authHashParams().get("type");
-  return type === "invite" || type === "recovery";
+  const type = authHashParams().get("type") || INITIAL_AUTH_LINK_TYPE;
+  if (type === "invite" || type === "recovery") return true;
+  return typeof window !== "undefined" && sessionStorage.getItem(CRM_PASSWORD_SETUP_PENDING_KEY) === "ok";
 }
 
 function authErrorMessage(error) {
@@ -4285,7 +4293,10 @@ export default function App() {
       setAuthSession(session);
       if (error) setAuthError(authErrorMessage(error));
 
-      if (session && !isPasswordSetupLink()) {
+      if (session && isPasswordSetupLink()) {
+        setAuthMode("set-password");
+        setGiris(false);
+      } else if (session) {
         const profile = await activeStaffProfile(session.user?.id);
         if (!active) return;
         if (profile) {
@@ -4312,8 +4323,18 @@ export default function App() {
       setAuthReady(true);
     });
 
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (active) setAuthSession(session || null);
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      setAuthSession(session || null);
+      if (event === "PASSWORD_RECOVERY") {
+        sessionStorage.setItem(CRM_PASSWORD_SETUP_PENDING_KEY, "ok");
+        sessionStorage.removeItem(CRM_AUTH_KEY);
+        sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
+        setAuthMode("set-password");
+        setGiris(false);
+        setAuthError("");
+        setAuthReady(true);
+      }
     });
     return () => {
       active = false;
@@ -4378,6 +4399,7 @@ export default function App() {
     const { data:sessionData } = await supabase.auth.getSession();
     const authorized = await authorizeStaffSession(sessionData?.session);
     if (authorized && typeof window !== "undefined") {
+      sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
       window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
     }
     setAuthBusy(false);
