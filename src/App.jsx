@@ -3,6 +3,15 @@ import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://wuizpkfueudglmgdsavu.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1aXpwa2Z1ZXVkZ2xtZ2RzYXZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMTg4OTUsImV4cCI6MjA5NDc5NDg5NX0.p1-d04TxeQfa_sg6QfoL8eAD4A9DULCwaS3GEiUcqmk";
+const CRM_AUTH_KEY = "crm_auth";
+const CRM_AUTH_METHOD_KEY = "crm_auth_method";
+const CRM_PASSWORD_SETUP_PENDING_KEY = "crm_password_setup_pending";
+const INITIAL_AUTH_LINK_TYPE = typeof window === "undefined"
+  ? ""
+  : new URLSearchParams(window.location.hash.replace(/^#/, "")).get("type") || "";
+if (typeof window !== "undefined" && ["invite", "recovery"].includes(INITIAL_AUTH_LINK_TYPE)) {
+  sessionStorage.setItem(CRM_PASSWORD_SETUP_PENDING_KEY, "ok");
+}
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
 const MAX_SAVE_RETRIES = 3;
@@ -13,6 +22,36 @@ const NEWSLETTER_URL = "https://bodrumsonsuzsanat.com/#bulten";
 const GOOGLE_REVIEW_URL = "https://g.page/r/CSo8oia25vGSEBI/review";
 const CURRENT_BRANCH_CODE = "bodrum";
 const MONTHLY_REPORT_START = "2026-08-01";
+
+function authHashParams() {
+  if (typeof window === "undefined") return new URLSearchParams();
+  return new URLSearchParams(window.location.hash.replace(/^#/, ""));
+}
+
+function isPasswordSetupLink() {
+  const type = authHashParams().get("type") || INITIAL_AUTH_LINK_TYPE;
+  if (type === "invite" || type === "recovery") return true;
+  return typeof window !== "undefined" && sessionStorage.getItem(CRM_PASSWORD_SETUP_PENDING_KEY) === "ok";
+}
+
+function authErrorMessage(error) {
+  const message = String(error?.message || error || "").toLocaleLowerCase("tr-TR");
+  if (message.includes("invalid login credentials")) return "E-posta veya parola hatalı.";
+  if (message.includes("email not confirmed")) return "Önce e-posta davetini onaylayın.";
+  if (message.includes("expired") || message.includes("otp")) return "Davet bağlantısının süresi dolmuş. Yeni davet gönderilmesi gerekiyor.";
+  return "Giriş doğrulanamadı. Lütfen tekrar deneyin.";
+}
+
+async function activeStaffProfile(userId) {
+  if (!userId) return null;
+  const { data, error } = await supabase
+    .from("app_profiles")
+    .select("role,active")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error || !data?.active || !["admin", "teacher"].includes(data.role)) return null;
+  return data;
+}
 
 const DAY_IDX = { "Pazartesi":1, "Sali":2, "Carsamba":3, "Persembe":4, "Cuma":5, "Cumartesi":6, "Pazar":0 };
 const TR_DAYS_MAP = { "Pazartesi":"Pazartesi", "Salı":"Sali", "Çarşamba":"Carsamba", "Perşembe":"Persembe", "Cuma":"Cuma", "Cumartesi":"Cumartesi", "Pazar":"Pazar" };
@@ -1365,6 +1404,7 @@ const MIZAN_UI_CSS = `
   .crm-nav-icon{width:22px;text-align:center;font-size:18px}.crm-nav-badge{margin-left:auto;min-width:20px;padding:3px 6px;border-radius:20px;background:#f2effb;color:var(--crm-purple);font-size:10px;text-align:center}
   .crm-sidebar-bottom{margin-top:auto}.crm-tip{margin:0 3px 18px;padding:15px;background:#f6f2e7;border-radius:14px;color:#7b7466;font-size:11px;line-height:1.5}.crm-tip strong{display:block;margin-bottom:4px;color:#5d5547;font-size:12px}
   .crm-side-action{width:100%;border:1px solid var(--crm-border);background:#fff;border-radius:11px;padding:10px 12px;margin-top:7px;text-align:left;font-size:11px;font-weight:750;cursor:pointer}.crm-side-action:hover{border-color:#c7bfd6;color:var(--crm-purple)}
+  .crm-desktop-logout{position:fixed;right:82px;bottom:24px;z-index:50;border:1px solid #ded9d3;background:#fff;color:#5b42d6;border-radius:12px;padding:11px 15px;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(38,30,48,.14)}.crm-desktop-logout:hover{border-color:#9e90d8;background:#f8f6ff}.crm-desktop-logout:disabled{cursor:wait;opacity:.65}
   .crm-content{min-height:100vh;margin-left:245px;padding:38px clamp(28px,5vw,76px) 76px;max-width:1530px;background:var(--crm-paper)}
   .crm-topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px}
   .crm-eyebrow{margin:0 0 8px;color:#9d96a4;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
@@ -1373,6 +1413,7 @@ const MIZAN_UI_CSS = `
   .crm-page{max-width:1120px}.crm-page>div>div,.crm-page>div>div>div{transition:border-color .2s,box-shadow .2s}
   .crm-mobile-nav{display:none}
   .crm-login{min-height:100vh;display:grid;grid-template-columns:.82fr 1.18fr;background:#fbfaf7}.crm-login-brand{padding:clamp(42px,8vw,120px);display:flex;flex-direction:column;justify-content:center;background:var(--crm-purple);color:#fff;position:relative;overflow:hidden}.crm-login-brand:after{content:"";position:absolute;width:420px;height:420px;border:82px solid rgba(255,255,255,.045);border-radius:50%;right:-220px;bottom:-190px}.crm-login-brand .crm-brand-mark{background:#fff;color:var(--crm-purple);width:52px;height:52px;font-size:25px}.crm-login-brand h1{margin:20px 0 8px;font-size:42px;letter-spacing:-.05em}.crm-login-brand p{max-width:330px;color:rgba(255,255,255,.72);line-height:1.6}.crm-login-panel{display:grid;place-items:center;padding:28px}.crm-login-card{width:min(100%,430px)}.crm-login-card .crm-eyebrow{color:var(--crm-purple)}.crm-login-card h2{margin:0 0 8px;font-size:31px;letter-spacing:-.04em}.crm-login-card>p{margin:0 0 28px;color:var(--crm-muted);font-size:13px}.crm-login-card label{display:block;margin:0 0 7px;color:#756f7a;font-size:11px;font-weight:800}.crm-login-card input{width:100%;border:1px solid #ded9d3;background:#fff;border-radius:11px;padding:13px 14px;outline:none;color:var(--crm-ink)}.crm-login-card input:focus{border-color:var(--crm-purple);box-shadow:0 0 0 3px #eeeafd}.crm-login-card button{width:100%;margin-top:15px;border:0;border-radius:12px;padding:13px;background:var(--crm-purple);color:#fff;font-weight:800;cursor:pointer}
+  .crm-login-card h2{color:var(--crm-ink)}
   .crm-loading{min-height:100vh;display:grid;place-items:center;background:var(--crm-paper);text-align:center}.crm-loading-mark{width:50px;height:50px;margin:0 auto 14px;display:grid;place-items:center;border-radius:17px 17px 17px 5px;background:var(--crm-purple);color:#fff;font-size:24px;box-shadow:0 10px 28px rgba(91,66,214,.22)}
   .crm-sheet-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:20px;background:rgba(29,27,36,.52);backdrop-filter:blur(6px)}.crm-sheet{width:min(100%,560px);max-height:calc(100vh - 40px);overflow:hidden;background:#fff;border-radius:22px;box-shadow:0 25px 90px rgba(0,0,0,.22)}.crm-sheet-head{display:flex;justify-content:space-between;align-items:center;padding:20px 23px;border-bottom:1px solid var(--crm-border);background:#fff}.crm-sheet-head strong{display:block;font-size:18px;letter-spacing:-.025em}.crm-sheet-head span{display:block;margin-top:3px;color:#96909b;font-size:12px}.crm-sheet-close{width:34px;height:34px;border:0;border-radius:50%;background:#f4f1ee;color:#746e78;font-size:20px;cursor:pointer}.crm-sheet-body{padding:20px 23px 28px;max-height:calc(100vh - 124px);overflow-y:auto}
   @media(max-width:980px){.crm-content{padding-left:26px;padding-right:26px}.crm-sidebar{width:220px}.crm-content{margin-left:220px}}
@@ -1381,7 +1422,7 @@ const MIZAN_UI_CSS = `
   .crm-student-info-item{min-width:0;padding:8px 13px;border-left:1px solid #ece8e4;font-size:12px;line-height:1.4}
   .crm-student-info-item:nth-child(3n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+4){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}
   .crm-student-info-label{display:block;margin-bottom:3px;color:#7b7680;font-size:10px;font-weight:850;letter-spacing:.05em;text-transform:uppercase}.crm-student-info-value{display:block;color:#1c1921;font-weight:750;overflow-wrap:anywhere}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(7,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(2,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(8,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(2,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -4193,10 +4234,24 @@ function FinansRaporu({ students, expenses, onExpenseAdd, onExpenseRemove }) {
 }
 
 export default function App() {
-  const [giris, setGiris] = useState(() => sessionStorage.getItem("crm_auth") === "ok");
+  const [giris, setGiris] = useState(() => {
+    if (isPasswordSetupLink()) return false;
+    return sessionStorage.getItem(CRM_AUTH_KEY) === "ok" && sessionStorage.getItem(CRM_AUTH_METHOD_KEY) !== "supabase";
+  });
   const [sifre, setSifre] = useState("");
   const [sifreHata, setSifreHata] = useState(false);
   const SIFRE = "sonsuz2024";
+  const [authReady, setAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState(() => isPasswordSetupLink() ? "set-password" : "supabase");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authPasswordAgain, setAuthPasswordAgain] = useState("");
+  const [authSession, setAuthSession] = useState(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState(() => {
+    const params = authHashParams();
+    return params.get("error") ? authErrorMessage(params.get("error_description") || params.get("error")) : "";
+  });
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -4229,6 +4284,171 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [failedOps, setFailedOps] = useState(() => readFailedOps());
   const [retryingOps, setRetryingOps] = useState({});
+
+  useEffect(() => {
+    let active = true;
+    const initializeAuth = async () => {
+      const { data, error } = await supabase.auth.getSession();
+      if (!active) return;
+      const session = data?.session || null;
+      setAuthSession(session);
+      if (error) setAuthError(authErrorMessage(error));
+
+      if (session && isPasswordSetupLink()) {
+        setAuthMode("set-password");
+        setGiris(false);
+      } else if (session) {
+        const profile = await activeStaffProfile(session.user?.id);
+        if (!active) return;
+        if (profile) {
+          sessionStorage.setItem(CRM_AUTH_KEY, "ok");
+          sessionStorage.setItem(CRM_AUTH_METHOD_KEY, "supabase");
+          setGiris(true);
+        } else {
+          await supabase.auth.signOut();
+          if (!active) return;
+          setAuthSession(null);
+          setAuthError("Bu hesabın aktif CRM yönetici veya öğretmen yetkisi yok.");
+        }
+      } else if (!session && sessionStorage.getItem(CRM_AUTH_METHOD_KEY) === "supabase") {
+        sessionStorage.removeItem(CRM_AUTH_KEY);
+        sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
+        setGiris(false);
+      }
+      if (active) setAuthReady(true);
+    };
+
+    initializeAuth().catch(error => {
+      if (!active) return;
+      setAuthError(authErrorMessage(error));
+      setAuthReady(true);
+    });
+
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      setAuthSession(session || null);
+      if (event === "PASSWORD_RECOVERY") {
+        sessionStorage.setItem(CRM_PASSWORD_SETUP_PENDING_KEY, "ok");
+        sessionStorage.removeItem(CRM_AUTH_KEY);
+        sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
+        setAuthMode("set-password");
+        setGiris(false);
+        setAuthError("");
+        setAuthReady(true);
+      } else if (event === "SIGNED_OUT") {
+        sessionStorage.removeItem(CRM_AUTH_KEY);
+        sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
+        sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
+        setAuthMode("supabase");
+        setGiris(false);
+        setAuthReady(true);
+      }
+    });
+    return () => {
+      active = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  const authorizeStaffSession = async session => {
+    const profile = await activeStaffProfile(session?.user?.id);
+    if (!profile) {
+      await supabase.auth.signOut();
+      setAuthSession(null);
+      setAuthError("Bu hesabın aktif CRM yönetici veya öğretmen yetkisi yok.");
+      return false;
+    }
+    sessionStorage.setItem(CRM_AUTH_KEY, "ok");
+    sessionStorage.setItem(CRM_AUTH_METHOD_KEY, "supabase");
+    setAuthSession(session);
+    setGiris(true);
+    return true;
+  };
+
+  const handleSupabaseLogin = async () => {
+    if (authBusy) return;
+    if (!authEmail.trim() || !authPassword) {
+      setAuthError("E-posta ve parola alanlarını doldurun.");
+      return;
+    }
+    setAuthBusy(true);
+    setAuthError("");
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email:authEmail.trim(),
+      password:authPassword,
+    });
+    if (error || !data?.session) setAuthError(authErrorMessage(error));
+    else await authorizeStaffSession(data.session);
+    setAuthBusy(false);
+  };
+
+  const handlePasswordSetup = async () => {
+    if (authBusy) return;
+    if (!authSession?.user) {
+      setAuthError("Davet oturumu bulunamadı. Yeni davet bağlantısını bu cihazda bir kez açın.");
+      return;
+    }
+    if (authPassword.length < 12) {
+      setAuthError("Parolanız en az 12 karakter olmalıdır.");
+      return;
+    }
+    if (authPassword !== authPasswordAgain) {
+      setAuthError("Parolalar birbiriyle aynı değil.");
+      return;
+    }
+    setAuthBusy(true);
+    setAuthError("");
+    const { data, error } = await supabase.auth.updateUser({ password:authPassword });
+    if (error || !data?.user) {
+      setAuthError(authErrorMessage(error));
+      setAuthBusy(false);
+      return;
+    }
+    const { data:sessionData } = await supabase.auth.getSession();
+    const authorized = await authorizeStaffSession(sessionData?.session);
+    if (authorized && typeof window !== "undefined") {
+      sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+    }
+    setAuthBusy(false);
+  };
+
+  const handleLegacyLogin = () => {
+    if (sifre === SIFRE) {
+      sessionStorage.setItem(CRM_AUTH_KEY, "ok");
+      sessionStorage.setItem(CRM_AUTH_METHOD_KEY, "legacy");
+      setGiris(true);
+      return;
+    }
+    setSifreHata(true);
+  };
+
+  const handleSecureLogout = async () => {
+    if (authBusy) return;
+    setAuthBusy(true);
+    setAuthError("");
+    const supabaseLogin = sessionStorage.getItem(CRM_AUTH_METHOD_KEY) === "supabase" || !!authSession;
+    if (supabaseLogin) {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        setAuthError(authErrorMessage(error));
+        pop("Güvenli çıkış tamamlanamadı. Tekrar deneyin.", 6000);
+        setAuthBusy(false);
+        return;
+      }
+    }
+    sessionStorage.removeItem(CRM_AUTH_KEY);
+    sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
+    sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
+    setAuthSession(null);
+    setAuthMode("supabase");
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthPasswordAgain("");
+    setSifre("");
+    setGiris(false);
+    setAuthBusy(false);
+  };
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
 
@@ -5436,31 +5656,94 @@ export default function App() {
         <section className="crm-login-panel">
         <div className="crm-login-card">
           <p className="crm-eyebrow">Sonsuz Sanat</p>
-          <h2>Tekrar hoş geldin</h2>
-          <p>Öğrenci yönetimine devam etmek için şifreni gir.</p>
-          <label>Şifre</label>
-          <input
-            type="password"
-            value={sifre}
-            onChange={e => { setSifre(e.target.value); setSifreHata(false); }}
-            onKeyDown={e => {
-              if (e.key === "Enter") {
-                if (sifre === SIFRE) { sessionStorage.setItem("crm_auth","ok"); setGiris(true); }
-                else setSifreHata(true);
-              }
-            }}
-            placeholder="Şifrenizi girin"
-            style={sifreHata ? {borderColor:"#dc5d51"} : undefined}
-          />
-          {sifreHata && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"7px 0 0" }}>Şifre hatalı</p>}
-          <button
-            onClick={() => {
-              if (sifre === SIFRE) { sessionStorage.setItem("crm_auth","ok"); setGiris(true); }
-              else setSifreHata(true);
-            }}
-          >
-            CRM'e Gir
-          </button>
+          {!authReady ? (
+            <>
+              <h2>Giriş doğrulanıyor</h2>
+              <p>Güvenli oturum kontrol ediliyor...</p>
+            </>
+          ) : authMode === "set-password" ? (
+            <>
+              <h2>Parolanı oluştur</h2>
+              <p>Yönetici hesabını tamamlamak için yalnızca sana ait güçlü bir parola belirle.</p>
+              <label>Yeni parola</label>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={authPassword}
+                onChange={e => { setAuthPassword(e.target.value); setAuthError(""); }}
+                placeholder="En az 12 karakter"
+              />
+              <label style={{marginTop:13}}>Yeni parola tekrar</label>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={authPasswordAgain}
+                onChange={e => { setAuthPasswordAgain(e.target.value); setAuthError(""); }}
+                onKeyDown={e => { if (e.key === "Enter") handlePasswordSetup(); }}
+                placeholder="Parolanızı tekrar girin"
+              />
+              {authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
+              <button disabled={authBusy} onClick={handlePasswordSetup} style={{opacity:authBusy ? .65 : 1}}>
+                {authBusy ? "Kaydediliyor..." : "Parolayı Kaydet ve CRM'e Gir"}
+              </button>
+            </>
+          ) : authMode === "supabase" ? (
+            <>
+              <h2>Tekrar hoş geldin</h2>
+              <p>Yönetici veya öğretmen hesabınla güvenli giriş yap.</p>
+              <label>E-posta</label>
+              <input
+                type="email"
+                autoComplete="username"
+                value={authEmail}
+                onChange={e => { setAuthEmail(e.target.value); setAuthError(""); }}
+                placeholder="ornek@eposta.com"
+              />
+              <label style={{marginTop:13}}>Parola</label>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={authPassword}
+                onChange={e => { setAuthPassword(e.target.value); setAuthError(""); }}
+                onKeyDown={e => { if (e.key === "Enter") handleSupabaseLogin(); }}
+                placeholder="Parolanızı girin"
+              />
+              {authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
+              <button disabled={authBusy} onClick={handleSupabaseLogin} style={{opacity:authBusy ? .65 : 1}}>
+                {authBusy ? "Giriş yapılıyor..." : "Güvenli Giriş"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAuthMode("legacy"); setAuthError(""); }}
+                style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}
+              >
+                Geçici ortak şifreyle giriş
+              </button>
+            </>
+          ) : (
+            <>
+              <h2>Geçici giriş</h2>
+              <p>Supabase Auth geçişi tamamlanana kadar mevcut CRM şifresi çalışmaya devam eder.</p>
+              <label>Mevcut CRM şifresi</label>
+              <input
+                type="password"
+                value={sifre}
+                onChange={e => { setSifre(e.target.value); setSifreHata(false); }}
+                onKeyDown={e => { if (e.key === "Enter") handleLegacyLogin(); }}
+                placeholder="Şifrenizi girin"
+                style={sifreHata ? {borderColor:"#dc5d51"} : undefined}
+              />
+              {sifreHata && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"7px 0 0" }}>Şifre hatalı</p>}
+              <button onClick={handleLegacyLogin}>CRM'e Gir</button>
+              <button
+                type="button"
+                onClick={() => { setAuthMode("supabase"); setSifreHata(false); }}
+                style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}
+              >
+                Güvenli hesaba dön
+              </button>
+            </>
+          )}
         </div>
         </section>
       </div>
@@ -5682,12 +5965,17 @@ export default function App() {
         </section>
       </main>
 
+      <button className="crm-desktop-logout" disabled={authBusy} onClick={handleSecureLogout}>↪ Güvenli çıkış</button>
+
       <nav className="crm-mobile-nav">
         {mainNav.map(t=>(
           <button key={t.key} className={mainTab===t.key?"active":""} onClick={()=>setMainTab(t.key)}>
             <span>{t.icon}</span>{t.label}
           </button>
         ))}
+        <button disabled={authBusy} onClick={handleSecureLogout}>
+          <span>↪</span>Çıkış
+        </button>
       </nav>
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
