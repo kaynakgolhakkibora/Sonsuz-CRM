@@ -5781,11 +5781,11 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <button className="crm-side-action" disabled={authBusy} onClick={handleSecureLogout} style={{marginTop:12}}>↪ Güvenli çıkış</button>
         <div className="crm-sidebar-bottom">
           <div className="crm-tip"><strong>Bugünün özeti</strong>{stats.active} aktif öğrenci · {stats.odeme} ödeme bekliyor · {telafiWarnList.length} telafi uyarısı.</div>
           <button className="crm-side-action" onClick={handleCalendarLinkCopy}>⌁ Takvim linkini kopyala</button>
           <button className="crm-side-action" onClick={handleGoogleCalendarExport}>⇧ Google Takvim'e aktar</button>
-          <button className="crm-side-action" disabled={authBusy} onClick={handleSecureLogout}>↪ Güvenli çıkış</button>
         </div>
       </aside>
 
