@@ -4252,6 +4252,7 @@ export default function App() {
     const params = authHashParams();
     return params.get("error") ? authErrorMessage(params.get("error_description") || params.get("error")) : "";
   });
+  const [authNotice, setAuthNotice] = useState("");
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -4373,12 +4374,29 @@ export default function App() {
     }
     setAuthBusy(true);
     setAuthError("");
+    setAuthNotice("");
     const { data, error } = await supabase.auth.signInWithPassword({
       email:authEmail.trim(),
       password:authPassword,
     });
     if (error || !data?.session) setAuthError(authErrorMessage(error));
     else await authorizeStaffSession(data.session);
+    setAuthBusy(false);
+  };
+
+  const handlePasswordRecovery = async () => {
+    if (authBusy) return;
+    if (!authEmail.trim()) {
+      setAuthError("Parola yenileme bağlantısı için e-posta adresinizi yazın.");
+      setAuthNotice("");
+      return;
+    }
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+    const { error } = await supabase.auth.resetPasswordForEmail(authEmail.trim());
+    if (error) setAuthError(authErrorMessage(error));
+    else setAuthNotice("E-posta kayıtlıysa parola yenileme bağlantısı gönderildi.");
     setAuthBusy(false);
   };
 
@@ -5696,7 +5714,7 @@ export default function App() {
                 type="email"
                 autoComplete="username"
                 value={authEmail}
-                onChange={e => { setAuthEmail(e.target.value); setAuthError(""); }}
+                onChange={e => { setAuthEmail(e.target.value); setAuthError(""); setAuthNotice(""); }}
                 placeholder="ornek@eposta.com"
               />
               <label style={{marginTop:13}}>Parola</label>
@@ -5709,12 +5727,21 @@ export default function App() {
                 placeholder="Parolanızı girin"
               />
               {authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
+              {authNotice && <p style={{ color:"#0f8a62", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authNotice}</p>}
               <button disabled={authBusy} onClick={handleSupabaseLogin} style={{opacity:authBusy ? .65 : 1}}>
                 {authBusy ? "Giriş yapılıyor..." : "Güvenli Giriş"}
               </button>
               <button
                 type="button"
-                onClick={() => { setAuthMode("legacy"); setAuthError(""); }}
+                disabled={authBusy}
+                onClick={handlePasswordRecovery}
+                style={{background:"transparent",color:"#5e43dd",border:"none",boxShadow:"none",marginTop:8,padding:"8px 10px"}}
+              >
+                Parolamı unuttum
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAuthMode("legacy"); setAuthError(""); setAuthNotice(""); }}
                 style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}
               >
                 Geçici ortak şifreyle giriş
