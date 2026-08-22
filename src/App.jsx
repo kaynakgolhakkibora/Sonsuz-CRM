@@ -4234,13 +4234,7 @@ function FinansRaporu({ students, expenses, onExpenseAdd, onExpenseRemove }) {
 }
 
 export default function App() {
-  const [giris, setGiris] = useState(() => {
-    if (isPasswordSetupLink()) return false;
-    return sessionStorage.getItem(CRM_AUTH_KEY) === "ok" && sessionStorage.getItem(CRM_AUTH_METHOD_KEY) !== "supabase";
-  });
-  const [sifre, setSifre] = useState("");
-  const [sifreHata, setSifreHata] = useState(false);
-  const SIFRE = "sonsuz2024";
+  const [giris, setGiris] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [authMode, setAuthMode] = useState(() => isPasswordSetupLink() ? "set-password" : "supabase");
   const [authEmail, setAuthEmail] = useState("");
@@ -4311,7 +4305,7 @@ export default function App() {
           setAuthSession(null);
           setAuthError("Bu hesabın aktif CRM yönetici veya öğretmen yetkisi yok.");
         }
-      } else if (!session && sessionStorage.getItem(CRM_AUTH_METHOD_KEY) === "supabase") {
+      } else if (!session) {
         sessionStorage.removeItem(CRM_AUTH_KEY);
         sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
         setGiris(false);
@@ -4431,16 +4425,6 @@ export default function App() {
     setAuthBusy(false);
   };
 
-  const handleLegacyLogin = () => {
-    if (sifre === SIFRE) {
-      sessionStorage.setItem(CRM_AUTH_KEY, "ok");
-      sessionStorage.setItem(CRM_AUTH_METHOD_KEY, "legacy");
-      setGiris(true);
-      return;
-    }
-    setSifreHata(true);
-  };
-
   const handleSecureLogout = async () => {
     if (authBusy) return;
     setAuthBusy(true);
@@ -4463,7 +4447,6 @@ export default function App() {
     setAuthEmail("");
     setAuthPassword("");
     setAuthPasswordAgain("");
-    setSifre("");
     setGiris(false);
     setAuthBusy(false);
   };
@@ -5705,7 +5688,7 @@ export default function App() {
                 {authBusy ? "Kaydediliyor..." : "Parolayı Kaydet ve CRM'e Gir"}
               </button>
             </>
-          ) : authMode === "supabase" ? (
+          ) : (
             <>
               <h2>Tekrar hoş geldin</h2>
               <p>Yönetici veya öğretmen hesabınla güvenli giriş yap.</p>
@@ -5738,36 +5721,6 @@ export default function App() {
                 style={{background:"transparent",color:"#5e43dd",border:"none",boxShadow:"none",marginTop:8,padding:"8px 10px"}}
               >
                 Parolamı unuttum
-              </button>
-              <button
-                type="button"
-                onClick={() => { setAuthMode("legacy"); setAuthError(""); setAuthNotice(""); }}
-                style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}
-              >
-                Geçici ortak şifreyle giriş
-              </button>
-            </>
-          ) : (
-            <>
-              <h2>Geçici giriş</h2>
-              <p>Supabase Auth geçişi tamamlanana kadar mevcut CRM şifresi çalışmaya devam eder.</p>
-              <label>Mevcut CRM şifresi</label>
-              <input
-                type="password"
-                value={sifre}
-                onChange={e => { setSifre(e.target.value); setSifreHata(false); }}
-                onKeyDown={e => { if (e.key === "Enter") handleLegacyLogin(); }}
-                placeholder="Şifrenizi girin"
-                style={sifreHata ? {borderColor:"#dc5d51"} : undefined}
-              />
-              {sifreHata && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"7px 0 0" }}>Şifre hatalı</p>}
-              <button onClick={handleLegacyLogin}>CRM'e Gir</button>
-              <button
-                type="button"
-                onClick={() => { setAuthMode("supabase"); setSifreHata(false); }}
-                style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}
-              >
-                Güvenli hesaba dön
               </button>
             </>
           )}
