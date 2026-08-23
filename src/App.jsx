@@ -13,7 +13,10 @@ const INITIAL_AUTH_LINK_TYPE = typeof window === "undefined"
 if (typeof window !== "undefined" && ["invite", "recovery"].includes(INITIAL_AUTH_LINK_TYPE)) {
   sessionStorage.setItem(CRM_PASSWORD_SETUP_PENDING_KEY, "ok");
 }
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const SUPABASE_AUTH_STORAGE = typeof window === "undefined" ? undefined : window.sessionStorage;
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth:{ persistSession:true, ...(SUPABASE_AUTH_STORAGE ? { storage:SUPABASE_AUTH_STORAGE } : {}) },
+});
 const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -4267,6 +4270,7 @@ export default function App() {
   const [mfaCode, setMfaCode] = useState("");
   const [mfaEnrollment, setMfaEnrollment] = useState(null);
   const [rememberDevice, setRememberDevice] = useState(true);
+  const [showSecurityMenu, setShowSecurityMenu] = useState(false);
   const [authError, setAuthError] = useState(() => {
     const params = authHashParams();
     return params.get("error") ? authErrorMessage(params.get("error_description") || params.get("error")) : "";
@@ -4546,17 +4550,17 @@ export default function App() {
     setAuthBusy(false);
   };
 
-  const handleSecureLogout = async () => {
+  const handleSecureLogout = async (forgetDevice = false) => {
     if (authBusy) return;
     setAuthBusy(true);
     setAuthError("");
     const supabaseLogin = sessionStorage.getItem(CRM_AUTH_METHOD_KEY) === "supabase" || !!authSession;
     if (supabaseLogin) {
-      if (authSession) {
+      if (forgetDevice && authSession) {
         const revokeResult = await trustedDeviceRequest(authSession, "revoke");
         if (revokeResult.unavailable) {
-          setAuthError("Bu cihazın güven kaydı kaldırılamadı. Güvenli çıkış için tekrar deneyin.");
-          pop("Güvenli çıkış tamamlanamadı. Tekrar deneyin.", 6000);
+          setAuthError("Bu cihazın güven kaydı kaldırılamadı. Tekrar deneyin.");
+          pop("Cihaz güveni kaldırılamadı. Tekrar deneyin.", 6000);
           setAuthBusy(false);
           return;
         }
@@ -4581,6 +4585,7 @@ export default function App() {
     setMfaCode("");
     setMfaEnrollment(null);
     setRememberDevice(true);
+    setShowSecurityMenu(false);
     setGiris(false);
     setAuthBusy(false);
   };
@@ -5865,7 +5870,7 @@ export default function App() {
                 </>
               )}
               {!mfaEnrollment && authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
-              <button type="button" disabled={authBusy} onClick={handleSecureLogout} style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}>
+              <button type="button" disabled={authBusy} onClick={()=>handleSecureLogout(false)} style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}>
                 Vazgeç ve güvenli çıkış yap
               </button>
             </>
@@ -5893,7 +5898,7 @@ export default function App() {
               <button disabled={authBusy} onClick={handleMfaVerify} style={{opacity:authBusy ? .65 : 1}}>
                 {authBusy ? "Doğrulanıyor..." : "Doğrula ve CRM'e Gir"}
               </button>
-              <button type="button" disabled={authBusy} onClick={handleSecureLogout} style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}>
+              <button type="button" disabled={authBusy} onClick={()=>handleSecureLogout(false)} style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}>
                 Güvenli çıkış yap
               </button>
             </>
@@ -6154,7 +6159,7 @@ export default function App() {
         </section>
       </main>
 
-      <button className="crm-desktop-logout" disabled={authBusy} onClick={handleSecureLogout}>↪ Güvenli çıkış</button>
+      <button className="crm-desktop-logout" disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>↪ Güvenli çıkış</button>
 
       <nav className="crm-mobile-nav">
         {mainNav.map(t=>(
@@ -6162,10 +6167,18 @@ export default function App() {
             <span>{t.icon}</span>{t.label}
           </button>
         ))}
-        <button disabled={authBusy} onClick={handleSecureLogout}>
+        <button disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>
           <span>↪</span>Çıkış
         </button>
       </nav>
+
+      {showSecurityMenu ? (
+        <Sheet title="Hesap ve cihaz güvenliği" subtitle="Nasıl çıkış yapmak istediğinizi seçin" onClose={()=>{ if(!authBusy) setShowSecurityMenu(false); }}>
+          <p style={{fontSize:13,color:"#666",lineHeight:1.6,margin:"0 0 16px"}}>Normal çıkışta bu tarayıcı 30 gün boyunca güvenilen cihaz olarak kalır. Bir sonraki girişte parolanız sorulur, doğrulama kodu sorulmaz.</p>
+          <Btn bg="#5b42d6" onClick={()=>handleSecureLogout(false)}>Yalnızca Güvenli Çıkış</Btn>
+          <Btn bg="#dc5d51" outline onClick={()=>handleSecureLogout(true)}>Çıkış Yap ve Bu Cihazı Unut</Btn>
+        </Sheet>
+      ) : null}
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
