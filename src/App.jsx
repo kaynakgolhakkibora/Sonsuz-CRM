@@ -4487,14 +4487,22 @@ export default function App() {
     }
     setAuthBusy(true);
     setAuthError("");
-    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code:mfaCode });
-    if (error) {
+    const { data:verifiedSession, error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code:mfaCode });
+    if (error || !verifiedSession?.access_token || !verifiedSession?.refresh_token) {
       setAuthError("Kod doğrulanamadı. Uygulamadaki güncel kodu tekrar girin.");
       setAuthBusy(false);
       return;
     }
-    const { data:sessionData } = await supabase.auth.getSession();
-    await authorizeStaffSession(sessionData?.session);
+    const { data:sessionData, error:sessionError } = await supabase.auth.setSession({
+      access_token:verifiedSession.access_token,
+      refresh_token:verifiedSession.refresh_token,
+    });
+    if (sessionError || !sessionData?.session) {
+      setAuthError("Doğrulanmış oturum bu tarayıcıya kaydedilemedi. Tekrar deneyin.");
+      setAuthBusy(false);
+      return;
+    }
+    await authorizeStaffSession(sessionData.session);
     setMfaCode("");
     setMfaEnrollment(null);
     setAuthBusy(false);
