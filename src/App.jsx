@@ -6,6 +6,7 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const CRM_AUTH_KEY = "crm_auth";
 const CRM_AUTH_METHOD_KEY = "crm_auth_method";
 const CRM_PASSWORD_SETUP_PENDING_KEY = "crm_password_setup_pending";
+const TRUSTED_DEVICE_DAYS = 30;
 const INITIAL_AUTH_LINK_TYPE = typeof window === "undefined"
   ? ""
   : new URLSearchParams(window.location.hash.replace(/^#/, "")).get("type") || "";
@@ -51,6 +52,26 @@ async function activeStaffProfile(userId) {
     .maybeSingle();
   if (error || !data?.active || !["admin", "teacher"].includes(data.role)) return null;
   return data;
+}
+
+async function trustedDeviceRequest(session, action) {
+  if (!session?.access_token) return { trusted:false, unavailable:true };
+  try {
+    const response = await fetch("/api/trusted-device", {
+      method:"POST",
+      credentials:"same-origin",
+      headers:{
+        "Content-Type":"application/json",
+        Authorization:"Bearer " + session.access_token,
+      },
+      body:JSON.stringify({ action }),
+    });
+    if (!response.ok) return { trusted:false, unavailable:response.status >= 500 };
+    const data = await response.json();
+    return { trusted:data?.trusted === true, expiresAt:data?.expiresAt || "", unavailable:false };
+  } catch {
+    return { trusted:false, unavailable:true };
+  }
 }
 
 const DAY_IDX = { "Pazartesi":1, "Sali":2, "Carsamba":3, "Persembe":4, "Cuma":5, "Cumartesi":6, "Pazar":0 };
@@ -4242,6 +4263,10 @@ export default function App() {
   const [authPasswordAgain, setAuthPasswordAgain] = useState("");
   const [authSession, setAuthSession] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
+  const [mfaFactorId, setMfaFactorId] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaEnrollment, setMfaEnrollment] = useState(null);
+  const [rememberDevice, setRememberDevice] = useState(true);
   const [authError, setAuthError] = useState(() => {
     const params = authHashParams();
     return params.get("error") ? authErrorMessage(params.get("error_description") || params.get("error")) : "";
@@ -4293,18 +4318,7 @@ export default function App() {
         setAuthMode("set-password");
         setGiris(false);
       } else if (session) {
-        const profile = await activeStaffProfile(session.user?.id);
-        if (!active) return;
-        if (profile) {
-          sessionStorage.setItem(CRM_AUTH_KEY, "ok");
-          sessionStorage.setItem(CRM_AUTH_METHOD_KEY, "supabase");
-          setGiris(true);
-        } else {
-          await supabase.auth.signOut();
-          if (!active) return;
-          setAuthSession(null);
-          setAuthError("Bu hesabın aktif CRM yönetici veya öğretmen yetkisi yok.");
-        }
+        await routeStaffMfa(session);
       } else if (!session) {
         sessionStorage.removeItem(CRM_AUTH_KEY);
         sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
@@ -4345,7 +4359,13 @@ export default function App() {
     };
   }, []);
 
-  const authorizeStaffSession = async session => {
+  const authorizeStaffSession = async (session, trustedDevice = false) => {
+    const { data:assurance, error:assuranceError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (!trustedDevice && (assuranceError || assurance?.currentLevel !== "aal2")) {
+      setGiris(false);
+      setAuthError("CRM'e girmek için iki adımlı doğrulamayı tamamlayın.");
+      return false;
+    }
     const profile = await activeStaffProfile(session?.user?.id);
     if (!profile) {
       await supabase.auth.signOut();
@@ -4358,6 +4378,52 @@ export default function App() {
     setAuthSession(session);
     setGiris(true);
     return true;
+  };
+
+  const routeStaffMfa = async session => {
+    const profile = await activeStaffProfile(session?.user?.id);
+    if (!profile) {
+      await supabase.auth.signOut();
+      setAuthSession(null);
+      setGiris(false);
+      setAuthError("Bu hesabın aktif CRM yönetici veya öğretmen yetkisi yok.");
+      return false;
+    }
+    setAuthSession(session);
+    setGiris(false);
+    const { data:assurance, error:assuranceError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (assuranceError) {
+      setAuthError(authErrorMessage(assuranceError));
+      return false;
+    }
+    if (assurance?.currentLevel === "aal2") return authorizeStaffSession(session);
+
+    const { data:factors, error:factorsError } = await supabase.auth.mfa.listFactors();
+    if (factorsError) {
+      setAuthError(authErrorMessage(factorsError));
+      return false;
+    }
+    const verifiedTotp = (factors?.totp || []).find(factor => factor.status === "verified") || factors?.totp?.[0];
+    const trustedResult = verifiedTotp?.id
+      ? await trustedDeviceRequest(session, "check")
+      : { trusted:false, unavailable:false };
+    if (trustedResult.trusted) return authorizeStaffSession(session, true);
+
+    setMfaCode("");
+    setMfaEnrollment(null);
+    setRememberDevice(true);
+    if (verifiedTotp?.id) {
+      setMfaFactorId(verifiedTotp.id);
+      setAuthMode("mfa-challenge");
+    } else {
+      setMfaFactorId("");
+      setAuthMode("mfa-enroll");
+    }
+    if (trustedResult.unavailable) {
+      setAuthNotice("Güvenilen cihaz kontrolü yapılamadı; güvenliğiniz için doğrulama kodu isteniyor.");
+    }
+    setAuthReady(true);
+    return false;
   };
 
   const handleSupabaseLogin = async () => {
@@ -4374,7 +4440,7 @@ export default function App() {
       password:authPassword,
     });
     if (error || !data?.session) setAuthError(authErrorMessage(error));
-    else await authorizeStaffSession(data.session);
+    else await routeStaffMfa(data.session);
     setAuthBusy(false);
   };
 
@@ -4417,11 +4483,66 @@ export default function App() {
       return;
     }
     const { data:sessionData } = await supabase.auth.getSession();
-    const authorized = await authorizeStaffSession(sessionData?.session);
-    if (authorized && typeof window !== "undefined") {
+    const session = sessionData?.session;
+    if (session && typeof window !== "undefined") {
       sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
       window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
     }
+    if (session) await routeStaffMfa(session);
+    setAuthBusy(false);
+  };
+
+  const handleMfaEnrollmentStart = async () => {
+    if (authBusy || !authSession?.user) return;
+    setAuthBusy(true);
+    setAuthError("");
+    const { data, error } = await supabase.auth.mfa.enroll({
+      factorType:"totp",
+      friendlyName:"Sonsuz CRM",
+    });
+    if (error || !data?.id || !data?.totp?.qr_code) setAuthError(authErrorMessage(error));
+    else {
+      setMfaFactorId(data.id);
+      setMfaEnrollment({ id:data.id, qrCode:data.totp.qr_code, secret:data.totp.secret || "" });
+      setMfaCode("");
+    }
+    setAuthBusy(false);
+  };
+
+  const handleMfaVerify = async () => {
+    if (authBusy) return;
+    const factorId = mfaEnrollment?.id || mfaFactorId;
+    if (!factorId || !/^\d{6}$/.test(mfaCode)) {
+      setAuthError("Doğrulama uygulamasındaki 6 haneli kodu girin.");
+      return;
+    }
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+    const { data:verifiedSession, error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code:mfaCode });
+    if (error || !verifiedSession?.access_token || !verifiedSession?.refresh_token) {
+      setAuthError("Kod doğrulanamadı. Uygulamadaki güncel kodu tekrar girin.");
+      setAuthBusy(false);
+      return;
+    }
+    const { data:sessionData, error:sessionError } = await supabase.auth.setSession({
+      access_token:verifiedSession.access_token,
+      refresh_token:verifiedSession.refresh_token,
+    });
+    if (sessionError || !sessionData?.session) {
+      setAuthError("Doğrulanmış oturum bu tarayıcıya kaydedilemedi. Tekrar deneyin.");
+      setAuthBusy(false);
+      return;
+    }
+    let deviceNotice = "";
+    if (rememberDevice) {
+      const trustResult = await trustedDeviceRequest(sessionData.session, "issue");
+      if (!trustResult.trusted) deviceNotice = "Giriş doğrulandı fakat bu tarayıcı güvenilen cihaz olarak kaydedilemedi.";
+    }
+    await authorizeStaffSession(sessionData.session);
+    if (deviceNotice) pop(deviceNotice, 6000);
+    setMfaCode("");
+    setMfaEnrollment(null);
     setAuthBusy(false);
   };
 
@@ -4431,6 +4552,15 @@ export default function App() {
     setAuthError("");
     const supabaseLogin = sessionStorage.getItem(CRM_AUTH_METHOD_KEY) === "supabase" || !!authSession;
     if (supabaseLogin) {
+      if (authSession) {
+        const revokeResult = await trustedDeviceRequest(authSession, "revoke");
+        if (revokeResult.unavailable) {
+          setAuthError("Bu cihazın güven kaydı kaldırılamadı. Güvenli çıkış için tekrar deneyin.");
+          pop("Güvenli çıkış tamamlanamadı. Tekrar deneyin.", 6000);
+          setAuthBusy(false);
+          return;
+        }
+      }
       const { error } = await supabase.auth.signOut();
       if (error) {
         setAuthError(authErrorMessage(error));
@@ -4447,6 +4577,10 @@ export default function App() {
     setAuthEmail("");
     setAuthPassword("");
     setAuthPasswordAgain("");
+    setMfaFactorId("");
+    setMfaCode("");
+    setMfaEnrollment(null);
+    setRememberDevice(true);
     setGiris(false);
     setAuthBusy(false);
   };
@@ -5686,6 +5820,81 @@ export default function App() {
               {authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
               <button disabled={authBusy} onClick={handlePasswordSetup} style={{opacity:authBusy ? .65 : 1}}>
                 {authBusy ? "Kaydediliyor..." : "Parolayı Kaydet ve CRM'e Gir"}
+              </button>
+            </>
+          ) : authMode === "mfa-enroll" ? (
+            <>
+              <h2>İki adımlı güvenliği kur</h2>
+              <p>Bu işlem yalnızca ilk kurulumda yapılır. Google Authenticator, Microsoft Authenticator veya 1Password kullanabilirsiniz.</p>
+              {!mfaEnrollment ? (
+                <button disabled={authBusy} onClick={handleMfaEnrollmentStart} style={{opacity:authBusy ? .65 : 1}}>
+                  {authBusy ? "Hazırlanıyor..." : "QR Kodu Oluştur"}
+                </button>
+              ) : (
+                <>
+                  <img
+                    src={mfaEnrollment.qrCode}
+                    alt="Sonsuz CRM doğrulama QR kodu"
+                    style={{display:"block",width:190,height:190,maxWidth:"100%",margin:"16px auto",borderRadius:14,background:"#fff",padding:8}}
+                  />
+                  <p style={{fontSize:12}}>QR kodunu telefonunuzdaki doğrulama uygulamasıyla tarayın.</p>
+                  {mfaEnrollment.secret && (
+                    <p style={{fontSize:11,wordBreak:"break-all",background:"#f4f1ff",padding:10,borderRadius:10}}>
+                      Elle ekleme kodu: <strong>{mfaEnrollment.secret}</strong>
+                    </p>
+                  )}
+                  <label>Uygulamadaki 6 haneli kod</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={mfaCode}
+                    onChange={e => { setMfaCode(e.target.value.replace(/\D/g, "").slice(0,6)); setAuthError(""); }}
+                    onKeyDown={e => { if (e.key === "Enter") handleMfaVerify(); }}
+                    placeholder="000000"
+                  />
+                  <label style={{display:"flex",alignItems:"center",gap:9,marginTop:13,cursor:"pointer"}}>
+                    <input type="checkbox" checked={rememberDevice} onChange={e => setRememberDevice(e.target.checked)} style={{width:16,height:16,margin:0}} />
+                    Bu tarayıcıya {TRUSTED_DEVICE_DAYS} gün güven
+                  </label>
+                  {authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
+                  <button disabled={authBusy} onClick={handleMfaVerify} style={{opacity:authBusy ? .65 : 1}}>
+                    {authBusy ? "Doğrulanıyor..." : "Doğrula ve CRM'e Gir"}
+                  </button>
+                </>
+              )}
+              {!mfaEnrollment && authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
+              <button type="button" disabled={authBusy} onClick={handleSecureLogout} style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}>
+                Vazgeç ve güvenli çıkış yap
+              </button>
+            </>
+          ) : authMode === "mfa-challenge" ? (
+            <>
+              <h2>Doğrulama kodu</h2>
+              <p>Telefonunuzdaki doğrulama uygulamasında görünen 6 haneli kodu girin.</p>
+              <label>6 haneli kod</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={mfaCode}
+                onChange={e => { setMfaCode(e.target.value.replace(/\D/g, "").slice(0,6)); setAuthError(""); }}
+                onKeyDown={e => { if (e.key === "Enter") handleMfaVerify(); }}
+                placeholder="000000"
+              />
+              <label style={{display:"flex",alignItems:"center",gap:9,marginTop:13,cursor:"pointer"}}>
+                <input type="checkbox" checked={rememberDevice} onChange={e => setRememberDevice(e.target.checked)} style={{width:16,height:16,margin:0}} />
+                Bu tarayıcıya {TRUSTED_DEVICE_DAYS} gün güven
+              </label>
+              {authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
+              {authNotice && <p style={{ color:"#8a6414", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authNotice}</p>}
+              <button disabled={authBusy} onClick={handleMfaVerify} style={{opacity:authBusy ? .65 : 1}}>
+                {authBusy ? "Doğrulanıyor..." : "Doğrula ve CRM'e Gir"}
+              </button>
+              <button type="button" disabled={authBusy} onClick={handleSecureLogout} style={{background:"transparent",color:"#756f7a",border:"1px solid #ded9d3",marginTop:10}}>
+                Güvenli çıkış yap
               </button>
             </>
           ) : (
