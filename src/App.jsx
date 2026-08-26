@@ -233,6 +233,8 @@ function isCurrentTelafi(record) {
   if (isNaN(expiryDate.getTime())) return true;
   return midday(expiryDate).getTime() >= midday().getTime();
 }
+function activeTelafiRecords(records) { return (records || []).filter(isCurrentTelafi); }
+function telafiQuotaCount(records) { return (records || []).length; }
 function fmtDate(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { weekday:"short", day:"numeric", month:"long" }); }
 function fmtMed(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { day:"numeric", month:"long" }); }
 function fmtShort(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { day:"numeric", month:"short" }); }
@@ -1673,9 +1675,9 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
   const [homework, setHomework] = useState(lesson?.homework || "");
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === lessonCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
   const [formError, setFormError] = useState("");
-  const activeTelafi = student.telafi_records.filter(r=>!r.done).length;
-  const willWarn = activeTelafi === 4;
-  const willFreeze = activeTelafi === 5;
+  const telafiQuota = telafiQuotaCount(student.telafi_records);
+  const willWarn = telafiQuota === 4;
+  const willFreeze = telafiQuota === 5;
   const reset = (s) => { setNote(s === "attended" ? (lesson?.note || "") : ""); setStep(s); };
   const act = (a) => onAction(a, note, lessonId || lesson?.id);
 
@@ -2296,9 +2298,10 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
   const telafiRecords = student.telafi_records || [];
-  const active = telafiRecords.filter(r=>!r.done);
+  const active = activeTelafiRecords(telafiRecords);
+  const expired = telafiRecords.filter(r=>!r.done && !isCurrentTelafi(r));
   const done = telafiRecords.filter(r=>r.done);
-  const remainingTelafiRights = Math.max(0, 6 - telafiRecords.length);
+  const remainingTelafiRights = Math.max(0, 6 - telafiQuotaCount(telafiRecords));
   const ekDersler = student.ek_dersler || [];
   const odenmemisEk = unpaidEkDersler(student);
   const undoablePackage = lastUndoablePackageInfo(student);
@@ -2494,6 +2497,24 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
                     </div>
                   );
                 })}
+              </div>
+            ) : null}
+            {expired.length > 0 ? (
+              <div style={{ marginBottom:16 }}>
+                <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Süresi Dolan</p>
+                {expired.map(r => (
+                  <div key={r.id} onClick={() => setTelafiSel(r)} style={{ background:"#fff1f2", border:"1.5px solid #fca5a5", borderRadius:12, padding:"12px 14px", marginBottom:8, cursor:"pointer" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                      <div>
+                        <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#111" }}>{fmtDate(r.lessonDate)} dersi</p>
+                        {r.note ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontStyle:"italic" }}>{r.note}</p> : null}
+                        {telafiPlannedAt(r) ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Plan: {fmtDate(telafiPlannedAt(r))} · {timeFromISO(telafiPlannedAt(r))}</p> : null}
+                        <p style={{ margin:"4px 0 0", fontSize:12, color:"#888" }}>Son geçerlilik: <strong style={{ color:"#dc2626" }}>{fmtMed(r.expiry)}</strong></p>
+                      </div>
+                      <div style={{ background:"#dc2626", color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:800, flexShrink:0, marginLeft:8 }}>Doldu</div>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : null}
             {done.length > 0 ? (
@@ -2759,7 +2780,7 @@ function msgPaketOzeti(student) {
     });
   }
   const verim = lessonEngagementStats(student, info);
-  const aktifTelafi = (student.telafi_records||[]).filter(r => !r.done);
+  const aktifTelafi = activeTelafiRecords(student.telafi_records);
   const yapilanTelafi = (student.telafi_records||[]).filter(r => r.done);
   let msg = "Sonsuz Sanat - Ders Özeti\n\n";
   msg += "Öğrenci: "+student.name+"\n";
@@ -4934,7 +4955,7 @@ export default function App() {
         case "telafi": {
           const rec = mkTelafi(s, lid, note||"24 saat oncesi iptal");
           const recs = clearHomeworkCheckInTelafi([...cleanTelafiForLesson(s.telafi_records||[]), rec], homeworkCheckRef("lesson", lid));
-          const ac = recs.filter(r=>!r.done).length;
+          const ac = telafiQuotaCount(recs);
           const frozen = ac>=6 ? true : s.frozen;
           msg = ac>=6 ? "6. telafi - program donduruldu" : ac===5 ? "5. telafi uyarisi" : "Telafi oluşturuldu";
           const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "telafi", note)};
@@ -4943,7 +4964,7 @@ export default function App() {
         case "lm-telafi": {
           const rec = mkTelafi(s, lid, note||"Son dakika iptali");
           const recs = clearHomeworkCheckInTelafi([...cleanTelafiForLesson(s.telafi_records||[]), rec], homeworkCheckRef("lesson", lid));
-          const ac = recs.filter(r=>!r.done).length;
+          const ac = telafiQuotaCount(recs);
           const frozen = ac>=6 ? true : s.frozen;
           msg = ac>=6 ? "6. telafi - program donduruldu" : "Son dakika + telafi kaydedildi";
           const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "lastminute", note||"Son dakika iptali")};
@@ -5755,14 +5776,14 @@ export default function App() {
     if (filter==="active") return !s.frozen;
     if (filter==="frozen") return s.frozen && !isStudentLeft(s);
     if (filter==="left") return isStudentLeft(s);
-    if (filter==="telafi") return s.telafi_records.some(r=>!r.done);
+    if (filter==="telafi") return s.telafi_records.some(isCurrentTelafi);
     if (filter==="odeme") return isÖdemeBekleyen(s);
     if (filter==="zam") return isRaiseDue(s);
     return true;
   });
 
-  const stats = { total:operationalStudents.length, active:operationalStudents.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:operationalStudents.filter(s=>s.frozen && !isStudentLeft(s)).length, left:operationalStudents.filter(isStudentLeft).length, telafi:operationalStudents.filter(s=>s.telafi_records.some(r=>!r.done)).length, odeme:todayPayments.length, zam:raiseDueList.length };
-  const telafiWarnList = operationalStudents.filter(s => s.telafi_records.filter(r=>!r.done).length===5 && !s.frozen);
+  const stats = { total:operationalStudents.length, active:operationalStudents.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:operationalStudents.filter(s=>s.frozen && !isStudentLeft(s)).length, left:operationalStudents.filter(isStudentLeft).length, telafi:operationalStudents.filter(s=>s.telafi_records.some(isCurrentTelafi)).length, odeme:todayPayments.length, zam:raiseDueList.length };
+  const telafiWarnList = operationalStudents.filter(s => telafiQuotaCount(s.telafi_records)===5 && !s.frozen);
   const pendingMonthlyReports = monthlyReports.filter(report=>!report.downloadedAt);
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
@@ -6111,8 +6132,8 @@ export default function App() {
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {filtered.map(s => {
                 const left = isStudentLeft(s);
-                const ac = s.telafi_records.filter(r=>!r.done).length;
-                const warn = ac===5 && !s.frozen;
+                const ac = activeTelafiRecords(s.telafi_records).length;
+                const warn = telafiQuotaCount(s.telafi_records)===5 && !s.frozen;
                 const payDue = isÖdemeBekleyen(s);
                 const age = studentAge(s);
                 const ekCount = (s.ek_dersler||[]).length;
