@@ -403,7 +403,7 @@ const PAYMENT_PACK_SIZE = 4;
 const PACKAGE_LOAD_OPTIONS = [4, 8, 12, 16];
 const PAID_LESSON_STATUSES = ["completed", "noshow", "lastminute"];
 const SCORE_STATUSES = ["completed", "telafi", "lastminute", "noshow"];
-const LESSON_FOCUS_OPTIONS = ["Parça Tekrarı","Yeni Parça Çalışması","Teknik Çalışma","Ritim Çalışması","Teorik Çalışma"];
+const LESSON_FOCUS_OPTIONS = ["Parça Tekrarı","Yeni Parça Çalışması","Teknik","Ritim","Teori/Nota","Dikkat Süresi Arttırma","Bilişsel Dayanıklılık Arttırma"];
 const PIECE_RESULT_OPTIONS = [
   { value:"complete", label:"Tam ve akıcı parça çıktı", score:100 },
   { value:"partial", label:"Kısmen çıktı", score:50 },
@@ -1713,7 +1713,7 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
               {storedLessonScore(lesson) !== null ? <div style={{ margin:"9px 0 0", background:"#ecfdf5", border:"1px solid #a7f3d0", borderRadius:10, padding:"10px 11px" }}>
                 <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#047857", letterSpacing:.5 }}>DERS VERİM PUANI</p>
                 <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:900, color:"#065f46" }}>{fmtNumber(storedLessonScore(lesson))}/100</p>
-                {lesson.lessonScoreBreakdown ? <p style={{ margin:"5px 0 0", fontSize:11, color:"#047857" }}>{lesson.lessonScoreBreakdown.homeworkApplicable === false ? "Ödev değerlendirilmedi" : "Ödev "+lesson.lessonScoreBreakdown.homework+"/40"} · Aktif süre {lesson.lessonScoreBreakdown.active}/10 · Görev odağı {lesson.lessonScoreBreakdown.taskFocus}/20 · Yönlendirme {lesson.lessonScoreBreakdown.redirection}/30</p> : null}
+                {lesson.lessonScoreBreakdown ? <p style={{ margin:"5px 0 0", fontSize:11, color:"#047857" }}>{lesson.lessonScoreBreakdown.homeworkApplicable === false ? "Değerlendirilecek önceki ödev yok" : "Ödev "+lesson.lessonScoreBreakdown.homework+"/40"} · Aktif süre {lesson.lessonScoreBreakdown.active}/10 · Görev odağı {lesson.lessonScoreBreakdown.taskFocus}/20 · Yönlendirme {lesson.lessonScoreBreakdown.redirection}/30</p> : null}
               </div> : null}
               <div style={{ marginTop:7, background:"#fff", border:"1px solid #e2e8f0", borderRadius:9, padding:"8px 9px" }}>
                 <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#94a3b8", letterSpacing:.5 }}>ÖĞRETMEN NOTU</p>
@@ -1773,11 +1773,12 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
         <label style={LBL}>Dersin Temel Odağı</label>
         <select style={INP} value={lessonFocus} onChange={e=>{ setLessonFocus(e.target.value); setFormError(""); }}>
           <option value="">Seçin</option>
+          {lessonFocus && !LESSON_FOCUS_OPTIONS.includes(lessonFocus) ? <option value={lessonFocus}>{lessonFocus} (Eski kayıt)</option> : null}
           {LESSON_FOCUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <label style={LBL}>Öğretmen Notu</label>
+        <label style={LBL}>Öğretmen Notu (İsteğe Bağlı)</label>
         <NoteArea value={note} onChange={value=>{ setNote(value); setFormError(""); }} placeholder="Kısa not" />
-        <label style={LBL}>Gelecek Ders İçin Ödev</label>
+        <label style={LBL}>Gelecek Ders İçin Ödev (İsteğe Bağlı)</label>
         <NoteArea value={homework} onChange={value=>{ setHomework(value); setFormError(""); }} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
         {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
         <Btn bg="#10b981" onClick={() => {
@@ -1787,8 +1788,6 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
           if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > duration) { setFormError("Geçerli görev odağı süresi girin."); return; }
           if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
           if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
-          if (!note.trim()) { setFormError("Öğretmen notunu girin."); return; }
-          if (!homework.trim()) { setFormError("Gelecek ders ödevini girin."); return; }
           const scoreBreakdown = calculateLessonScore({
             homeworkStatus,
             homeworkApplicable:!!homeworkToEvaluate,
@@ -1995,11 +1994,12 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
                 <label style={LBL}>Dersin Temel Odağı</label>
                 <select style={INP} value={lessonFocus} onChange={e=>{ setLessonFocus(e.target.value); setFormError(""); }}>
                   <option value="">Seçin</option>
+                  {lessonFocus && !LESSON_FOCUS_OPTIONS.includes(lessonFocus) ? <option value={lessonFocus}>{lessonFocus} (Eski kayıt)</option> : null}
                   {LESSON_FOCUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
-                <label style={LBL}>Öğretmen Notu</label>
+                <label style={LBL}>Öğretmen Notu (İsteğe Bağlı)</label>
                 <NoteArea value={doneNote} onChange={value=>{ setDoneNote(value); setFormError(""); }} placeholder="Kısa not" />
-                <label style={LBL}>Gelecek Ders İçin Ödev</label>
+                <label style={LBL}>Gelecek Ders İçin Ödev (İsteğe Bağlı)</label>
                 <NoteArea value={homework} onChange={value=>{ setHomework(value); setFormError(""); }} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
                 {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
                 <Btn bg="#10b981" onClick={() => {
@@ -2009,8 +2009,6 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
                   if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > lessonDuration) { setFormError("Geçerli görev odağı süresi girin."); return; }
                   if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
                   if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
-                  if (!doneNote.trim()) { setFormError("Öğretmen notunu girin."); return; }
-                  if (!homework.trim()) { setFormError("Gelecek ders ödevini girin."); return; }
                   const scoreBreakdown = calculateLessonScore({ homeworkStatus, homeworkApplicable:!!homeworkToEvaluate, activeMinutes, taskFocusMinutes, redirectionCount });
                   onSave(record.id, {
                     action: "attended",
@@ -2860,11 +2858,11 @@ function msgDersDegerlendirmesi(student, record, type="normal") {
     "Görev odağını sürdürme: Yaklaşık "+(parseInt(record?.taskFocusMinutes ?? record?.task_focus_minutes)||0)+" dakika ("+(breakdown.taskFocus ?? 0)+"/20)",
     "Yeniden yönlendirme: "+(parseInt(record?.redirectionCount ?? record?.redirection_count)||0)+" kez ("+(breakdown.redirection ?? 0)+"/30)",
   ];
-  if (breakdown.homeworkApplicable === false) lines.push("Önceki ödev: İlk ders olduğu için değerlendirilmedi");
+  if (breakdown.homeworkApplicable === false) lines.push("Önceki ödev: Bu ders için değerlendirilecek ödev yoktu");
   else lines.push("Önceki ödev: "+homeworkStatusLabel(record?.evaluatedHomeworkStatus)+" ("+(breakdown.homework ?? 0)+"/40)");
   lines.push("", "Ders Verim Puanı: "+fmtNumber(storedLessonScore(record) ?? 0)+"/100");
   if (record?.note || record?.doneNote) lines.push("", "Öğretmen notu: "+(record.note || record.doneNote));
-  lines.push("", "Gelecek ders ödevi: "+(record?.homework || "-"));
+  lines.push("", "Gelecek ders ödevi: "+(record?.homework || "Ödev verilmedi"));
   return lines.join("\n");
 }
 
