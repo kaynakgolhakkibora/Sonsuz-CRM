@@ -987,6 +987,87 @@ function paymentPackageLessons(student, payment, index) {
   };
 }
 
+function historicalLessonYearGroups(student, lessons) {
+  const historical = [...(lessons || [])]
+    .filter(lesson => lesson?.date && !isNaN(new Date(lesson.date).getTime()))
+    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const schedule = student?.schedule || [];
+  const periodByLessonId = new Map();
+  const periodMeta = new Map();
+  const assignPeriod = (periodKey, periodLessons, storedStart="", storedEnd="") => {
+    const valid = (periodLessons || []).filter(lesson => lesson?.id && lesson?.date);
+    if (!valid.length) return;
+    const ordered = [...valid].sort((a,b)=>new Date(a.date)-new Date(b.date));
+    periodMeta.set(periodKey, {
+      start:storedStart || dateKey(ordered[0].date),
+      end:storedEnd || dateKey(ordered[ordered.length-1].date),
+    });
+    ordered.forEach(lesson => {
+      if (!periodByLessonId.has(lesson.id)) periodByLessonId.set(lesson.id, periodKey);
+    });
+  };
+
+  (student?.odemeler || []).forEach((payment,index) => {
+    if (!payment || payment.sadeceEkDers) return;
+    let periodLessons = [];
+    const storedIds = Array.isArray(payment.packageLessonIds) ? payment.packageLessonIds.filter(Boolean) : [];
+    if (storedIds.length) {
+      const ids = new Set(storedIds);
+      periodLessons = schedule.filter(lesson => ids.has(lesson.id));
+    } else if (payment.packageStart && payment.packageEnd) {
+      const startKey = dateKey(payment.packageStart);
+      const endKey = dateKey(payment.packageEnd);
+      periodLessons = schedule.filter(lesson => {
+        const key = dateKey(lesson.date);
+        return key >= startKey && key <= endKey;
+      });
+    } else if (payment.packageId) {
+      periodLessons = schedule.filter(lesson => lesson.packageId === payment.packageId);
+    }
+    assignPeriod("payment:"+index, periodLessons, payment.packageStart || "", payment.packageEnd || "");
+  });
+
+  const packageGroups = new Map();
+  schedule.forEach(lesson => {
+    if (!lesson?.id || !lesson.packageId || periodByLessonId.has(lesson.id)) return;
+    const key = "package:"+lesson.packageId;
+    if (!packageGroups.has(key)) packageGroups.set(key, []);
+    packageGroups.get(key).push(lesson);
+  });
+  packageGroups.forEach((periodLessons,key)=>assignPeriod(key,periodLessons));
+
+  const years = new Map();
+  historical.forEach(lesson => {
+    const year = new Date(lesson.date).getFullYear();
+    const periodKey = periodByLessonId.get(lesson.id) || "unknown:"+year;
+    if (!years.has(year)) years.set(year,new Map());
+    const periods = years.get(year);
+    if (!periods.has(periodKey)) periods.set(periodKey,[]);
+    periods.get(periodKey).push(lesson);
+  });
+
+  return [...years.entries()]
+    .sort((a,b)=>b[0]-a[0])
+    .map(([year,periodMap]) => {
+      const chronological = [...periodMap.entries()].sort((a,b)=>new Date(a[1][0].date)-new Date(b[1][0].date));
+      const numberedKeys = new Map(chronological.filter(([key])=>!key.startsWith("unknown:")).map(([key],index)=>[key,index+1]));
+      const periods = chronological.reverse().map(([key,periodLessons]) => {
+        const ordered = [...periodLessons].sort((a,b)=>new Date(b.date)-new Date(a.date));
+        const meta = periodMeta.get(key);
+        const start = meta?.start || dateKey(ordered[ordered.length-1].date);
+        const end = meta?.end || dateKey(ordered[0].date);
+        return {
+          key,
+          label:key.startsWith("unknown:")
+            ? "Dönemi belirlenemeyen dersler"
+            : numberedKeys.get(key)+". Dönem · "+fmtShort(start)+" – "+fmtShort(end),
+          lessons:ordered,
+        };
+      });
+      return { year, periods, count:periods.reduce((sum,period)=>sum+period.lessons.length,0) };
+    });
+}
+
 function paymentDisplayInfo(student, payment, index) {
   const { lessons, effectiveCount, startKey, endKey } = paymentPackageLessons(student, payment, index);
   const first = lessons[0];
@@ -2538,12 +2619,12 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
           };
           const upcomingDersler = student.schedule.filter(l => l.status === "upcoming");
           const gecmisDersler = student.schedule.filter(l => l.status !== "upcoming");
-          const güncelGecmisSayisi = gecmisDersler.length % 4;
-          const güncelGecmis = güncelGecmisSayisi > 0 ? gecmisDersler.slice(-güncelGecmisSayisi) : [];
-          const eskiPaketler = güncelGecmisSayisi > 0 ? gecmisDersler.slice(0, -güncelGecmisSayisi) : gecmisDersler;
-          const currentScheduleItems = [...güncelGecmis, ...upcomingDersler];
-          const currentStart = currentScheduleItems.length ? Math.min(...currentScheduleItems.map(l => new Date(l.date).getTime())) : null;
-          const currentEnd = currentScheduleItems.length ? Math.max(...currentScheduleItems.map(l => new Date(l.date).getTime())) : null;
+          const historicalGroups = historicalLessonYearGroups(student, gecmisDersler);
+          const telafiPencereGecmisSayisi = gecmisDersler.length % 4;
+          const telafiPencereGecmis = telafiPencereGecmisSayisi > 0 ? gecmisDersler.slice(-telafiPencereGecmisSayisi) : [];
+          const telafiWindowItems = [...telafiPencereGecmis, ...upcomingDersler];
+          const currentStart = telafiWindowItems.length ? Math.min(...telafiWindowItems.map(l => new Date(l.date).getTime())) : null;
+          const currentEnd = telafiWindowItems.length ? Math.max(...telafiWindowItems.map(l => new Date(l.date).getTime())) : null;
           const plannedTelafiler = telafiRecords
             .filter(r => telafiPlannedAt(r))
             .filter(r => {
@@ -2552,18 +2633,30 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
               return !r.done || (t >= currentStart && t <= currentEnd);
             })
             .map(r => ({ id:"telafi-"+r.id, kind:"telafi", date:telafiPlannedAt(r), record:r }));
-          const güncel = [...currentScheduleItems, ...plannedTelafiler].sort((a,b)=>new Date(a.date)-new Date(b.date));
+          const güncel = [...upcomingDersler, ...plannedTelafiler].sort((a,b)=>new Date(a.date)-new Date(b.date));
           return (
             <div>
-              {eskiPaketler.length > 0 ? (
+              {gecmisDersler.length > 0 ? (
                 <div style={{ marginBottom:8 }}>
                   <button onClick={() => setGecmisAcik(!gecmisAcik)} style={{ width:"100%", background:"#f3f4f6", border:"none", borderRadius:10, padding:"10px 12px", fontSize:13, fontWeight:700, color:"#555", cursor:"pointer", fontFamily:"inherit", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <span>Geçmiş Dersler ({eskiPaketler.length})</span>
+                    <span>Geçmiş Dersler ({gecmisDersler.length})</span>
                     <span>{gecmisAcik ? "▲" : "▼"}</span>
                   </button>
                   {gecmisAcik ? (
-                    <div style={{ marginTop:6 }}>
-                      {eskiPaketler.map(l => <LessonCard key={l.id} l={l} />)}
+                    <div style={{ marginTop:7, display:"grid", gap:7 }}>
+                      {historicalGroups.map(yearGroup => (
+                        <details key={yearGroup.year} style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"0 10px" }}>
+                          <summary style={{ cursor:"pointer", padding:"10px 2px", fontSize:13, fontWeight:900, color:"#334155" }}>{yearGroup.year} · {yearGroup.count} ders</summary>
+                          <div style={{ display:"grid", gap:6, padding:"0 0 9px" }}>
+                            {yearGroup.periods.map(period => (
+                              <details key={period.key} style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:9, padding:"0 9px" }}>
+                                <summary style={{ cursor:"pointer", padding:"9px 1px", fontSize:12, fontWeight:800, color:"#6366f1" }}>{period.label} · {period.lessons.length} ders</summary>
+                                <div style={{ paddingBottom:4 }}>{period.lessons.map(l => <LessonCard key={l.id} l={l} />)}</div>
+                              </details>
+                            ))}
+                          </div>
+                        </details>
+                      ))}
                     </div>
                   ) : null}
                 </div>
