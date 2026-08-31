@@ -234,7 +234,82 @@ function isCurrentTelafi(record) {
   return midday(expiryDate).getTime() >= midday().getTime();
 }
 function activeTelafiRecords(records) { return (records || []).filter(isCurrentTelafi); }
-function telafiQuotaCount(records) { return (records || []).length; }
+function telafiPolicyDate(value) {
+  if (!value) return null;
+  const text = String(value);
+  const ymd = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const parsed = ymd
+    ? new Date(Number(ymd[1]), Number(ymd[2])-1, Number(ymd[3]), 12, 0, 0, 0)
+    : new Date(value);
+  if (isNaN(parsed.getTime())) return null;
+  parsed.setHours(12,0,0,0);
+  return parsed;
+}
+function registrationAnniversary(startDate, yearOffset) {
+  const year = startDate.getFullYear() + yearOffset;
+  const month = startDate.getMonth();
+  const day = startDate.getDate();
+  const lastDay = new Date(year, month+1, 0, 12, 0, 0, 0).getDate();
+  return new Date(year, month, Math.min(day,lastDay), 12, 0, 0, 0);
+}
+function registrationYearPeriod(student, value = new Date()) {
+  const start = telafiPolicyDate(student?.lesson_start_date || student?.lessonStartDate);
+  const target = telafiPolicyDate(value);
+  if (!start || !target) return null;
+  if (target < start) return { key:"before-start", number:0, start:null, end:null, beforeStart:true };
+  let offset = target.getFullYear() - start.getFullYear();
+  if (target < registrationAnniversary(start, offset)) offset -= 1;
+  const periodStart = registrationAnniversary(start, offset);
+  const periodEnd = registrationAnniversary(start, offset+1);
+  return { key:"registration-year-"+offset, number:offset+1, start:periodStart, end:periodEnd, beforeStart:false };
+}
+function telafiPeriodForRecord(student, record) {
+  return registrationYearPeriod(student, record?.lessonDate);
+}
+function isManagerTelafiException(record) {
+  return record?.managerException === true || record?.manager_exception === true;
+}
+function telafiRecordsWithoutLesson(records, lesson) {
+  if (!lesson?.id) return records || [];
+  return (records || []).filter(record => !(record.lessonId === lesson.id || (!record.lessonId && dateKey(record.lessonDate) === dateKey(lesson.date) && !record.done)));
+}
+function telafiQuotaInfo(student, referenceDate = new Date(), records = student?.telafi_records || []) {
+  const period = registrationYearPeriod(student, referenceDate);
+  if (!period || period.beforeStart) return { period, count:null, used:[], normalRecords:[], exceptionRecords:[], legacyOverflowRecords:[], remaining:null, exceptionCount:0, legacyOverflowCount:0 };
+  const used = (records || []).filter(record => telafiPeriodForRecord(student, record)?.key === period.key);
+  const explicitExceptions = used.filter(isManagerTelafiException);
+  const unmarked = used.filter(record=>!isManagerTelafiException(record)).sort((a,b)=>{
+    const aTime = telafiPolicyDate(a.createdAt || a.created_at || a.lessonDate)?.getTime() || 0;
+    const bTime = telafiPolicyDate(b.createdAt || b.created_at || b.lessonDate)?.getTime() || 0;
+    return aTime-bTime;
+  });
+  const normalRecords = unmarked.slice(0,6);
+  const legacyOverflowRecords = unmarked.slice(6);
+  const exceptionRecords = explicitExceptions;
+  const count = normalRecords.length;
+  return { period, count, used, normalRecords, exceptionRecords, legacyOverflowRecords, remaining:Math.max(0,6-count), exceptionCount:exceptionRecords.length, legacyOverflowCount:legacyOverflowRecords.length };
+}
+function telafiPeriodGroups(student) {
+  const groups = new Map();
+  (student?.telafi_records || []).forEach(record => {
+    const period = telafiPeriodForRecord(student, record);
+    const key = period?.key || "unassigned";
+    if (!groups.has(key)) groups.set(key, { key, period, records:[] });
+    groups.get(key).records.push(record);
+  });
+  return [...groups.values()].sort((a,b) => {
+    const aTime = a.period?.start?.getTime() ?? -Infinity;
+    const bTime = b.period?.start?.getTime() ?? -Infinity;
+    return bTime-aTime;
+  });
+}
+function telafiPeriodLabel(period) {
+  if (!period) return "Dönemi hesaplanamayan kayıtlar";
+  if (period.beforeStart) return "Başlangıç tarihinden önceki kayıtlar";
+  const lastDay = new Date(period.end); lastDay.setDate(lastDay.getDate()-1);
+  const full = date => date.toLocaleDateString("tr-TR", { day:"numeric", month:"long", year:"numeric" });
+  return period.number+". Telafi Hak Dönemi · "+full(period.start)+" – "+full(lastDay);
+}
 function fmtDate(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { weekday:"short", day:"numeric", month:"long" }); }
 function fmtMed(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { day:"numeric", month:"long" }); }
 function fmtShort(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { day:"numeric", month:"short" }); }
@@ -1675,16 +1750,25 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
   const [homework, setHomework] = useState(lesson?.homework || "");
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === lessonCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
   const [formError, setFormError] = useState("");
-  const telafiQuota = telafiQuotaCount(student.telafi_records);
-  const willWarn = telafiQuota === 4;
-  const willFreeze = telafiQuota === 5;
-  const reset = (s) => { setNote(s === "attended" ? (lesson?.note || "") : ""); setStep(s); };
-  const act = (a) => onAction(a, note, lessonId || lesson?.id);
+  const [pendingExceptionAction, setPendingExceptionAction] = useState("");
+  const quotaRecordsForLesson = telafiRecordsWithoutLesson(student.telafi_records, lesson);
+  const telafiQuota = telafiQuotaInfo(student, lesson?.date || new Date(), quotaRecordsForLesson);
+  const willWarn = telafiQuota.count === 4;
+  const willFill = telafiQuota.count === 5;
+  const needsException = telafiQuota.count !== null && telafiQuota.count >= 6;
+  const reset = (s) => { setNote(s === "attended" ? (lesson?.note || "") : ""); setPendingExceptionAction(""); setStep(s); };
+  const act = (a) => {
+    if ((a === "telafi" || a === "lm-telafi") && telafiQuota.count === null) { setPendingExceptionAction(a); setStep("telafi-start-required"); return; }
+    if ((a === "telafi" || a === "lm-telafi") && needsException) { setPendingExceptionAction(a); setStep("telafi-exception"); return; }
+    onAction(a, note, lessonId || lesson?.id);
+  };
 
   const TelafiWarn = () => (
     <>
       {willWarn && <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#92400e", fontWeight:600 }}>Uyarı: Bu telafi ile 5. hakka ulaşılacak.</div>}
-      {willFreeze && <div style={{ background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#991b1b", fontWeight:600 }}>Uyarı: 6. telafi limiti - program dondurulacak.</div>}
+      {willFill && <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#9a3412", fontWeight:700 }}>Bilgi: Bu telafi ile öğrencinin normal hakkı 6/6 dolacak. Program devam eder; sonraki telafiler yönetici inisiyatifi gerektirir.</div>}
+      {needsException && <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#9a3412", fontWeight:700 }}>Bu telafi hak döneminin normal kotası 6/6 dolu. Devam ederseniz ayrıca yönetici inisiyatifi onayı istenir.</div>}
+      {telafiQuota.count === null && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#991b1b", fontWeight:700 }}>Derse başlangıç tarihi eksik olduğu için telafi hak dönemi hesaplanamıyor. Tarihi öğrenci düzenleme ekranından girin.</div>}
     </>
   );
 
@@ -1751,6 +1835,23 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
         <NoteArea value={note} onChange={setNote} placeholder="Neden iptal edildi?" />
         <Btn bg="#3b82f6" onClick={() => act("telafi")}>Telafi Hakkı Oluştur</Btn>
         <Btn bg="#111" outline onClick={() => reset("main")}>Geri</Btn>
+      </>}
+      {step === "telafi-exception" && <>
+        <div style={{ background:"#fff7ed", border:"1.5px solid #fb923c", borderRadius:13, padding:"13px 14px", marginBottom:14 }}>
+          <p style={{ margin:0, fontSize:14, color:"#9a3412", fontWeight:900 }}>Telafi hakları dolmuş</p>
+          <p style={{ margin:"7px 0 0", fontSize:13, color:"#9a3412", lineHeight:1.6 }}>Bu öğrenci bu telafi hak dönemindeki 6 normal telafinin tamamını kullanmış. Öğrenci normal kurala göre artık telafi dersi alamaz.</p>
+          <p style={{ margin:"7px 0 0", fontSize:13, color:"#7c2d12", lineHeight:1.6, fontWeight:800 }}>Yine de verirseniz bu kayıt “Yönetici İnisiyatifi” olarak ayrıca sayılacak ve veli mesajında açıkça belirtilecektir.</p>
+          {telafiQuota.exceptionCount>0 ? <p style={{ margin:"7px 0 0", fontSize:12, color:"#c2410c", fontWeight:800 }}>Daha önce verilen yönetici inisiyatifi: {telafiQuota.exceptionCount}</p> : null}
+        </div>
+        <Btn bg="#c2410c" onClick={() => onAction(pendingExceptionAction, note, lessonId || lesson?.id, { managerException:true })}>Yönetici İnisiyatifiyle Telafi Ver</Btn>
+        <Btn bg="#111" outline onClick={() => { setStep(pendingExceptionAction === "lm-telafi" ? "sondakika" : "telafi"); setPendingExceptionAction(""); }}>Vazgeç</Btn>
+      </>}
+      {step === "telafi-start-required" && <>
+        <div style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:13, padding:"13px 14px", marginBottom:14 }}>
+          <p style={{ margin:0, fontSize:14, color:"#991b1b", fontWeight:900 }}>Derse başlangıç tarihi gerekli</p>
+          <p style={{ margin:"7px 0 0", fontSize:13, color:"#991b1b", lineHeight:1.6 }}>Bu öğrencinin 12 aylık telafi hak dönemi hesaplanamadığı için telafi kaydı oluşturulmadı. Öğrenci düzenleme ekranından derse başlangıç tarihini girdikten sonra tekrar deneyin.</p>
+        </div>
+        <Btn bg="#111" outline onClick={() => { setStep(pendingExceptionAction === "lm-telafi" ? "sondakika" : "telafi"); setPendingExceptionAction(""); }}>Geri</Btn>
       </>}
       {step === "attended" && <>
         <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ders verim bilgilerini gir.</p>
@@ -2297,9 +2398,9 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
   const np = calcNextPayment(student.schedule);
   const telafiRecords = student.telafi_records || [];
   const active = activeTelafiRecords(telafiRecords);
-  const expired = telafiRecords.filter(r=>!r.done && !isCurrentTelafi(r));
-  const done = telafiRecords.filter(r=>r.done);
-  const remainingTelafiRights = Math.max(0, 6 - telafiQuotaCount(telafiRecords));
+  const currentTelafiQuota = telafiQuotaInfo(student);
+  const remainingTelafiRights = currentTelafiQuota.remaining;
+  const telafiGroups = telafiPeriodGroups(student);
   const ekDersler = student.ek_dersler || [];
   const odenmemisEk = unpaidEkDersler(student);
   const undoablePackage = lastUndoablePackageInfo(student);
@@ -2341,9 +2442,12 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
         <div className="crm-student-metrics" style={{ display:"grid", gap:8, marginBottom:8 }}>
           <MiniMetric label="Kalan Ders" value={bal} />
           <MiniMetric label="Aktif Telafi" value={active.length} tone={active.length>4?"danger":active.length===4?"warn":"info"} />
-          <MiniMetric label="Kalan Telafi Hakkı" value={remainingTelafiRights} tone={remainingTelafiRights===0?"danger":remainingTelafiRights<=2?"warn":"good"} />
+          <MiniMetric label="Kalan Telafi Hakkı" value={remainingTelafiRights===null?"—":remainingTelafiRights} tone={remainingTelafiRights===null?"neutral":remainingTelafiRights===0?"danger":remainingTelafiRights<=2?"warn":"good"} />
           <MiniMetric label="No-Show" value={student.no_show} tone={student.no_show>0?"danger":"neutral"} />
         </div>
+        {currentTelafiQuota.count === null ? <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:12, padding:"9px 11px", marginBottom:10 }}><p style={{ margin:0, fontSize:12, color:"#991b1b", fontWeight:800 }}>Telafi hak dönemi hesabı için derse başlangıç tarihini öğrenci düzenleme ekranından girin.</p></div> : null}
+        {currentTelafiQuota.exceptionCount > 0 ? <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:12, padding:"9px 11px", marginBottom:10 }}><p style={{ margin:0, fontSize:12, color:"#9a3412", fontWeight:800 }}>Bu telafi hak dönemi: {currentTelafiQuota.count}/6 normal hak · {currentTelafiQuota.exceptionCount} yönetici inisiyatifi</p></div> : null}
+        {currentTelafiQuota.legacyOverflowCount > 0 ? <div style={{ background:"#f8fafc", border:"1px solid #cbd5e1", borderRadius:12, padding:"9px 11px", marginBottom:10 }}><p style={{ margin:0, fontSize:12, color:"#475569", fontWeight:800 }}>Bu telafi hak döneminde v98 öncesinden {currentTelafiQuota.legacyOverflowCount} ek telafi kaydı var; yönetici inisiyatifi olarak varsayılmadı.</p></div> : null}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(3,minmax(0,1fr))", gap:8, marginBottom:12 }}>
           <MiniMetric label="Derse Katılım" value={scoreLabel(attStats?.score)} tone="good" />
           <MiniMetric label="Ödev Yapma" value={scoreLabel(homeworkStats?.score)} tone={!homeworkStats?"neutral":homeworkStats.score>=8?"good":homeworkStats.score>=5?"warn":"danger"} />
@@ -2471,62 +2575,51 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
 
         {tab === "telafi" ? (
           <div>
-            {telafiRecords.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Aktif telafi hakkı yok</p> : null}
-            {active.length > 0 ? (
-              <div style={{ marginBottom:16 }}>
-                <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Bekleyen</p>
-                {active.map(r => {
-                  const d = daysLeft(r.expiry);
-                  const exp = d !== null && d < 0;
-                  const urg = !exp && d !== null && d <= 7;
-                  return (
-                    <div key={r.id} onClick={() => setTelafiSel(r)} style={{ background:exp?"#fff1f2":urg?"#fffbeb":"#f0f9ff", border:"1.5px solid "+(exp?"#fca5a5":urg?"#fcd34d":"#bae6fd"), borderRadius:12, padding:"12px 14px", marginBottom:8, cursor:"pointer" }}>
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                        <div>
-                          <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#111" }}>{fmtDate(r.lessonDate)} dersi</p>
-                          {r.note ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontStyle:"italic" }}>{r.note}</p> : null}
-                          {telafiPlannedAt(r) ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Plan: {fmtDate(telafiPlannedAt(r))} · {timeFromISO(telafiPlannedAt(r))}</p> : null}
-                          <p style={{ margin:"4px 0 0", fontSize:12, color:"#888" }}>Son geçerlilik: <strong style={{ color: exp?"#dc2626":urg?"#d97706":"#0369a1" }}>{fmtMed(r.expiry)}</strong></p>
-                        </div>
-                        <div style={{ background:exp?"#dc2626":urg?"#d97706":"#0ea5e9", color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:800, flexShrink:0, marginLeft:8 }}>
-                          {exp?"Doldu":d+"g"}
-                        </div>
-                      </div>
+            {telafiRecords.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Henüz telafi kaydı yok</p> : null}
+            {telafiGroups.map(group => {
+              const waiting = group.records.filter(isCurrentTelafi);
+              const expiredInPeriod = group.records.filter(record=>!record.done && !isCurrentTelafi(record));
+              const doneInPeriod = group.records.filter(record=>record.done);
+              const groupQuota = group.period && !group.period.beforeStart ? telafiQuotaInfo(student, group.period.start, group.records) : null;
+              const exceptionCount = groupQuota?.exceptionCount || 0;
+              const legacyOverflowCount = groupQuota?.legacyOverflowCount || 0;
+              const isCurrentPeriod = !!group.period && group.period.key === currentTelafiQuota.period?.key;
+              const renderRecord = (record,status) => {
+                const managerExceptionRecord = !!groupQuota?.exceptionRecords?.includes(record);
+                const legacyOverflowRecord = !!groupQuota?.legacyOverflowRecords?.includes(record);
+                const leftDays = daysLeft(record.expiry);
+                const urgent = status === "waiting" && leftDays !== null && leftDays <= 7;
+                const doneRecord = status === "done";
+                const expiredRecord = status === "expired";
+                const background = doneRecord?"#f0fdf4":expiredRecord?"#fff1f2":urgent?"#fffbeb":"#f0f9ff";
+                const border = doneRecord?"#bbf7d0":expiredRecord?"#fca5a5":urgent?"#fcd34d":"#bae6fd";
+                const tone = doneRecord?"#166534":expiredRecord?"#dc2626":urgent?"#d97706":"#0369a1";
+                return <div key={record.id} onClick={() => setTelafiSel(record)} style={{ background, border:"1.5px solid "+border, borderRadius:11, padding:"10px 12px", marginBottom:7, cursor:"pointer" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:9 }}>
+                    <div>
+                      <p style={{ margin:0, fontSize:13, fontWeight:700, color:doneRecord?"#166534":"#111" }}>{fmtDate(record.lessonDate)} dersi{doneRecord?" yapıldı":""}</p>
+                      {record.note ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontStyle:"italic" }}>{record.note}</p> : null}
+                      {telafiPlannedAt(record) ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Plan: {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p> : null}
+                      {doneRecord && telafiDoneAt(record) ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#16a34a" }}>{telafiDoneDateText(record)}</p> : null}
+                      {doneRecord && telafiMetricText(record) ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#166534" }}>{telafiMetricText(record)}</p> : null}
+                      {managerExceptionRecord ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#c2410c", fontWeight:900 }}>Yönetici İnisiyatifiyle Verildi</p> : null}
+                      {legacyOverflowRecord ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#475569", fontWeight:900 }}>v98 Öncesi Ek Telafi · Türü İşaretlenmemiş</p> : null}
+                      {!doneRecord ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#888" }}>Son geçerlilik: <strong style={{ color:tone }}>{record.expiry?fmtMed(record.expiry):"Belirtilmedi"}</strong></p> : null}
                     </div>
-                  );
-                })}
-              </div>
-            ) : null}
-            {expired.length > 0 ? (
-              <div style={{ marginBottom:16 }}>
-                <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Süresi Dolan</p>
-                {expired.map(r => (
-                  <div key={r.id} onClick={() => setTelafiSel(r)} style={{ background:"#fff1f2", border:"1.5px solid #fca5a5", borderRadius:12, padding:"12px 14px", marginBottom:8, cursor:"pointer" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                      <div>
-                        <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#111" }}>{fmtDate(r.lessonDate)} dersi</p>
-                        {r.note ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontStyle:"italic" }}>{r.note}</p> : null}
-                        {telafiPlannedAt(r) ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Plan: {fmtDate(telafiPlannedAt(r))} · {timeFromISO(telafiPlannedAt(r))}</p> : null}
-                        <p style={{ margin:"4px 0 0", fontSize:12, color:"#888" }}>Son geçerlilik: <strong style={{ color:"#dc2626" }}>{fmtMed(r.expiry)}</strong></p>
-                      </div>
-                      <div style={{ background:"#dc2626", color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:800, flexShrink:0, marginLeft:8 }}>Doldu</div>
-                    </div>
+                    <span style={{ background:tone, color:"#fff", borderRadius:20, padding:"4px 9px", fontSize:11, fontWeight:800, flexShrink:0 }}>{doneRecord?"Yapıldı":expiredRecord?"Doldu":leftDays===null?"Bekliyor":leftDays+"g"}</span>
                   </div>
-                ))}
-              </div>
-            ) : null}
-            {done.length > 0 ? (
-              <div>
-                <p style={{ fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:8 }}>Yapılmış</p>
-                {done.map(r => (
-                  <div key={r.id} onClick={() => setTelafiSel(r)} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginBottom:6, cursor:"pointer" }}>
-                    <p style={{ margin:0, fontSize:13, fontWeight:700, color:"#166534" }}>{fmtDate(r.lessonDate)} dersi yapıldı</p>
-                    {telafiDoneAt(r) ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#16a34a" }}>{telafiDoneDateText(r)}</p> : null}
-                    {telafiMetricText(r) ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#166534" }}>{telafiMetricText(r)}</p> : null}
-                  </div>
-                ))}
-              </div>
-            ) : null}
+                </div>;
+              };
+              return <div key={group.key} style={{ background:"#fafafa", border:isCurrentPeriod?"1.5px solid #a78bfa":"1px solid #e5e7eb", borderRadius:13, padding:"11px 12px", marginBottom:12 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8, marginBottom:10 }}>
+                  <div><p style={{ margin:0, fontSize:12, color:"#111", fontWeight:900 }}>{telafiPeriodLabel(group.period)}</p>{isCurrentPeriod?<p style={{ margin:"3px 0 0", fontSize:11, color:"#7e22ce", fontWeight:800 }}>Güncel telafi hak dönemi</p>:null}</div>
+                  {groupQuota ? <div style={{ textAlign:"right", flexShrink:0 }}><p style={{ margin:0, fontSize:12, color:groupQuota.count>=6?"#b91c1c":"#475569", fontWeight:900 }}>{groupQuota.count}/6 normal{groupQuota.count>=6?" · dolu":""}</p>{exceptionCount>0?<p style={{ margin:"2px 0 0", fontSize:10, color:"#c2410c", fontWeight:800 }}>{exceptionCount} yönetici inisiyatifi</p>:null}{legacyOverflowCount>0?<p style={{ margin:"2px 0 0", fontSize:10, color:"#64748b", fontWeight:800 }}>{legacyOverflowCount} geçmiş ek kayıt</p>:null}</div>:null}
+                </div>
+                {waiting.length>0?<div><p style={{ fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:1, margin:"0 0 6px" }}>BEKLEYEN</p>{waiting.map(record=>renderRecord(record,"waiting"))}</div>:null}
+                {expiredInPeriod.length>0?<div><p style={{ fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:1, margin:"10px 0 6px" }}>SÜRESİ DOLAN</p>{expiredInPeriod.map(record=>renderRecord(record,"expired"))}</div>:null}
+                {doneInPeriod.length>0?<div><p style={{ fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:1, margin:"10px 0 6px" }}>YAPILMIŞ</p>{doneInPeriod.map(record=>renderRecord(record,"done"))}</div>:null}
+              </div>;
+            })}
           </div>
         ) : null}
 
@@ -2689,7 +2782,8 @@ function msgTelafiDersHatirlatma(student, record) {
 function msgTelafiHakki(student, record) {
   const lessonText = record?.lessonDate ? fmtMed(record.lessonDate)+" tarihli dersiniz" : "Dersiniz";
   const expiryText = record?.expiry ? fmtMed(record.expiry) : "oluşturulduğu tarihten itibaren 30 gün";
-  return "Merhaba,\n\n"+lessonText+" için telafi hakkı oluşturulmuştur. Telafi hakkınızı 30 gün içinde, "+expiryText+" tarihine kadar kullanabilirsiniz.\n\nUygunluk oluştuğunda telafi dersi planlaması için sizinle iletişime geçeceğiz.\n\nBodrum Sonsuz Sanat";
+  const exceptionText = isManagerTelafiException(record) ? "\n\nBu telafi hak dönemindeki 6 normal telafi hakkınız dolmuş olmasına rağmen, bildirilen durum kurum yönetimi tarafından değerlendirilmiş ve yönetici inisiyatifiyle istisnai bir telafi hakkı tanımlanmıştır." : "";
+  return "Merhaba,\n\n"+lessonText+" için telafi hakkı oluşturulmuştur."+exceptionText+" Telafi hakkınızı 30 gün içinde, "+expiryText+" tarihine kadar kullanabilirsiniz.\n\nUygunluk oluştuğunda telafi dersi planlaması için sizinle iletişime geçeceğiz.\n\nBodrum Sonsuz Sanat";
 }
 function msgTelafiPlanlandi(student, record) {
   const plannedAt = telafiPlannedAt(record);
@@ -4848,9 +4942,10 @@ export default function App() {
     const s=[...schedule]; s[i]={...s[i],status,note}; return s;
   };
 
-  const mkTelafi = (student, lid, note) => {
+  const mkTelafi = (student, lid, note, options = {}) => {
     const lesson = lid ? student.schedule.find(l=>l.id===lid) : student.schedule.find(l=>l.status==="upcoming");
-    return { id:uid(), lessonId:lesson?.id||null, lessonDate:lesson?.date||new Date().toISOString(), note, createdAt:new Date().toISOString(), expiry:expiry30(), done:false, doneAt:null };
+    const createdAt = new Date().toISOString();
+    return { id:uid(), lessonId:lesson?.id||null, lessonDate:lesson?.date||createdAt, note, createdAt, expiry:expiry30(), done:false, doneAt:null, ...(options.managerException ? { managerException:true, managerExceptionAt:createdAt } : {}) };
   };
 
   const clearHomeworkEffects = (schedule, lessonId) => (schedule || []).map(item => {
@@ -4892,13 +4987,13 @@ export default function App() {
     homeworkCheckedInRef:null,
   } : item);
 
-  const buildActionUpdate = (sourceStudents, sid, action, note="", lid=null) => {
+  const buildActionUpdate = (sourceStudents, sid, action, note="", lid=null, actionOptions={}) => {
     let msg = "Kaydedildi";
     const updated = sourceStudents.map(s => {
       if (s.id !== sid) return s;
       const oldLesson = lid ? s.schedule.find(l=>l.id===lid) : s.schedule.find(l=>l.status==="upcoming");
       const noShowFix = oldLesson?.status === "noshow" ? -1 : 0;
-      const cleanTelafiForLesson = (records) => records.filter(r => !(lid && (r.lessonId === lid || (!r.lessonId && oldLesson && dateKey(r.lessonDate) === dateKey(oldLesson.date) && !r.done))));
+      const cleanTelafiForLesson = (records) => telafiRecordsWithoutLesson(records, oldLesson || (lid ? { id:lid } : null));
       switch(action) {
         case "attended": {
           const detail = typeof note === "object" && note ? note : {};
@@ -4951,22 +5046,24 @@ export default function App() {
           };
         }
         case "telafi": {
-          const rec = mkTelafi(s, lid, note||"24 saat oncesi iptal");
-          const recs = clearHomeworkCheckInTelafi([...cleanTelafiForLesson(s.telafi_records||[]), rec], homeworkCheckRef("lesson", lid));
-          const ac = telafiQuotaCount(recs);
-          const frozen = ac>=6 ? true : s.frozen;
-          msg = ac>=6 ? "6. telafi - program donduruldu" : ac===5 ? "5. telafi uyarisi" : "Telafi oluşturuldu";
-          const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "telafi", note)};
-          return frozen && !s.frozen ? withStatusEvent(next, "frozen") : next;
+          const baseRecords = cleanTelafiForLesson(s.telafi_records||[]);
+          const quotaBefore = telafiQuotaInfo({ ...s, telafi_records:baseRecords }, oldLesson?.date || new Date(), baseRecords);
+          const managerException = actionOptions.managerException === true && quotaBefore.count !== null && quotaBefore.count>=6;
+          const rec = mkTelafi(s, lid, note||"24 saat oncesi iptal", { managerException });
+          const recs = clearHomeworkCheckInTelafi([...baseRecords, rec], homeworkCheckRef("lesson", lid));
+          const quota = telafiQuotaInfo({ ...s, telafi_records:recs }, rec.lessonDate, recs);
+          msg = managerException ? "Yönetici inisiyatifiyle telafi oluşturuldu" : quota.count===null ? "Telafi oluşturuldu - başlangıç tarihi gerekli" : quota.count===6 ? "6/6 telafi hakkı doldu" : quota.count===5 ? "5. telafi uyarisi" : "Telafi oluşturuldu";
+          return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:recs, schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "telafi", note)};
         }
         case "lm-telafi": {
-          const rec = mkTelafi(s, lid, note||"Son dakika iptali");
-          const recs = clearHomeworkCheckInTelafi([...cleanTelafiForLesson(s.telafi_records||[]), rec], homeworkCheckRef("lesson", lid));
-          const ac = telafiQuotaCount(recs);
-          const frozen = ac>=6 ? true : s.frozen;
-          msg = ac>=6 ? "6. telafi - program donduruldu" : "Son dakika + telafi kaydedildi";
-          const next = {...s, no_show:Math.max(0, s.no_show+noShowFix), frozen, telafi_records:recs, schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "lastminute", note||"Son dakika iptali")};
-          return frozen && !s.frozen ? withStatusEvent(next, "frozen") : next;
+          const baseRecords = cleanTelafiForLesson(s.telafi_records||[]);
+          const quotaBefore = telafiQuotaInfo({ ...s, telafi_records:baseRecords }, oldLesson?.date || new Date(), baseRecords);
+          const managerException = actionOptions.managerException === true && quotaBefore.count !== null && quotaBefore.count>=6;
+          const rec = mkTelafi(s, lid, note||"Son dakika iptali", { managerException });
+          const recs = clearHomeworkCheckInTelafi([...baseRecords, rec], homeworkCheckRef("lesson", lid));
+          const quota = telafiQuotaInfo({ ...s, telafi_records:recs }, rec.lessonDate, recs);
+          msg = managerException ? "Yönetici inisiyatifiyle son dakika telafisi oluşturuldu" : quota.count===null ? "Son dakika + telafi kaydedildi - başlangıç tarihi gerekli" : quota.count===6 ? "6/6 telafi hakkı doldu" : quota.count===5 ? "5. telafi uyarisi" : "Son dakika + telafi kaydedildi";
+          return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:recs, schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "lastminute", note||"Son dakika iptali")};
         }
         case "lm-notelafi": msg = "Son dakika iptali"; return {...s, no_show:Math.max(0, s.no_show+noShowFix), telafi_records:clearHomeworkCheckInTelafi(cleanTelafiForLesson(s.telafi_records||[]), homeworkCheckRef("lesson", lid)), schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "lastminute", note||"Son dakika iptali")};
         case "noshow": msg = "No-show kaydedildi"; return {...s, no_show:Math.max(0, s.no_show + (oldLesson?.status === "noshow" ? 0 : 1)), telafi_records:clearHomeworkCheckInTelafi(cleanTelafiForLesson(s.telafi_records||[]), homeworkCheckRef("lesson", lid)), schedule: updLesson(clearHomeworkEffects(s.schedule, lid), lid, "noshow", note||"Habersiz gelmedi")};
@@ -4977,8 +5074,22 @@ export default function App() {
     return { updated, msg };
   };
 
-  const handleAction = async (sid, action, note="", lid=null) => {
-    const built = buildActionUpdate(students, sid, action, note, lid);
+  const handleAction = async (sid, action, note="", lid=null, actionOptions={}) => {
+    const sourceStudent = students.find(student=>student.id===sid);
+    const sourceLesson = sourceStudent?.schedule?.find(lesson=>lesson.id===lid) || sourceStudent?.schedule?.find(lesson=>lesson.status==="upcoming");
+    if (action === "telafi" || action === "lm-telafi") {
+      const sourceQuotaRecords = telafiRecordsWithoutLesson(sourceStudent?.telafi_records, sourceLesson);
+      const sourceQuota = telafiQuotaInfo(sourceStudent, sourceLesson?.date || new Date(), sourceQuotaRecords);
+      if (sourceQuota.count === null) {
+        pop("Derse başlangıç tarihi girilmeden telafi hak dönemi hesaplanamaz; telafi oluşturulmadı.",7000);
+        return;
+      }
+      if (sourceQuota.count>=6 && actionOptions.managerException !== true) {
+        pop("Telafi hakları 6/6 dolu. Yönetici inisiyatifi onayı olmadan telafi oluşturulmadı.",7000);
+        return;
+      }
+    }
+    const built = buildActionUpdate(students, sid, action, note, lid, actionOptions);
     const msg = built.msg;
     const updated = built.updated.map(student => student.id === sid ? invalidatePeriodEvaluationForLesson(student, lid) : student);
     const student = updated.find(s => s.id === sid);
@@ -5781,7 +5892,7 @@ export default function App() {
   });
 
   const stats = { total:operationalStudents.length, active:operationalStudents.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:operationalStudents.filter(s=>s.frozen && !isStudentLeft(s)).length, left:operationalStudents.filter(isStudentLeft).length, telafi:operationalStudents.filter(s=>s.telafi_records.some(isCurrentTelafi)).length, odeme:todayPayments.length, zam:raiseDueList.length };
-  const telafiWarnList = operationalStudents.filter(s => telafiQuotaCount(s.telafi_records)===5 && !s.frozen);
+  const telafiWarnList = operationalStudents.filter(s => telafiQuotaInfo(s).count===5 && !s.frozen);
   const pendingMonthlyReports = monthlyReports.filter(report=>!report.downloadedAt);
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
@@ -6131,14 +6242,16 @@ export default function App() {
               {filtered.map(s => {
                 const left = isStudentLeft(s);
                 const ac = activeTelafiRecords(s.telafi_records).length;
-                const warn = telafiQuotaCount(s.telafi_records)===5 && !s.frozen;
+                const quota = telafiQuotaInfo(s);
+                const warn = quota.count===5 && !s.frozen;
+                const quotaFull = quota.count !== null && quota.count>=6;
                 const payDue = isÖdemeBekleyen(s);
                 const age = studentAge(s);
                 const ekCount = (s.ek_dersler||[]).length;
                 const unpaidEkCount = unpaidEkDersler(s).length;
-                const stripe = left ? "#be123c" : s.frozen ? "#3b82f6" : warn ? "#f59e0b" : payDue ? "#fb923c" : "#10b981";
+                const stripe = left ? "#be123c" : s.frozen ? "#3b82f6" : quotaFull ? "#dc2626" : warn ? "#f59e0b" : payDue ? "#fb923c" : "#10b981";
                 return (
-                  <div key={s.id} style={{ ...CARD, position:"relative", overflow:"hidden", background:left?"#fff7f7":s.frozen?"#f8fbff":"#fff", padding:"14px 16px 14px 20px", border:left?"1.5px solid #fecdd3":warn?"1.5px solid #fcd34d":payDue?"1.5px solid #fb923c":s.frozen?"1.5px solid #bfdbfe":"1px solid #e8eaee" }}>
+                  <div key={s.id} style={{ ...CARD, position:"relative", overflow:"hidden", background:left?"#fff7f7":s.frozen?"#f8fbff":"#fff", padding:"14px 16px 14px 20px", border:left?"1.5px solid #fecdd3":quotaFull?"1.5px solid #fca5a5":warn?"1.5px solid #fcd34d":payDue?"1.5px solid #fb923c":s.frozen?"1.5px solid #bfdbfe":"1px solid #e8eaee" }}>
                     <div style={{ position:"absolute", left:0, top:0, bottom:0, width:5, background:stripe }} />
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                       <div style={{ flex:1, cursor:"pointer" }} onClick={()=>setDetailSt(s)}>
@@ -6146,6 +6259,7 @@ export default function App() {
                           <p style={{ fontWeight:700, fontSize:15, margin:0, color:"#111" }}>{s.name}</p>
                           {left ? <TonePill tone="danger">Ayrılan</TonePill> : s.frozen ? <TonePill tone="info">Donuk</TonePill> : null}
                           {warn ? <TonePill tone="warn">5/6 Telafi</TonePill> : null}
+                          {quotaFull ? <TonePill tone="danger">6/6 Normal Telafi{quota.exceptionCount>0?" · "+quota.exceptionCount+" Yönetici İnisiyatifi":""}{quota.legacyOverflowCount>0?" · "+quota.legacyOverflowCount+" Geçmiş Ek":""}</TonePill> : null}
                           {payDue ? <TonePill tone="warn">Ödeme</TonePill> : null}
                           {isRaiseDue(s) ? <TonePill tone="warn">Zam</TonePill> : null}
                           {ekCount>0 ? <TonePill tone="special">+{ekCount} ek</TonePill> : null}
@@ -6199,7 +6313,7 @@ export default function App() {
         </Sheet>
       ) : null}
 
-      {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l)=>handleAction(actionModal.student.id,a,n,l)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
+      {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
