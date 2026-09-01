@@ -306,9 +306,18 @@ function telafiPeriodGroups(student) {
 function telafiPeriodLabel(period) {
   if (!period) return "Dönemi hesaplanamayan kayıtlar";
   if (period.beforeStart) return "Başlangıç tarihinden önceki kayıtlar";
+  return telafiPeriodTitle(period)+" · "+telafiPeriodDateRange(period);
+}
+function telafiPeriodTitle(period) {
+  if (!period) return "Dönemi hesaplanamayan kayıtlar";
+  if (period.beforeStart) return "Başlangıç tarihinden önceki kayıtlar";
+  return period.number+". Telafi Hak Dönemi";
+}
+function telafiPeriodDateRange(period) {
+  if (!period || period.beforeStart) return "";
   const lastDay = new Date(period.end); lastDay.setDate(lastDay.getDate()-1);
   const full = date => date.toLocaleDateString("tr-TR", { day:"numeric", month:"long", year:"numeric" });
-  return period.number+". Telafi Hak Dönemi · "+full(period.start)+" – "+full(lastDay);
+  return full(period.start)+" – "+full(lastDay);
 }
 function fmtDate(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { weekday:"short", day:"numeric", month:"long" }); }
 function fmtMed(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("tr-TR", { day:"numeric", month:"long" }); }
@@ -2741,30 +2750,45 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
                 const background = doneRecord?"#f0fdf4":expiredRecord?"#fff1f2":urgent?"#fffbeb":"#f0f9ff";
                 const border = doneRecord?"#bbf7d0":expiredRecord?"#fca5a5":urgent?"#fcd34d":"#bae6fd";
                 const tone = doneRecord?"#166534":expiredRecord?"#dc2626":urgent?"#d97706":"#0369a1";
-                return <div key={record.id} onClick={() => setTelafiSel(record)} style={{ background, border:"1.5px solid "+border, borderRadius:11, padding:"10px 12px", marginBottom:7, cursor:"pointer" }}>
+                return <div key={record.id} onClick={() => setTelafiSel(record)} style={{ background, border:"1px solid "+border, borderRadius:11, padding:"11px 12px", marginBottom:7, cursor:"pointer" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:9 }}>
-                    <div>
-                      <p style={{ margin:0, fontSize:13, fontWeight:700, color:doneRecord?"#166534":"#111" }}>{fmtDate(record.lessonDate)} dersi{doneRecord?" yapıldı":""}</p>
-                      {record.note ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b", fontStyle:"italic" }}>{record.note}</p> : null}
-                      {telafiPlannedAt(record) ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Plan: {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p> : null}
-                      {doneRecord && telafiDoneAt(record) ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#16a34a" }}>{telafiDoneDateText(record)}</p> : null}
-                      {doneRecord && telafiMetricText(record) ? <p style={{ margin:"3px 0 0", fontSize:12, color:"#166534" }}>{telafiMetricText(record)}</p> : null}
+                    <div style={{ minWidth:0 }}>
+                      <p style={{ margin:0, fontSize:13, fontWeight:850, color:doneRecord?"#166534":"#0f172a" }}>{fmtDate(record.lessonDate)} dersi</p>
+                      {record.note ? <p style={{ margin:"5px 0 0", fontSize:12, color:"#64748b", fontStyle:"italic", lineHeight:1.45 }}>{record.note}</p> : null}
+                      {telafiPlannedAt(record) ? <p style={{ margin:"6px 0 0", fontSize:11, color:"#7e22ce", fontWeight:800 }}>Planlandı: {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p> : null}
+                      {doneRecord && telafiDoneAt(record) ? <p style={{ margin:"5px 0 0", fontSize:11, color:"#16a34a", fontWeight:700 }}>{telafiDoneDateText(record)}</p> : null}
+                      {doneRecord && telafiMetricText(record) ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#166534" }}>{telafiMetricText(record)}</p> : null}
                       {managerExceptionRecord ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#c2410c", fontWeight:900 }}>Yönetici İnisiyatifiyle Verildi</p> : null}
                       {legacyOverflowRecord ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#475569", fontWeight:900 }}>v98 Öncesi Ek Telafi · Türü İşaretlenmemiş</p> : null}
-                      {!doneRecord ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#888" }}>Son geçerlilik: <strong style={{ color:tone }}>{record.expiry?fmtMed(record.expiry):"Belirtilmedi"}</strong></p> : null}
+                      {!doneRecord ? <p style={{ margin:"6px 0 0", fontSize:11, color:"#64748b" }}>Son geçerlilik <strong style={{ color:tone }}>· {record.expiry?fmtMed(record.expiry):"Belirtilmedi"}</strong></p> : null}
                     </div>
                     <span style={{ background:tone, color:"#fff", borderRadius:20, padding:"4px 9px", fontSize:11, fontWeight:800, flexShrink:0 }}>{doneRecord?"Yapıldı":expiredRecord?"Doldu":leftDays===null?"Bekliyor":leftDays+"g"}</span>
                   </div>
                 </div>;
               };
-              return <div key={group.key} style={{ background:"#fafafa", border:isCurrentPeriod?"1.5px solid #a78bfa":"1px solid #e5e7eb", borderRadius:13, padding:"11px 12px", marginBottom:12 }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8, marginBottom:10 }}>
-                  <div><p style={{ margin:0, fontSize:12, color:"#111", fontWeight:900 }}>{telafiPeriodLabel(group.period)}</p>{isCurrentPeriod?<p style={{ margin:"3px 0 0", fontSize:11, color:"#7e22ce", fontWeight:800 }}>Güncel telafi hak dönemi</p>:null}</div>
-                  {groupQuota ? <div style={{ textAlign:"right", flexShrink:0 }}><p style={{ margin:0, fontSize:12, color:groupQuota.count>=6?"#b91c1c":"#475569", fontWeight:900 }}>{groupQuota.count}/6 normal{groupQuota.count>=6?" · dolu":""}</p>{exceptionCount>0?<p style={{ margin:"2px 0 0", fontSize:10, color:"#c2410c", fontWeight:800 }}>{exceptionCount} yönetici inisiyatifi</p>:null}{legacyOverflowCount>0?<p style={{ margin:"2px 0 0", fontSize:10, color:"#64748b", fontWeight:800 }}>{legacyOverflowCount} geçmiş ek kayıt</p>:null}</div>:null}
+              const quotaSummary = groupQuota ? <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                <span style={{ background:groupQuota.count>=6?"#fee2e2":"#eef2ff", color:groupQuota.count>=6?"#b91c1c":"#4338ca", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900 }}>{groupQuota.count}/6 kullanıldı</span>
+                <span style={{ background:"#ecfdf5", color:"#047857", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900 }}>{groupQuota.remaining} hak kaldı</span>
+                {exceptionCount>0?<span style={{ background:"#fff7ed", color:"#c2410c", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900 }}>{exceptionCount} yönetici inisiyatifi</span>:null}
+                {legacyOverflowCount>0?<span style={{ background:"#f1f5f9", color:"#475569", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900 }}>{legacyOverflowCount} geçmiş ek kayıt</span>:null}
+              </div> : null;
+              const recordSections = <div style={{ display:"grid", gap:8 }}>
+                {waiting.length>0?<div><div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", margin:"0 0 7px" }}><p style={{ fontSize:10, fontWeight:900, color:"#0369a1", letterSpacing:1, margin:0 }}>BEKLEYEN TELAFİLER</p><span style={{ fontSize:10, fontWeight:900, color:"#0369a1" }}>{waiting.length}</span></div>{waiting.map(record=>renderRecord(record,"waiting"))}</div>:isCurrentPeriod?<div style={{ background:"#f8fafc", borderRadius:10, padding:"10px 12px", fontSize:12, color:"#64748b", fontWeight:700 }}>Bu dönemde bekleyen telafi yok.</div>:null}
+                {expiredInPeriod.length>0?<details style={{ borderTop:"1px solid #e5e7eb", paddingTop:8 }}><summary style={{ cursor:"pointer", padding:"3px 0 8px" }}><span style={{ display:"inline-flex", alignItems:"center", gap:6 }}><p style={{ margin:0, fontSize:11, fontWeight:850, color:"#dc2626" }}>SÜRESİ DOLAN</p><strong style={{ fontSize:10, color:"#dc2626" }}>{expiredInPeriod.length}</strong></span></summary>{expiredInPeriod.map(record=>renderRecord(record,"expired"))}</details>:null}
+                {doneInPeriod.length>0?<details style={{ borderTop:"1px solid #e5e7eb", paddingTop:8 }}><summary style={{ cursor:"pointer", padding:"3px 0 8px" }}><span style={{ display:"inline-flex", alignItems:"center", gap:6 }}><p style={{ margin:0, fontSize:11, fontWeight:850, color:"#166534" }}>YAPILMIŞ</p><strong style={{ fontSize:10, color:"#166534" }}>{doneInPeriod.length}</strong></span></summary>{doneInPeriod.map(record=>renderRecord(record,"done"))}</details>:null}
+              </div>;
+              if (!isCurrentPeriod) return <details key={group.key} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, padding:"0 11px", marginBottom:9 }}>
+                <summary style={{ cursor:"pointer", padding:"11px 1px", listStyle:"none" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"center" }}><div><p style={{ margin:0, fontSize:12, fontWeight:900, color:"#334155" }}>{telafiPeriodTitle(group.period)}</p>{telafiPeriodDateRange(group.period)?<p style={{ margin:"3px 0 0", fontSize:10, color:"#94a3b8" }}>{telafiPeriodDateRange(group.period)}</p>:null}</div><span style={{ color:"#64748b", fontSize:11, fontWeight:850 }}>{group.records.length} kayıt · Aç</span></div>
+                </summary>
+                <div style={{ borderTop:"1px solid #eef2f7", padding:"10px 0 4px" }}>{quotaSummary}<div style={{ height:9 }} />{recordSections}</div>
+              </details>;
+              return <div key={group.key} style={{ background:"#fff", border:"1.5px solid #c4b5fd", borderRadius:14, padding:"13px", marginBottom:12 }}>
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10, marginBottom:9 }}><div><p style={{ margin:0, fontSize:13, color:"#111", fontWeight:950 }}>{telafiPeriodTitle(group.period)}</p><p style={{ margin:"4px 0 0", fontSize:11, color:"#64748b" }}>{telafiPeriodDateRange(group.period)}</p></div><span style={{ background:"#f3e8ff", color:"#7e22ce", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900, whiteSpace:"nowrap" }}>Güncel dönem</span></div>
+                  {quotaSummary}
                 </div>
-                {waiting.length>0?<div><p style={{ fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:1, margin:"0 0 6px" }}>BEKLEYEN</p>{waiting.map(record=>renderRecord(record,"waiting"))}</div>:null}
-                {expiredInPeriod.length>0?<div><p style={{ fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:1, margin:"10px 0 6px" }}>SÜRESİ DOLAN</p>{expiredInPeriod.map(record=>renderRecord(record,"expired"))}</div>:null}
-                {doneInPeriod.length>0?<div><p style={{ fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:1, margin:"10px 0 6px" }}>YAPILMIŞ</p>{doneInPeriod.map(record=>renderRecord(record,"done"))}</div>:null}
+                {recordSections}
               </div>;
             })}
           </div>
