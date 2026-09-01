@@ -987,6 +987,48 @@ function paymentPackageLessons(student, payment, index) {
   };
 }
 
+function currentOpenLessonPeriodIds(student) {
+  const schedule = [...(student?.schedule || [])]
+    .filter(lesson=>lesson?.id && lesson?.date)
+    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const firstUpcoming = schedule.find(lesson=>lesson.status === "upcoming");
+  if (!firstUpcoming) return new Set();
+
+  for (const payment of (student?.odemeler || [])) {
+    if (!payment || payment.sadeceEkDers) continue;
+    const storedIds = Array.isArray(payment.packageLessonIds) ? payment.packageLessonIds.filter(Boolean) : [];
+    if (storedIds.includes(firstUpcoming.id)) return new Set(storedIds);
+    if (payment.packageStart && payment.packageEnd) {
+      const startKey = dateKey(payment.packageStart);
+      const endKey = dateKey(payment.packageEnd);
+      const upcomingKey = dateKey(firstUpcoming.date);
+      if (upcomingKey >= startKey && upcomingKey <= endKey) {
+        return new Set(schedule.filter(lesson => {
+          const key = dateKey(lesson.date);
+          return key >= startKey && key <= endKey;
+        }).map(lesson=>lesson.id));
+      }
+    }
+    if (payment.packageId && firstUpcoming.packageId === payment.packageId) {
+      return new Set(schedule.filter(lesson=>lesson.packageId === payment.packageId).map(lesson=>lesson.id));
+    }
+  }
+
+  if (firstUpcoming.packageId) {
+    return new Set(schedule.filter(lesson=>lesson.packageId === firstUpcoming.packageId).map(lesson=>lesson.id));
+  }
+  return new Set([firstUpcoming.id]);
+}
+
+function splitCurrentAndArchivedLessons(student) {
+  const schedule = [...(student?.schedule || [])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const currentPeriodIds = currentOpenLessonPeriodIds(student);
+  const currentPeriodLessons = schedule.filter(lesson=>currentPeriodIds.has(lesson.id));
+  const current = schedule.filter(lesson=>lesson.status === "upcoming" || currentPeriodIds.has(lesson.id));
+  const archived = schedule.filter(lesson=>lesson.status !== "upcoming" && !currentPeriodIds.has(lesson.id));
+  return { current, archived, currentPeriodLessons };
+}
+
 function historicalLessonYearGroups(student, lessons) {
   const historical = [...(lessons || [])]
     .filter(lesson => lesson?.date && !isNaN(new Date(lesson.date).getTime()))
@@ -2474,6 +2516,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
   const [showPaketYukle, setShowPaketYukle] = useState(false);
   const [showZam, setShowZam] = useState(false);
   const [showResumeProgram, setShowResumeProgram] = useState(false);
+  const [mevcutAcik, setMevcutAcik] = useState(true);
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
@@ -2617,11 +2660,14 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
               </div>
             );
           };
+          const lessonSections = splitCurrentAndArchivedLessons(student);
           const upcomingDersler = student.schedule.filter(l => l.status === "upcoming");
-          const gecmisDersler = student.schedule.filter(l => l.status !== "upcoming");
+          const tümTamamlananDersler = student.schedule.filter(l => l.status !== "upcoming");
+          const mevcutDonemDersleri = lessonSections.current;
+          const gecmisDersler = lessonSections.archived;
           const historicalGroups = historicalLessonYearGroups(student, gecmisDersler);
-          const telafiPencereGecmisSayisi = gecmisDersler.length % 4;
-          const telafiPencereGecmis = telafiPencereGecmisSayisi > 0 ? gecmisDersler.slice(-telafiPencereGecmisSayisi) : [];
+          const telafiPencereGecmisSayisi = tümTamamlananDersler.length % 4;
+          const telafiPencereGecmis = telafiPencereGecmisSayisi > 0 ? tümTamamlananDersler.slice(-telafiPencereGecmisSayisi) : [];
           const telafiWindowItems = [...telafiPencereGecmis, ...upcomingDersler];
           const currentStart = telafiWindowItems.length ? Math.min(...telafiWindowItems.map(l => new Date(l.date).getTime())) : null;
           const currentEnd = telafiWindowItems.length ? Math.max(...telafiWindowItems.map(l => new Date(l.date).getTime())) : null;
@@ -2633,11 +2679,20 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
               return !r.done || (t >= currentStart && t <= currentEnd);
             })
             .map(r => ({ id:"telafi-"+r.id, kind:"telafi", date:telafiPlannedAt(r), record:r }));
-          const güncel = [...upcomingDersler, ...plannedTelafiler].sort((a,b)=>new Date(a.date)-new Date(b.date));
+          const güncel = [...mevcutDonemDersleri, ...plannedTelafiler].sort((a,b)=>new Date(a.date)-new Date(b.date));
           return (
-            <div>
+            <div style={{ display:"grid", gap:10 }}>
+              {güncel.length > 0 ? (
+                <div>
+                  <button onClick={() => setMevcutAcik(!mevcutAcik)} style={{ width:"100%", background:"#eef2ff", border:"1px solid #c7d2fe", borderRadius:10, padding:"10px 12px", fontSize:13, fontWeight:800, color:"#4338ca", cursor:"pointer", fontFamily:"inherit", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <span>Mevcut Dönem ({lessonSections.currentPeriodLessons.length || mevcutDonemDersleri.length})</span>
+                    <span>{mevcutAcik ? "▲" : "▼"}</span>
+                  </button>
+                  {mevcutAcik ? <div style={{ marginTop:7 }}>{güncel.map(l => <LessonCard key={l.id} l={l} />)}</div> : null}
+                </div>
+              ) : null}
               {gecmisDersler.length > 0 ? (
-                <div style={{ marginBottom:8 }}>
+                <div>
                   <button onClick={() => setGecmisAcik(!gecmisAcik)} style={{ width:"100%", background:"#f3f4f6", border:"none", borderRadius:10, padding:"10px 12px", fontSize:13, fontWeight:700, color:"#555", cursor:"pointer", fontFamily:"inherit", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <span>Geçmiş Dersler ({gecmisDersler.length})</span>
                     <span>{gecmisAcik ? "▲" : "▼"}</span>
@@ -2661,7 +2716,6 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
                   ) : null}
                 </div>
               ) : null}
-              {güncel.map(l => <LessonCard key={l.id} l={l} />)}
             </div>
           );
         })()}
