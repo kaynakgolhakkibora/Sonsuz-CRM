@@ -1422,9 +1422,22 @@ function periodEvaluationScore(attendanceScore, lessonAverage, pieceScore) {
 function studentPieceHistory(student) {
   return (student.package_summary_logs || [])
     .map(log => {
+      if (log?.type === "manual_piece") {
+        const name = String(log?.piece?.name || "").trim();
+        if (!name) return null;
+        return {
+          id:log.id || null,
+          name,
+          result:log.piece.label || "Sonuç belirtilmedi",
+          score:Number(log.piece.score),
+          period:log.addedAt ? "Manuel kayıt · "+fmtShort(log.addedAt) : "Manuel kayıt",
+          date:new Date(log.addedAt || 0),
+        };
+      }
       const name = String(log?.evaluation?.pieceName || "").trim();
       if (!name) return null;
       return {
+        id:null,
         name,
         result:log.evaluation.pieceLabel || "Sonuç belirtilmedi",
         score:Number(log.evaluation.pieceScore),
@@ -2520,7 +2533,35 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
   );
 }
 
-function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function PieceAddSheet({ student, onClose, onSave }) {
+  const [pieceName, setPieceName] = useState("");
+  const [pieceResult, setPieceResult] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  return <Sheet title="Parça Ekle" subtitle={student.name} onClose={onClose}>
+    <label style={{ ...LBL, marginTop:0 }}>Parçanın Adı</label>
+    <input style={INP} value={pieceName} maxLength={120} onChange={event=>{ setPieceName(event.target.value); setError(""); }} placeholder="Örn. Für Elise" />
+    <label style={LBL}>Parça Sonucu</label>
+    <select style={INP} value={pieceResult} onChange={event=>{ setPieceResult(event.target.value); setError(""); }}>
+      <option value="">Seçin</option>
+      {PIECE_RESULT_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
+    </select>
+    {error ? <p style={{ margin:"9px 0 0", color:"#dc2626", fontSize:12, fontWeight:800 }}>{error}</p> : null}
+    <div style={{ marginTop:14 }}><Btn bg="#7e22ce" onClick={async()=>{
+      const piece = pieceResultOption(pieceResult);
+      if (!pieceName.trim()) { setError("Parçanın adını yazın."); return; }
+      if (!piece) { setError("Parça sonucunu seçin."); return; }
+      if (saving) return;
+      setSaving(true);
+      const saved = await onSave({ name:pieceName.trim(), result:piece.value, label:piece.label, score:piece.score });
+      setSaving(false);
+      if (saved) onClose();
+    }}>{saving ? "Kaydediliyor..." : "Parçayı Kaydet"}</Btn></div>
+    <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
+  </Sheet>;
+}
+
+function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -2530,6 +2571,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
   const [showPaketYukle, setShowPaketYukle] = useState(false);
   const [showZam, setShowZam] = useState(false);
   const [showResumeProgram, setShowResumeProgram] = useState(false);
+  const [showPieceAdd, setShowPieceAdd] = useState(false);
   const [mevcutAcik, setMevcutAcik] = useState(true);
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
@@ -2602,11 +2644,15 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
           </div>
         ) : null}
         <ProgressChart student={student} />
-        {pieceHistory.length > 0 ? (
-          <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>PARÇA GEÇMİŞİ</p>
+        <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, marginBottom:pieceHistory.length?6:0 }}>
+            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>PARÇA GEÇMİŞİ</p>
+            <button onClick={()=>setShowPieceAdd(true)} style={{ border:"none", borderRadius:9, background:"#ede9fe", color:"#6d28d9", padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer", fontFamily:"inherit", flexShrink:0 }}>+ Parça Ekle</button>
+          </div>
+          {pieceHistory.length > 0 ? (
+            <>
             {pieceHistory.map((piece,index) => (
-              <div key={piece.name+"|"+piece.date.getTime()+"|"+index} style={{ borderBottom:index<pieceHistory.length-1?"1px solid #f0f0f0":"none", padding:"8px 0" }}>
+              <div key={piece.id || piece.name+"|"+piece.date.getTime()+"|"+index} style={{ borderBottom:index<pieceHistory.length-1?"1px solid #f0f0f0":"none", padding:"8px 0" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
                   <div style={{ minWidth:0 }}>
                     <p style={{ margin:0, fontSize:13, fontWeight:800, color:"#111" }}>{piece.name}</p>
@@ -2616,8 +2662,9 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
                 </div>
               </div>
             ))}
-          </div>
-        ) : null}
+            </>
+          ) : <p style={{ margin:"9px 0 2px", fontSize:12, color:"#94a3b8" }}>Henüz parça kaydı yok.</p>}
+        </div>
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Ödeme Geçmişi</p>
@@ -2869,6 +2916,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
       {showResumeProgram ? <ResumeProgramSheet student={student} onClose={() => setShowResumeProgram(false)} onResume={(startDate) => onToggleFreeze(student.id, false, startDate)} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
       {showDuzenle ? <DuzenleSheet student={student} teachers={teachers} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} /> : null}
+      {showPieceAdd ? <PieceAddSheet student={student} onClose={()=>setShowPieceAdd(false)} onSave={piece=>onPieceAdd(student.id,piece)} /> : null}
     </>
   );
 }
@@ -5743,6 +5791,33 @@ export default function App() {
     }
   };
 
+  const handlePieceAdd = async (sid, piece) => {
+    const student = students.find(s => s.id === sid);
+    const result = pieceResultOption(piece?.result);
+    const name = String(piece?.name || "").trim();
+    if (!student || !name || !result) { pop("Parça kaydı tamamlanamadı", 5000); return false; }
+    const addedAt = new Date().toISOString();
+    const updatedStudent = {
+      ...student,
+      package_summary_logs:[
+        ...(student.package_summary_logs || []),
+        {
+          id:uid(),
+          type:"manual_piece",
+          addedAt,
+          piece:{ name, result:result.value, label:result.label, score:result.score },
+        },
+      ],
+    };
+    try {
+      await saveStudent(updatedStudent);
+      pop("Parça kaydedildi");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const handlePaketOzetiAc = (sid) => {
     const student = students.find(s => s.id === sid);
     const info = lastCompletedPackageInfo(student);
@@ -6491,7 +6566,7 @@ export default function App() {
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
