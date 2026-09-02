@@ -224,7 +224,12 @@ function buildSchedule(day, count, from, time = "10:00") {
 function uid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16); }); }
 
 function addDays(iso, n) { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString(); }
-function expiry30() { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().split("T")[0]; }
+function expiry30FromLessonDate(value) {
+  const d = telafiPolicyDate(value);
+  if (!d) return "";
+  d.setDate(d.getDate() + 30);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
 function daysLeft(iso) { if (!iso) return null; return Math.ceil((new Date(iso) - new Date()) / 86400000); }
 function isCurrentTelafi(record) {
   if (!record || record.done) return false;
@@ -2951,7 +2956,7 @@ function msgTelafiDersHatirlatma(student, record) {
 }
 function msgTelafiHakki(student, record) {
   const lessonText = record?.lessonDate ? fmtMed(record.lessonDate)+" tarihli dersiniz" : "Dersiniz";
-  const expiryText = record?.expiry ? fmtMed(record.expiry) : "oluşturulduğu tarihten itibaren 30 gün";
+  const expiryText = record?.expiry ? fmtMed(record.expiry) : "asıl ders tarihinden itibaren 30 gün";
   const exceptionText = isManagerTelafiException(record) ? "\n\nBu telafi hak dönemindeki 6 normal telafi hakkınız dolmuş olmasına rağmen, bildirilen durum kurum yönetimi tarafından değerlendirilmiş ve yönetici inisiyatifiyle istisnai bir telafi hakkı tanımlanmıştır." : "";
   return "Merhaba,\n\n"+lessonText+" için telafi hakkı oluşturulmuştur."+exceptionText+" Telafi hakkınızı 30 gün içinde, "+expiryText+" tarihine kadar kullanabilirsiniz.\n\nUygunluk oluştuğunda telafi dersi planlaması için sizinle iletişime geçeceğiz.\n\nBodrum Sonsuz Sanat";
 }
@@ -2984,7 +2989,7 @@ function msgIlkDersÖdeme(student) {
 }
 
 function msgYeniKayitKurallari() {
-  return "Sonsuz Sanat Ders Süreci Bilgilendirmesi\n\nDerslerimiz haftalık sabit gün ve saatlerde ilerler. Eğitim sürecinde devamlılık ve düzenli katılım büyük önem taşır.\n\nLütfen aşağıdaki kuralları inceleyiniz:\n\nDers İptalleri\n\n• Ders iptallerinin en az 24 saat önceden bildirilmesi gerekir.\n• Her telafi hakkı oluşturulduğu tarihten itibaren 30 gün geçerlidir.\n• Kullanılmayan telafi hakları bir sonraki döneme devredilmez.\n\nDers Günü İptalleri\n\n• Ders günü yapılan iptallerde, eğer iptal sebebi sağlık sorunlarının dışındaysa ders yapılmış sayılır.\n• Derse habersiz gelinmemesi durumunda ders yapılmış sayılır ve telafi hakkı oluşmaz.\n\nTelafi Dersleri\n\n• Telafi dersleri kurumun uygunluk durumuna göre planlanır, uygunluk oluştuğunda tarafınıza bilgi verilir.\n\nProgram Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi halinde öğrenciye ayrılan gün ve saat korunur; ders ve ödeme takvimi normal şekilde işlemeye devam eder.\n• Planlı yokluk sırasında derslere katılmasanız bile, size ayırılan gün ve saatin korunması için ödeme günleri gelmeye devam eder ve telafi hakları birikebilir. Bunu istemiyorsanız programı dondurmanızı öneririz.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.\n\nÖdeme Düzeni\n\n• Ödemelerin zamanında yapılması programın devamlılığı açısından önemlidir.\n• Ödeme sürecinin aksaması durumunda program dondurulabilir ve ayrılan gün/saat başka öğrencilere açılabilir.\n\nAmacımız tüm öğrencilerimiz için düzenli, adil ve sürdürülebilir bir eğitim süreci oluşturmaktır.\n\nBodrum Sonsuz Sanat";
+  return "Sonsuz Sanat Ders Süreci Bilgilendirmesi\n\nDerslerimiz haftalık sabit gün ve saatlerde ilerler. Eğitim sürecinde devamlılık ve düzenli katılım büyük önem taşır.\n\nLütfen aşağıdaki kuralları inceleyiniz:\n\nDers İptalleri\n\n• Ders iptallerinin en az 24 saat önceden bildirilmesi gerekir.\n• Her telafi hakkı, telafiye alınan asıl ders tarihinden itibaren 30 gün geçerlidir.\n• Kullanılmayan telafi hakları bir sonraki döneme devredilmez.\n\nDers Günü İptalleri\n\n• Ders günü yapılan iptallerde, eğer iptal sebebi sağlık sorunlarının dışındaysa ders yapılmış sayılır.\n• Derse habersiz gelinmemesi durumunda ders yapılmış sayılır ve telafi hakkı oluşmaz.\n\nTelafi Dersleri\n\n• Telafi dersleri kurumun uygunluk durumuna göre planlanır, uygunluk oluştuğunda tarafınıza bilgi verilir.\n\nProgram Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi halinde öğrenciye ayrılan gün ve saat korunur; ders ve ödeme takvimi normal şekilde işlemeye devam eder.\n• Planlı yokluk sırasında derslere katılmasanız bile, size ayırılan gün ve saatin korunması için ödeme günleri gelmeye devam eder ve telafi hakları birikebilir. Bunu istemiyorsanız programı dondurmanızı öneririz.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.\n\nÖdeme Düzeni\n\n• Ödemelerin zamanında yapılması programın devamlılığı açısından önemlidir.\n• Ödeme sürecinin aksaması durumunda program dondurulabilir ve ayrılan gün/saat başka öğrencilere açılabilir.\n\nAmacımız tüm öğrencilerimiz için düzenli, adil ve sürdürülebilir bir eğitim süreci oluşturmaktır.\n\nBodrum Sonsuz Sanat";
 }
 function msgWhatsAppGroup(student) {
   const greeting = student?.veli_adi ? "Merhaba "+student.veli_adi+"," : "Merhaba,";
@@ -5115,7 +5120,8 @@ export default function App() {
   const mkTelafi = (student, lid, note, options = {}) => {
     const lesson = lid ? student.schedule.find(l=>l.id===lid) : student.schedule.find(l=>l.status==="upcoming");
     const createdAt = new Date().toISOString();
-    return { id:uid(), lessonId:lesson?.id||null, lessonDate:lesson?.date||createdAt, note, createdAt, expiry:expiry30(), done:false, doneAt:null, ...(options.managerException ? { managerException:true, managerExceptionAt:createdAt } : {}) };
+    const lessonDate = lesson?.date || createdAt;
+    return { id:uid(), lessonId:lesson?.id||null, lessonDate, note, createdAt, expiry:expiry30FromLessonDate(lessonDate), done:false, doneAt:null, ...(options.managerException ? { managerException:true, managerExceptionAt:createdAt } : {}) };
   };
 
   const clearHomeworkEffects = (schedule, lessonId) => (schedule || []).map(item => {
