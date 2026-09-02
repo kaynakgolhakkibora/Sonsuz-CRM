@@ -494,7 +494,7 @@ const PAID_LESSON_STATUSES = ["completed", "noshow", "lastminute"];
 const SCORE_STATUSES = ["completed", "telafi", "lastminute", "noshow"];
 const LESSON_FOCUS_OPTIONS = ["Parça Tekrarı","Yeni Parça Çalışması","Teknik","Ritim","Teori/Nota","Dikkat Süresi Arttırma","Bilişsel Dayanıklılık Arttırma"];
 const PIECE_RESULT_OPTIONS = [
-  { value:"complete", label:"Tam ve akıcı parça çıktı", score:100 },
+  { value:"complete", label:"Tam ve akıcı", score:100 },
   { value:"partial", label:"Kısmen çıktı", score:50 },
   { value:"none", label:"Çıkmadı", score:0 },
 ];
@@ -572,6 +572,13 @@ function storedLessonScore(record) {
 
 function pieceResultOption(value) {
   return PIECE_RESULT_OPTIONS.find(option => option.value === value) || null;
+}
+
+function displayPieceResult(value, storedLabel, fallback = "Sonuç belirtilmedi") {
+  const option = pieceResultOption(value);
+  if (option) return option.label;
+  if (storedLabel === "Tam ve akıcı parça çıktı") return "Tam ve akıcı";
+  return storedLabel || fallback;
 }
 
 function readFailedOps() {
@@ -1428,7 +1435,7 @@ function studentPieceHistory(student) {
         return {
           id:log.id || null,
           name,
-          result:log.piece.label || "Sonuç belirtilmedi",
+          result:displayPieceResult(log.piece.result, log.piece.label),
           score:Number(log.piece.score),
           period:log.addedAt ? "Manuel kayıt · "+fmtShort(log.addedAt) : "Manuel kayıt",
           date:new Date(log.addedAt || 0),
@@ -1439,7 +1446,7 @@ function studentPieceHistory(student) {
       return {
         id:null,
         name,
-        result:log.evaluation.pieceLabel || "Sonuç belirtilmedi",
+        result:displayPieceResult(log.evaluation.pieceResult, log.evaluation.pieceLabel),
         score:Number(log.evaluation.pieceScore),
         period:log.packageStart && log.packageEnd ? fmtShort(log.packageStart)+" - "+fmtShort(log.packageEnd) : "",
         date:new Date(log.packageEnd ? log.packageEnd+"T12:00:00" : (log.evaluatedAt || 0)),
@@ -3197,7 +3204,7 @@ function msgDonemDegerlendirmesi(student, info, log) {
     "Derse katılım: "+fmtNumber(evaluation.attendanceScore)+"/100 ("+evaluation.attendedLessonCount+"/"+evaluation.expectedLessonCount+" ders)",
     "Dönem derslerinin ortalaması: "+fmtNumber(evaluation.lessonAverage)+"/100",
     ...(evaluation.pieceName ? ["Parça: "+evaluation.pieceName] : []),
-    "Parça sonucu: "+evaluation.pieceLabel+" ("+evaluation.pieceScore+"/100)",
+    "Parça sonucu: "+displayPieceResult(evaluation.pieceResult, evaluation.pieceLabel)+" ("+evaluation.pieceScore+"/100)",
     "",
     "Dönem Değerlendirme Puanı: "+fmtNumber(evaluation.periodScore)+"/100",
     "",
@@ -4063,7 +4070,7 @@ function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth
       const evaluationDate = log.packageEnd || log.evaluatedAt;
       if (!inMonth(evaluationDate,targetMonth)) return;
       periodEvaluations.push(log.evaluation);
-      if (log.evaluation.pieceName) pieces.push({ student:student.name, name:log.evaluation.pieceName, result:log.evaluation.pieceLabel || "" });
+      if (log.evaluation.pieceName) pieces.push({ student:student.name, name:log.evaluation.pieceName, result:displayPieceResult(log.evaluation.pieceResult, log.evaluation.pieceLabel, "") });
     });
   });
 
