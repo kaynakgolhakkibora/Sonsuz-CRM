@@ -3009,6 +3009,10 @@ function msgTelafiDersHatirlatma(student, record) {
   const plannedAt = telafiPlannedAt(record);
   return "Günaydın :) Bugünkü telafi dersimizin saati "+timeFromISO(plannedAt)+". Lütfen 5 dakika önce hazır olun.";
 }
+function msgTekDersHatirlatma(lesson) {
+  const mode = lesson?.lesson_mode === "online" ? "online " : "";
+  return "Günaydın :) Bugünkü "+mode+(lesson?.instrument || "müzik")+" tek dersimizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
+}
 function msgTelafiHakki(student, record) {
   const lessonText = record?.lessonDate ? fmtMed(record.lessonDate)+" tarihli dersiniz" : "Dersiniz";
   const expiryText = record?.expiry ? fmtMed(record.expiry) : "asıl ders tarihinden itibaren 30 gün";
@@ -3841,6 +3845,31 @@ function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStuden
   );
 }
 
+function BugünTekDersleri({ lessons, onWA, onReminderToggle, onOpen }) {
+  const todayLessons = (lessons || [])
+    .filter(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at))
+    .sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at) || a.participant_name.localeCompare(b.participant_name,"tr"));
+  if (!todayLessons.length) return null;
+  return (
+    <AçılırBugünBölümü title={`Bugünkü Tek Dersler (${todayLessons.length})`} color="#6d28d9" style={{ background:"#faf5ff", border:"1.5px solid #c4b5fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+      {todayLessons.map(lesson=>{
+        const sent = !!lesson.reminder_sent_at;
+        return <div key={lesson.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #ede9fe" }}>
+          <div onClick={()=>onOpen(lesson)} style={{ cursor:"pointer", minWidth:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}><p style={{ margin:0, fontWeight:750, fontSize:14, color:"#111" }}>{lesson.participant_name}</p><TonePill tone="special">Tek Ders</TonePill>{lesson.participant_kind==="guest"?<TonePill>Misafir</TonePill>:null}</div>
+            <p style={{ margin:"3px 0 0", fontSize:12, color:"#6d28d9", fontWeight:700 }}>{timeFromISO(lesson.starts_at)} · {lesson.instrument} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
+            <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent?"Hatırlatma gönderildi":"Hatırlatma bekliyor"} · {singleLessonBillingLabel(lesson.billing_status)}</p>
+          </div>
+          <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+            {lesson.participant_phone ? <button onClick={()=>onWA(lesson)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:10, padding:"7px 12px", fontSize:13, fontWeight:700, cursor:"pointer" }}>WA</button> : null}
+            <button onClick={()=>onReminderToggle(lesson,!sent)} style={{ background:sent?"#dcfce7":"#fff", color:sent?"#166534":"#475569", border:"1px solid #ddd6fe", borderRadius:10, padding:"7px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>{sent?"Geri Al":"İşaretle"}</button>
+          </div>
+        </div>;
+      })}
+    </AçılırBugünBölümü>
+  );
+}
+
 function BekleyenTelafiler({ students, onStudentClick }) {
   const telafiler = [];
   students.forEach(student => {
@@ -4440,7 +4469,26 @@ function AylikOzet({ students, teachers, monthlyReports, onMonthlyReportDownload
   );
 }
 
-function FinansRaporu({ students, expenses, onExpenseAdd, onExpenseRemove }) {
+function singleLessonPaymentsForMonth(singleLessons, targetMonth) {
+  return (singleLessons || [])
+    .filter(lesson=>!lesson.deleted_at && lesson.billing_status==="paid" && lesson.paid_on)
+    .filter(lesson=>{
+      const paymentDate = new Date(lesson.paid_on+"T12:00:00");
+      return !isNaN(paymentDate.getTime()) && paymentDate.getFullYear()===targetMonth.getFullYear() && paymentDate.getMonth()===targetMonth.getMonth();
+    })
+    .map(lesson=>({
+      id:"single-lesson-"+lesson.id,
+      tarih:lesson.paid_on,
+      tutar:Number(lesson.fee) || 0,
+      paketUcret:0,
+      ekTutar:0,
+      tekDersTutar:Number(lesson.fee) || 0,
+      ogrenci:lesson.participant_name,
+      ödemeTürü:"Tek Ders",
+    }));
+}
+
+function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onExpenseRemove }) {
   const [ayOffset, setAyOffset] = useState(0);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [savingExpense, setSavingExpense] = useState(false);
@@ -4461,9 +4509,11 @@ function FinansRaporu({ students, expenses, onExpenseAdd, onExpenseRemove }) {
       }
     });
   });
+  ayÖdemeleri.push(...singleLessonPaymentsForMonth(singleLessons,hedefAy));
   const toplamGelir = ayÖdemeleri.reduce((sum, o) => sum + o.tutar, 0);
   const paketGeliri = ayÖdemeleri.reduce((sum, o) => sum + (o.paketUcret || 0), 0);
   const ekGeliri = ayÖdemeleri.reduce((sum, o) => sum + (o.ekTutar || 0), 0);
+  const tekDersGeliri = ayÖdemeleri.reduce((sum, o) => sum + (o.tekDersTutar || 0), 0);
   const ayGiderleri = (expenses || [])
     .filter(expense => expenseAppliesToMonth(expense, hedefAy))
     .sort((a,b) => String(a.expense_date).localeCompare(String(b.expense_date)) || a.title.localeCompare(b.title, "tr"));
@@ -4530,7 +4580,7 @@ function FinansRaporu({ students, expenses, onExpenseAdd, onExpenseRemove }) {
         </div>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:8, marginBottom:14 }}>
         <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
           <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, letterSpacing:1 }}>Paket Geliri</p>
           <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#111" }}>{paketGeliri.toLocaleString("tr-TR")} TL</p>
@@ -4538,6 +4588,10 @@ function FinansRaporu({ students, expenses, onExpenseAdd, onExpenseRemove }) {
         <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
           <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, letterSpacing:1 }}>Ek Ders Geliri</p>
           <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#5b21b6" }}>{ekGeliri.toLocaleString("tr-TR")} TL</p>
+        </div>
+        <div style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
+          <p style={{ margin:0, fontSize:11, color:"#888", fontWeight:600, letterSpacing:1 }}>Tek Ders Geliri</p>
+          <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:800, color:"#6d28d9" }}>{tekDersGeliri.toLocaleString("tr-TR")} TL</p>
         </div>
       </div>
 
@@ -4568,10 +4622,10 @@ function FinansRaporu({ students, expenses, onExpenseAdd, onExpenseRemove }) {
         {ayÖdemeleri.length === 0
           ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay ödeme yok</p>
           : [...ayÖdemeleri].reverse().map((o, i) => (
-              <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom: i < ayÖdemeleri.length-1 ? "1px solid #f0f0f0" : "none" }}>
+              <div key={o.id || i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom: i < ayÖdemeleri.length-1 ? "1px solid #f0f0f0" : "none" }}>
                 <div>
                   <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111" }}>{o.ogrenci}</p>
-                  <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{fmtMed(o.tarih)}{o.ekDersSayisi > 0 ? " +" + o.ekDersSayisi + " ek ders" : ""}</p>
+                  <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{fmtMed(o.tarih)}{o.ekDersSayisi > 0 ? " +" + o.ekDersSayisi + " ek ders" : ""}{o.ödemeTürü ? " · "+o.ödemeTürü : ""}</p>
                 </div>
                 <p style={{ margin:0, fontSize:15, fontWeight:800, color:"#059669" }}>{typeof o.tutar === "number" ? o.tutar.toLocaleString("tr-TR")+" TL" : o.tutar}</p>
               </div>
@@ -5275,6 +5329,33 @@ export default function App() {
       paid_on:paid?localDateKey():null,
       payment_recorded_at:paid?new Date().toISOString():null,
     },paid?"Tek Ders ödemesi alındı":"Tek Ders ödemesi geri alındı");
+  };
+
+  const handleSingleLessonReminderToggle = async (lesson, sent) => {
+    if (sent && !authSession?.user?.id) {
+      pop("Yetkili oturum doğrulanamadı; hatırlatma işareti kaydedilmedi.",7000);
+      return null;
+    }
+    return persistSingleLessonUpdate(lesson,{
+      reminder_sent_at:sent?new Date().toISOString():null,
+      reminder_sent_by:sent?authSession.user.id:null,
+    },sent?"Tek Ders hatırlatması gönderildi işaretlendi":"Tek Ders hatırlatma işareti kaldırıldı");
+  };
+
+  const handleWASingleLesson = async lesson => {
+    const text = msgTekDersHatirlatma(lesson);
+    const phone = lesson.participant_phone ? lesson.participant_phone.replace(/[^0-9]/g,"") : "";
+    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text),"_blank");
+    else {
+      try {
+        await navigator.clipboard.writeText(text);
+        pop("Tek Ders hatırlatma mesajı kopyalandı");
+      } catch {
+        pop("Telefon bulunamadı; hatırlatma mesajı kopyalanamadı.",7000);
+        return;
+      }
+    }
+    await handleSingleLessonReminderToggle(lesson,true);
   };
 
   const handleSingleLessonDelete = async lesson => {
@@ -6721,6 +6802,7 @@ export default function App() {
               );
             })()}
             <BugünDersleri students={operationalStudents} onWA={handleWADers} onWATelafi={handleWATelafi} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} onTelafiClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
+            <BugünTekDersleri lessons={singleLessons} onWA={handleWASingleLesson} onReminderToggle={handleSingleLessonReminderToggle} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <BekleyenTelafiler students={operationalStudents} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
             {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
@@ -6751,7 +6833,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            {pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -6764,7 +6846,7 @@ export default function App() {
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} onStudentClick={setDetailSt} /> : null}
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyId={singleLessonBusyId} /> : null}
-        {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
+        {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
         {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
         {mainTab === "liste" ? (
           <div>
