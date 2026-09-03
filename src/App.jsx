@@ -1680,7 +1680,7 @@ const MIZAN_UI_CSS = `
   .crm-student-info-item{min-width:0;padding:8px 13px;border-left:1px solid #ece8e4;font-size:12px;line-height:1.4}
   .crm-student-info-item:nth-child(3n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+4){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}
   .crm-student-info-label{display:block;margin-bottom:3px;color:#7b7680;font-size:10px;font-weight:850;letter-spacing:.05em;text-transform:uppercase}.crm-student-info-value{display:block;color:#1c1921;font-weight:750;overflow-wrap:anywhere}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(8,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(9,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -4600,6 +4600,186 @@ function FinansRaporu({ students, expenses, onExpenseAdd, onExpenseRemove }) {
   );
 }
 
+function singleLessonStatusLabel(status) {
+  return ({ planned:"Planlandı", completed:"Yapıldı", no_show:"Gelmedi", cancelled:"İptal" })[status] || "Planlandı";
+}
+
+function singleLessonBillingLabel(status) {
+  return ({ unpaid:"Ödeme Bekliyor", paid:"Ödendi", free:"Ücretsiz" })[status] || "Ödeme Bekliyor";
+}
+
+function singleLessonDateTimeParts(value) {
+  const date = value ? new Date(value) : new Date();
+  const safe = isNaN(date.getTime()) ? new Date() : date;
+  return { date:localDateKey(safe), time:String(safe.getHours()).padStart(2,"0")+":"+String(safe.getMinutes()).padStart(2,"0") };
+}
+
+function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, saving=false }) {
+  const initialParts = singleLessonDateTimeParts(lesson?.starts_at);
+  const [participantKind, setParticipantKind] = useState(lesson?.participant_kind || "guest");
+  const [studentId, setStudentId] = useState(lesson?.student_id || "");
+  const [participantName, setParticipantName] = useState(lesson?.participant_name || "");
+  const [participantPhone, setParticipantPhone] = useState(lesson?.participant_phone || "");
+  const [teacherId, setTeacherId] = useState(lesson?.teacher_id || teachers.find(t=>t.active)?.id || teachers[0]?.id || "");
+  const [instrument, setInstrument] = useState(lesson?.instrument || "");
+  const [date, setDate] = useState(initialParts.date);
+  const [time, setTime] = useState(initialParts.time || "10:00");
+  const [duration, setDuration] = useState(lesson?.duration_minutes || 45);
+  const [lessonMode, setLessonMode] = useState(lesson?.lesson_mode || "physical");
+  const [billingStatus, setBillingStatus] = useState(lesson?.billing_status || "unpaid");
+  const [fee, setFee] = useState(lesson?.fee !== undefined ? String(lesson.fee) : "");
+  const [note, setNote] = useState(lesson?.note || "");
+  const [error, setError] = useState("");
+  const selectableStudents = students.filter(student=>!isStudentDeleted(student)).sort((a,b)=>a.name.localeCompare(b.name,"tr"));
+  const selectedStudent = selectableStudents.find(student=>student.id===studentId);
+  const paidRecord = lesson?.billing_status === "paid";
+
+  const chooseStudent = id => {
+    setStudentId(id);
+    setError("");
+    const student = selectableStudents.find(item=>item.id===id);
+    if (!student) return;
+    setParticipantName(student.name || "");
+    setParticipantPhone(student.phone || "");
+    setInstrument(student.instrument || "");
+    const linkedTeacher = teachers.find(teacher=>teacher.id===student.teacher_id)
+      || teachers.find(teacher=>teacher.name===studentTeacherName(student));
+    if (linkedTeacher) setTeacherId(linkedTeacher.id);
+    if (!lesson && !fee) setFee(String(ekDersFee(student)));
+  };
+
+  const submit = () => {
+    const cleanName = participantKind === "student" ? String(selectedStudent?.name || participantName).trim() : participantName.trim();
+    const teacher = teachers.find(item=>item.id===teacherId);
+    const amount = billingStatus === "free" ? 0 : Number(fee);
+    const startsAt = new Date(date+"T"+time+":00");
+    if (participantKind === "student" && !selectedStudent) return setError("Kayıtlı öğrenciyi seçin.");
+    if (!cleanName) return setError("Derse katılacak kişinin adını yazın.");
+    if (!teacher) return setError("Öğretmeni seçin.");
+    if (!instrument.trim()) return setError("Enstrümanı yazın.");
+    if (!date || !time || isNaN(startsAt.getTime())) return setError("Geçerli tarih ve saat seçin.");
+    if (billingStatus !== "free" && (!Number.isFinite(amount) || amount <= 0)) return setError("Ücretli ders için sıfırdan büyük bir tutar yazın.");
+    onSave({
+      participant_kind:participantKind,
+      student_id:participantKind === "student" ? selectedStudent.id : null,
+      participant_name:cleanName,
+      participant_phone:participantKind === "student" ? (selectedStudent.phone || "") : participantPhone.trim(),
+      teacher_id:teacher.id,
+      teacher_name:teacher.name,
+      instrument:instrument.trim(),
+      starts_at:startsAt.toISOString(),
+      duration_minutes:Number(duration) || 45,
+      lesson_mode:lessonMode,
+      lesson_status:lesson?.lesson_status || "planned",
+      billing_status:paidRecord ? "paid" : billingStatus,
+      fee:paidRecord ? Number(lesson.fee) : amount,
+      paid_on:paidRecord ? lesson.paid_on : null,
+      payment_recorded_at:paidRecord ? lesson.payment_recorded_at : null,
+      note:note.trim(),
+    }, lesson);
+  };
+
+  return (
+    <Sheet title={lesson ? "Tek Dersi Düzenle" : "Tek Ders Ekle"} subtitle="Paketlerden ve mevcut Ek Ders kayıtlarından bağımsız" onClose={()=>{ if(!saving) onClose(); }}>
+      <div style={{ background:"#faf5ff", border:"1px solid #ddd6fe", borderRadius:11, padding:"10px 12px", color:"#5b21b6", fontSize:12, fontWeight:700, lineHeight:1.5 }}>
+        Bu kayıt öğrencinin paketini, kalan dersini, telafi hakkını veya puanlarını değiştirmez.
+      </div>
+      <label style={LBL}>Katılımcı</label>
+      <select style={INP} value={participantKind} onChange={event=>{ setParticipantKind(event.target.value); setError(""); }} disabled={saving}>
+        <option value="guest">Kayıtsız / Misafir</option>
+        <option value="student">Kayıtlı Öğrenci</option>
+      </select>
+      {participantKind === "student" ? (
+        <>
+          <label style={LBL}>Öğrenci</label>
+          <select style={INP} value={studentId} onChange={event=>chooseStudent(event.target.value)} disabled={saving}>
+            <option value="">Öğrenci seçin</option>
+            {selectableStudents.map(student=><option key={student.id} value={student.id}>{student.name}</option>)}
+          </select>
+        </>
+      ) : (
+        <>
+          <label style={LBL}>Ad Soyad</label>
+          <input style={INP} value={participantName} maxLength={160} onChange={event=>{ setParticipantName(event.target.value); setError(""); }} placeholder="Derse katılacak kişi" disabled={saving} />
+          <label style={LBL}>Telefon (opsiyonel)</label>
+          <input style={INP} type="tel" value={participantPhone} onChange={event=>setParticipantPhone(event.target.value)} placeholder="905xxxxxxxxx" disabled={saving} />
+        </>
+      )}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        <div><label style={LBL}>Öğretmen</label><select style={INP} value={teacherId} onChange={event=>setTeacherId(event.target.value)} disabled={saving}><option value="">Öğretmen seçin</option>{teachers.map(teacher=><option key={teacher.id} value={teacher.id}>{teacher.name}{teacher.active===false?" · Pasif":""}</option>)}</select></div>
+        <div><label style={LBL}>Enstrüman</label><input style={INP} value={instrument} maxLength={120} onChange={event=>setInstrument(event.target.value)} placeholder="Örn. Piyano" disabled={saving} /></div>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        <div><label style={LBL}>Tarih</label><input style={INP} type="date" value={date} onChange={event=>setDate(event.target.value)} disabled={saving} /></div>
+        <div><label style={LBL}>Saat</label><input style={INP} type="time" step={900} value={time} onChange={event=>setTime(event.target.value)} disabled={saving} /></div>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        <div><label style={LBL}>Ders Süresi</label><select style={INP} value={duration} onChange={event=>setDuration(Number(event.target.value))} disabled={saving}><option value={30}>30 dakika</option><option value={45}>45 dakika</option><option value={60}>60 dakika</option><option value={90}>90 dakika</option></select></div>
+        <div><label style={LBL}>Ders Türü</label><select style={INP} value={lessonMode} onChange={event=>setLessonMode(event.target.value)} disabled={saving}><option value="physical">Fiziki</option><option value="online">Online</option></select></div>
+      </div>
+      <label style={LBL}>Ücretlendirme</label>
+      {paidRecord ? (
+        <div style={{ background:"#ecfdf5", border:"1px solid #bbf7d0", borderRadius:11, padding:"11px 12px", color:"#166534", fontSize:12, fontWeight:800 }}>Bu dersin ödemesi alınmış. Ücret bilgisi için önce karttan “Ödemeyi Geri Al” işlemini kullanın.</div>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+          <select style={INP} value={billingStatus} onChange={event=>{ const value=event.target.value; setBillingStatus(value); if(value==="free") setFee("0"); setError(""); }} disabled={saving}><option value="unpaid">Ücretli</option><option value="free">Ücretsiz</option></select>
+          <input style={INP} type="number" min={0} step="0.01" value={billingStatus==="free"?"0":fee} onChange={event=>setFee(event.target.value)} disabled={saving || billingStatus==="free"} placeholder="Ders ücreti" />
+        </div>
+      )}
+      <label style={LBL}>Not (opsiyonel)</label>
+      <input style={INP} value={note} onChange={event=>setNote(event.target.value)} placeholder="Dersle ilgili kısa not" disabled={saving} />
+      {error ? <p style={{ margin:"12px 0 0", color:"#b91c1c", fontSize:12, fontWeight:800 }}>{error}</p> : null}
+      <div style={{ marginTop:18 }}>
+        <button disabled={saving} onClick={submit} style={{ width:"100%", border:"none", borderRadius:14, padding:"13px 16px", marginBottom:8, background:"#6d28d9", color:"#fff", fontWeight:800, cursor:saving?"wait":"pointer", opacity:saving?.7:1 }}>{saving ? "Kaydediliyor..." : lesson ? "Değişiklikleri Kaydet" : "Tek Dersi Kaydet"}</button>
+        <Btn bg="#111" outline onClick={()=>{ if(!saving) onClose(); }}>İptal</Btn>
+      </div>
+    </Sheet>
+  );
+}
+
+function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayment, onDelete, busyId }) {
+  const [filter, setFilter] = useState("active");
+  const visible = lessons
+    .filter(lesson=>!lesson.deleted_at)
+    .filter(lesson=>filter==="all" || (filter==="active" && lesson.lesson_status==="planned") || (filter==="unpaid" && lesson.billing_status==="unpaid"))
+    .sort((a,b)=>filter==="all" ? new Date(b.starts_at)-new Date(a.starts_at) : new Date(a.starts_at)-new Date(b.starts_at));
+  const activeCount = lessons.filter(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned").length;
+  const unpaidCount = lessons.filter(lesson=>!lesson.deleted_at && lesson.billing_status==="unpaid").length;
+  return (
+    <div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:14 }}>
+        {[{key:"active",label:"Planlanan",value:activeCount,color:"#6d28d9"},{key:"unpaid",label:"Ödeme Bekleyen",value:unpaidCount,color:"#c2410c"},{key:"all",label:"Tüm Kayıtlar",value:lessons.filter(item=>!item.deleted_at).length,color:"#111827"}].map(item=><button key={item.key} onClick={()=>setFilter(item.key)} style={{ border:filter===item.key?"2px solid "+item.color:"2px solid transparent", borderRadius:13, padding:"10px 8px", background:"#fff", cursor:"pointer" }}><strong style={{ display:"block", fontSize:22, color:item.color }}>{item.value}</strong><span style={{ fontSize:10, color:"#64748b", fontWeight:800 }}>{item.label}</span></button>)}
+      </div>
+      <button onClick={onAdd} style={{ width:"100%", border:"none", borderRadius:13, padding:"12px 15px", marginBottom:14, background:"#6d28d9", color:"#fff", fontWeight:850, cursor:"pointer" }}>＋ Tek Ders Ekle</button>
+      {loading ? <div style={{ textAlign:"center", padding:40, color:"#94a3b8", fontWeight:700 }}>Tek ders kayıtları yükleniyor...</div> : null}
+      {!loading && visible.length===0 ? <div style={{ ...CARD, padding:"38px 20px", textAlign:"center", color:"#94a3b8" }}><p style={{ margin:"0 0 5px", fontSize:30 }}>◇</p><p style={{ margin:0, fontWeight:750 }}>Bu görünümde tek ders kaydı yok.</p></div> : null}
+      <div style={{ display:"grid", gap:10 }}>
+        {visible.map(lesson=>{
+          const busy = busyId===lesson.id;
+          const paid = lesson.billing_status==="paid";
+          return <div key={lesson.id} style={{ ...CARD, padding:"15px 16px", borderLeft:"5px solid #7c3aed", opacity:busy?.65:1 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
+              <div style={{ minWidth:0 }}>
+                <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}><p style={{ margin:0, fontSize:15, fontWeight:850, color:"#111" }}>{lesson.participant_name}</p><TonePill tone="special">Tek Ders</TonePill>{lesson.participant_kind==="student"?<TonePill tone="info">Kayıtlı</TonePill>:<TonePill>Misafir</TonePill>}</div>
+                <p style={{ margin:"6px 0 0", fontSize:13, color:"#475569", fontWeight:700 }}>{fmtDate(lesson.starts_at)} · {timeFromISO(lesson.starts_at)} · {lesson.duration_minutes} dk</p>
+                <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b" }}>{lesson.instrument} · {lesson.teacher_name} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
+                {lesson.note ? <p style={{ margin:"7px 0 0", padding:"7px 9px", background:"#f8fafc", borderRadius:8, fontSize:12, color:"#475569", fontStyle:"italic" }}>{lesson.note}</p> : null}
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6, flexShrink:0 }}><TonePill tone={lesson.lesson_status==="planned"?"info":lesson.lesson_status==="completed"?"good":lesson.lesson_status==="no_show"?"danger":"neutral"}>{singleLessonStatusLabel(lesson.lesson_status)}</TonePill><TonePill tone={lesson.billing_status==="paid"?"good":lesson.billing_status==="free"?"special":"warn"}>{singleLessonBillingLabel(lesson.billing_status)}</TonePill><strong style={{ fontSize:13, color:lesson.billing_status==="free"?"#6d28d9":"#111" }}>{lesson.billing_status==="free"?"0 TL":Number(lesson.fee).toLocaleString("tr-TR")+" TL"}</strong></div>
+            </div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginTop:13 }}>
+              <button disabled={busy} onClick={()=>onEdit(lesson)} style={{ border:"1px solid #ddd6fe", background:"#faf5ff", color:"#6d28d9", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Düzenle</button>
+              {lesson.lesson_status==="planned" ? <><button disabled={busy} onClick={()=>onStatus(lesson,"completed")} style={{ border:"none", background:"#dcfce7", color:"#166534", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Yapıldı</button><button disabled={busy} onClick={()=>onStatus(lesson,"no_show")} style={{ border:"none", background:"#fee2e2", color:"#991b1b", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Gelmedi</button><button disabled={busy} onClick={()=>onStatus(lesson,"cancelled")} style={{ border:"none", background:"#f3f4f6", color:"#475569", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>İptal</button></> : <button disabled={busy} onClick={()=>onStatus(lesson,"planned")} style={{ border:"none", background:"#dbeafe", color:"#1d4ed8", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Planlandıya Geri Al</button>}
+              {lesson.billing_status==="unpaid" ? <button disabled={busy} onClick={()=>onPayment(lesson,"paid")} style={{ border:"none", background:"#10b981", color:"#fff", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Ödeme Al</button> : paid ? <button disabled={busy} onClick={()=>onPayment(lesson,"unpaid")} style={{ border:"1px solid #fca5a5", background:"#fff", color:"#b91c1c", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Ödemeyi Geri Al</button> : null}
+              <button disabled={busy} onClick={()=>onDelete(lesson)} style={{ marginLeft:"auto", border:"none", background:"#fff1f2", color:"#be123c", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Sil</button>
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [giris, setGiris] = useState(false);
   const [authReady, setAuthReady] = useState(false);
@@ -4622,6 +4802,12 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [singleLessons, setSingleLessons] = useState([]);
+  const [singleLessonsLoading, setSingleLessonsLoading] = useState(false);
+  const [singleLessonSheet, setSingleLessonSheet] = useState(null);
+  const [singleLessonSaving, setSingleLessonSaving] = useState(false);
+  const [singleLessonBusyId, setSingleLessonBusyId] = useState(null);
+  const [currentBranch, setCurrentBranch] = useState(null);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
   const [loadedSources, setLoadedSources] = useState({ students:false, teachers:false, expenses:false });
@@ -4994,7 +5180,115 @@ export default function App() {
     }
   };
 
+  const loadSingleLessons = async () => {
+    setSingleLessonsLoading(true);
+    const branchResult = await supabase.from("branches").select("id,code,name").eq("code",CURRENT_BRANCH_CODE).single();
+    if (branchResult.error || !branchResult.data?.id) {
+      console.error("Tek Ders şube kaydı yüklenemedi:",branchResult.error);
+      pop("Tek Ders için şube kaydı yüklenemedi.",7000);
+      setSingleLessonsLoading(false);
+      return;
+    }
+    setCurrentBranch(branchResult.data);
+    const result = await supabase.from("single_lessons").select("*").eq("branch_id",branchResult.data.id).order("starts_at",{ ascending:true });
+    if (result.error) {
+      console.error("Tek Ders kayıtları yüklenemedi:",result.error);
+      pop("Tek Ders kayıtları yüklenemedi. v106 Supabase kurulumunu kontrol edin.",8000);
+    } else setSingleLessons(result.data || []);
+    setSingleLessonsLoading(false);
+  };
+
   useEffect(() => { loadStudents(); loadTeachers(); loadExpenses(); document.title = "Sonsuz Sanat CRM"; }, []);
+  useEffect(() => { if (giris) loadSingleLessons(); }, [giris]);
+
+  const persistSingleLessonUpdate = async (lesson, changes, successMessage) => {
+    if (!lesson?.id || singleLessonBusyId) return null;
+    const writeId = uid();
+    setSingleLessonBusyId(lesson.id);
+    let result = null;
+    try {
+      result = await supabase
+        .from("single_lessons")
+        .update({ ...changes, last_write_id:writeId })
+        .eq("id",lesson.id)
+        .eq("record_version",lesson.record_version)
+        .select("*")
+        .single();
+    } catch (error) {
+      result = { error };
+    } finally {
+      setSingleLessonBusyId(null);
+    }
+    if (result.error || !result.data?.id || result.data.last_write_id!==writeId || result.data.record_version!==lesson.record_version+1) {
+      console.error("Tek Ders güncellemesi doğrulanamadı:",result.error);
+      pop("Tek Ders değişikliği doğrulanamadı; liste yenilendi.",8000);
+      await loadSingleLessons();
+      return null;
+    }
+    setSingleLessons(current=>current.map(item=>item.id===result.data.id?result.data:item));
+    if (successMessage) pop(successMessage);
+    return result.data;
+  };
+
+  const handleSingleLessonSave = async (payload, existingLesson) => {
+    if (singleLessonSaving) return;
+    if (!currentBranch?.id) {
+      pop("Şube bilgisi hazır değil; Tek Ders kaydedilmedi.",7000);
+      return;
+    }
+    setSingleLessonSaving(true);
+    if (existingLesson?.id) {
+      const saved = await persistSingleLessonUpdate(existingLesson,payload,"Tek Ders güncellendi");
+      if (saved) setSingleLessonSheet(null);
+      setSingleLessonSaving(false);
+      return;
+    }
+    const writeId = uid();
+    let result = null;
+    try {
+      result = await supabase.from("single_lessons").insert({ ...payload, branch_id:currentBranch.id, last_write_id:writeId }).select("*").single();
+    } catch (error) {
+      result = { error };
+    } finally {
+      setSingleLessonSaving(false);
+    }
+    if (result.error || !result.data?.id || result.data.last_write_id!==writeId) {
+      console.error("Tek Ders kaydı doğrulanamadı:",result.error);
+      pop("Tek Ders veritabanına kaydedilemedi.",8000);
+      return;
+    }
+    setSingleLessons(current=>[...current,result.data]);
+    setSingleLessonSheet(null);
+    pop("Tek Ders kaydedildi");
+  };
+
+  const handleSingleLessonStatus = async (lesson, status) => {
+    const label = status==="planned" ? "Tek Ders planlandıya geri alındı" : "Tek Ders durumu: "+singleLessonStatusLabel(status);
+    await persistSingleLessonUpdate(lesson,{ lesson_status:status },label);
+  };
+
+  const handleSingleLessonPayment = async (lesson, status) => {
+    const paid = status==="paid";
+    if (!paid && typeof window!=="undefined" && !window.confirm(lesson.participant_name+" için alınmış Tek Ders ödemesini geri almak istiyor musunuz?")) return;
+    await persistSingleLessonUpdate(lesson,{
+      billing_status:status,
+      paid_on:paid?localDateKey():null,
+      payment_recorded_at:paid?new Date().toISOString():null,
+    },paid?"Tek Ders ödemesi alındı":"Tek Ders ödemesi geri alındı");
+  };
+
+  const handleSingleLessonDelete = async lesson => {
+    if (lesson.billing_status==="paid") {
+      pop("Ödenmiş Tek Ders silinemez. Önce ödemeyi geri alın.",7000);
+      return;
+    }
+    if (typeof window!=="undefined" && !window.confirm(lesson.participant_name+" için Tek Ders kaydını kaldırmak istiyor musunuz? Kayıt güvenli arşivde korunacaktır.")) return;
+    if (!authSession?.user?.id) {
+      pop("Yetkili oturum doğrulanamadı; kayıt silinmedi.",7000);
+      return;
+    }
+    await persistSingleLessonUpdate(lesson,{ deleted_at:new Date().toISOString(), deleted_by:authSession.user.id },"Tek Ders güvenli arşive alındı");
+  };
 
   useEffect(() => {
     if (!giris || !loadedSources.students || !loadedSources.teachers || !loadedSources.expenses || reportInitializationRef.current) return;
@@ -6157,6 +6451,7 @@ export default function App() {
     { key:"liste", label:"Öğrenciler", icon:<StudentsNavIcon />, badge:stats.active },
     { key:"ogretmenler", label:"Öğretmenler", icon:<TeachersNavIcon />, badge:teachers.filter(t=>t.active).length },
     { key:"iletisim", label:"İletişim", icon:<CommunicationNavIcon /> },
+    { key:"tekders", label:"Tek Ders", icon:"◇", badge:singleLessons.filter(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned").length },
     { key:"takvim", label:"Takvim", icon:"□" },
     { key:"gelir", label:"Finans", icon:"↗" },
     { key:"ozet", label:"Özet", icon:"◎" },
@@ -6166,6 +6461,7 @@ export default function App() {
     liste:{ eyebrow:"ÖĞRENCİ YÖNETİMİ", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
     ogretmenler:{ eyebrow:"ÖĞRETMEN YÖNETİMİ", title:"Öğretmenler", subtitle:"Öğretmenlerin öğrencilerini, haftalık programını ve aylık derslerini gör." },
     iletisim:{ eyebrow:"VELİ İLETİŞİMİ", title:"İletişim", subtitle:"WhatsApp grubu, bülten, ders kuralları ve Google yorumlarını takip et." },
+    tekders:{ eyebrow:"BAĞIMSIZ DERS YÖNETİMİ", title:"Tek Ders", subtitle:"Kayıtlı öğrenciler ve misafirler için paket dışı tek dersleri yönet." },
     takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
     gelir:{ eyebrow:"Finansal Görünüm", title:"Finans", subtitle:"Tahsilat, gider ve net kârını aylık olarak takip et." },
     ozet:{ eyebrow:"AYLIK YÖNETİM", title:"Kurum özeti", subtitle:"Ders, gelir, kayıt, öğrenci durumu ve öğretmen dağılımını ay ay izle." },
@@ -6375,7 +6671,7 @@ export default function App() {
         <header className="crm-topbar">
           <div><p className="crm-eyebrow">{viewMeta.eyebrow}</p><h1 className="crm-title">{viewMeta.title}</h1><p className="crm-subtitle">{viewMeta.subtitle}</p></div>
           <div className="crm-header-actions">
-            <button className="crm-primary" onClick={()=>setShowAdd(true)}>＋ Öğrenci ekle</button>
+            <button className="crm-primary" onClick={()=>mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):setShowAdd(true)}>{mainTab==="tekders"?"＋ Tek Ders Ekle":"＋ Öğrenci ekle"}</button>
           </div>
         </header>
         <section className="crm-page">
@@ -6467,6 +6763,7 @@ export default function App() {
         {mainTab === "takvim" ? <WeekCal students={operationalStudents} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} /> : null}
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} onStudentClick={setDetailSt} /> : null}
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
+        {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyId={singleLessonBusyId} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
         {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
         {mainTab === "liste" ? (
@@ -6577,6 +6874,7 @@ export default function App() {
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
+      {singleLessonSheet ? <SingleLessonSheet lesson={singleLessonSheet.lesson || null} students={students} teachers={teachers} saving={singleLessonSaving} onClose={()=>setSingleLessonSheet(null)} onSave={handleSingleLessonSave} /> : null}
       {welcomeStudentId && students.find(student=>student.id===welcomeStudentId) ? <YeniÖğrenciİletişimSheet student={students.find(student=>student.id===welcomeStudentId)} onClose={()=>setWelcomeStudentId(null)} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {periodEvaluationModal ? <DonemDegerlendirmeSheet student={students.find(student=>student.id===periodEvaluationModal.student.id) || periodEvaluationModal.student} info={periodEvaluationModal.info} onClose={()=>setPeriodEvaluationModal(null)} onSave={evaluation=>handleDonemDegerlendirmeKaydet(periodEvaluationModal.student.id, periodEvaluationModal.info, evaluation)} /> : null}
