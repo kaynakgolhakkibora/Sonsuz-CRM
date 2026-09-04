@@ -768,8 +768,32 @@ function calendarEventsFromStudents(students) {
   return events.sort((a,b) => a.start - b.start);
 }
 
-function buildGoogleCalendarICS(students) {
-  const events = calendarEventsFromStudents(students);
+function calendarEventsFromSingleLessons(singleLessons) {
+  return (singleLessons || [])
+    .filter(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && lesson.starts_at)
+    .map(lesson=>{
+      const start = new Date(lesson.starts_at);
+      if (isNaN(start.getTime())) return null;
+      const duration = Math.max(15,parseInt(lesson.duration_minutes)||45);
+      const mode = lesson.lesson_mode==="online" ? "Online" : "Fiziki";
+      return {
+        uid:"tek-ders-"+lesson.id+"@sonsuz-sanat-crm",
+        start,
+        end:addMinutes(start,duration),
+        summary:"Tek Ders - "+lesson.participant_name,
+        description:[
+          "Katılımcı: "+lesson.participant_name,
+          "Ders: Tek Ders",
+          "Ders tipi: "+mode,
+        ].join("\n"),
+      };
+    })
+    .filter(Boolean)
+    .sort((a,b)=>a.start-b.start);
+}
+
+function buildGoogleCalendarICS(students, singleLessons=[]) {
+  const events = [...calendarEventsFromStudents(students),...calendarEventsFromSingleLessons(singleLessons)].sort((a,b)=>a.start-b.start);
   const now = icsDate(new Date().toISOString());
   const lines = [
     "BEGIN:VCALENDAR",
@@ -800,8 +824,8 @@ function buildGoogleCalendarICS(students) {
 
 const CALENDAR_FEED_VERSION = "2026-06-18-v17";
 
-function downloadGoogleCalendarICS(students) {
-  const { content, count } = buildGoogleCalendarICS(students);
+function downloadGoogleCalendarICS(students, singleLessons=[]) {
+  const { content, count } = buildGoogleCalendarICS(students,singleLessons);
   const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -3437,7 +3461,7 @@ function ZamSheet({ student, onClose, onSave }) {
   );
 }
 
-function WeekCal({ students, offset, setOffset, onStudentClick, teacherName = "" }) {
+function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, teacherName = "" }) {
   const now = new Date();
   const dow = now.getDay();
   const start = new Date(now);
@@ -3532,6 +3556,25 @@ function WeekCal({ students, offset, setOffset, onStudentClick, teacherName = ""
     });
   });
 
+  singleLessons.forEach(lesson=>{
+    if (lesson.deleted_at || lesson.lesson_status!=="planned" || !lesson.starts_at) return;
+    if (teacherName && lesson.teacher_name!==teacherName) return;
+    const startAt = new Date(lesson.starts_at);
+    if (isNaN(startAt.getTime())) return;
+    const dayIndex = dayKeyToIndex.get(localDateKey(startAt));
+    if (dayIndex===undefined) return;
+    addItem({
+      key:"single-lesson-"+lesson.id,
+      singleLesson:lesson,
+      displayName:lesson.participant_name,
+      dayIndex,
+      time:timeFromISO(startAt),
+      duration:lesson.duration_minutes || 45,
+      kind:"single-lesson",
+      subtitle:"Tek Ders · "+(lesson.lesson_mode==="online"?"Online":"Fiziki"),
+    });
+  });
+
   const groupedItems = Object.values(calendarItems.reduce((groups,item) => {
     const key = item.dayIndex+"|"+item.row;
     if (!groups[key]) groups[key] = { key, dayIndex:item.dayIndex, row:item.row, span:item.span, items:[] };
@@ -3545,6 +3588,7 @@ function WeekCal({ students, offset, setOffset, onStudentClick, teacherName = ""
     "package-ended":{ background:"#43a66c", border:"#267849", opacity:1 },
     "telafi-slot":{ background:"#526fd4", border:"#344fae", opacity:.28 },
     "planned-telafi":{ background:"#df8a37", border:"#a85c19", opacity:1 },
+    "single-lesson":{ background:"#7c3aed", border:"#5b21b6", opacity:1 },
   };
   return (
     <div>
@@ -3552,9 +3596,10 @@ function WeekCal({ students, offset, setOffset, onStudentClick, teacherName = ""
         .week-calendar-v66 { overflow:hidden; background:#fff; border:1px solid #e5e7eb; border-radius:14px; }
         .week-calendar-v66-grid { display:grid; grid-template-columns:48px repeat(7,minmax(0,1fr)); grid-template-rows:48px repeat(${rowCount},14px); width:100%; min-width:0; position:relative; }
         .week-calendar-v66-event { min-width:0; height:100%; border:0; border-left:4px solid; border-radius:7px; padding:3px 5px; color:#fff; font-family:inherit; text-align:left; overflow:hidden; cursor:pointer; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; gap:3px; }
-        .week-calendar-v66-name,.week-calendar-v66-time { display:block; width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .week-calendar-v66-name,.week-calendar-v66-time,.week-calendar-v66-meta { display:block; width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .week-calendar-v66-name { font-size:10px; line-height:1.05; font-weight:800; letter-spacing:-.1px; }
         .week-calendar-v66-time { font-size:9px; line-height:1; font-weight:700; font-variant-numeric:tabular-nums; }
+        .week-calendar-v66-meta { font-size:7px; line-height:1; font-weight:750; opacity:.9; }
         @media (max-width:700px) {
           .week-calendar-v66-grid { grid-template-columns:42px repeat(7,minmax(0,1fr)); }
           .week-calendar-v66-event { border-left-width:2px; padding:3px 2px; }
@@ -3576,6 +3621,7 @@ function WeekCal({ students, offset, setOffset, onStudentClick, teacherName = ""
           ["#43a66c",1,"Paket bitti · yer korunuyor"],
           ["#526fd4",.28,"Telafi hakkı · saat boş"],
           ["#df8a37",1,"Planlanmış telafi"],
+          ["#7c3aed",1,"Tek Ders"],
         ].map(([color,opacity,text])=><span key={text} style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:20, height:10, borderRadius:3, background:color, opacity }} />{text}</span>)}
       </div>
       <div className="week-calendar-v66">
@@ -3590,9 +3636,11 @@ function WeekCal({ students, offset, setOffset, onStudentClick, teacherName = ""
           {groupedItems.map(group => <div key={group.key} style={{ gridColumn:group.dayIndex+2, gridRow:`${group.row+2} / span ${group.span}`, zIndex:3, display:"flex", gap:2, minWidth:0, padding:"1px 3px" }}>
             {group.items.map(item => {
               const colors = itemColors[item.kind] || itemColors.normal;
-              return <button key={item.key} className="week-calendar-v66-event" onClick={()=>onStudentClick(item.student)} style={{ flex:1, background:colors.background, borderLeftColor:colors.border, opacity:colors.opacity }} aria-label={item.student.name+" · "+item.time+(item.subtitle?" · "+item.subtitle:"")}>
-                <span className="week-calendar-v66-name" style={{ fontSize:item.student.name.length>16?8:item.student.name.length>12?9:undefined }}>{item.student.name}</span>
+              const displayName = item.displayName || item.student?.name || "Ders";
+              return <button key={item.key} className="week-calendar-v66-event" onClick={()=>item.singleLesson?onSingleLessonClick(item.singleLesson):onStudentClick(item.student)} style={{ flex:1, background:colors.background, borderLeftColor:colors.border, opacity:colors.opacity }} aria-label={displayName+" · "+item.time+(item.subtitle?" · "+item.subtitle:"")}>
+                <span className="week-calendar-v66-name" style={{ fontSize:displayName.length>16?8:displayName.length>12?9:undefined }}>{displayName}</span>
                 <span className="week-calendar-v66-time">{item.time}</span>
+                {item.singleLesson ? <span className="week-calendar-v66-meta">{item.subtitle}</span> : null}
               </button>;
             })}
           </div>)}
@@ -3612,7 +3660,7 @@ function studentAge(student) {
   return age >= 0 ? age : null;
 }
 
-function ÖğretmenlerPaneli({ students, teachers, onStudentClick }) {
+function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentClick, onSingleLessonClick }) {
   const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [teacherWeekOffset, setTeacherWeekOffset] = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
@@ -3676,7 +3724,7 @@ function ÖğretmenlerPaneli({ students, teachers, onStudentClick }) {
 
       <section style={{ marginBottom:20 }}>
         <p style={{ margin:"0 0 9px", fontSize:13, fontWeight:850, color:"#374151" }}>Haftalık ders takvimi</p>
-        <WeekCal students={students} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} teacherName={selectedTeacher.name} />
+        <WeekCal students={students} singleLessons={singleLessons} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} teacherName={selectedTeacher.name} />
       </section>
 
       <section style={{ ...CARD, padding:"16px 18px", marginBottom:16 }}>
@@ -6419,7 +6467,7 @@ export default function App() {
   };
 
   const handleGoogleCalendarExport = () => {
-    const count = downloadGoogleCalendarICS(students);
+    const count = downloadGoogleCalendarICS(students,singleLessons);
     pop(count ? count + " ders Google Takvim dosyasına aktarıldı" : "Aktarılacak ders bulunamadı");
   };
 
@@ -6842,8 +6890,8 @@ export default function App() {
           </div>
         ) : null}
 
-        {mainTab === "takvim" ? <WeekCal students={operationalStudents} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} /> : null}
-        {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} onStudentClick={setDetailSt} /> : null}
+        {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} /> : null}
+        {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} /> : null}
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyId={singleLessonBusyId} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
