@@ -2592,7 +2592,13 @@ function PieceAddSheet({ student, onClose, onSave }) {
   </Sheet>;
 }
 
-function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function studentLinkedSingleLessons(singleLessons, studentId) {
+  return (singleLessons || [])
+    .filter(lesson=>!lesson.deleted_at && lesson.participant_kind==="student" && lesson.student_id===studentId)
+    .sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at));
+}
+
+function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -2613,6 +2619,7 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
   const remainingTelafiRights = currentTelafiQuota.remaining;
   const telafiGroups = telafiPeriodGroups(student);
   const ekDersler = student.ek_dersler || [];
+  const linkedSingleLessons = studentLinkedSingleLessons(singleLessons,student.id);
   const odenmemisEk = unpaidEkDersler(student);
   const undoablePackage = lastUndoablePackageInfo(student);
   const payStats = paymentHabitStats(student);
@@ -2913,6 +2920,33 @@ function DetailSheet({ student, teachers, initialTab="takvim", onClose, onRechar
                   </div>
                 ))
             }
+            <div style={{ borderTop:"1px solid #e5e7eb", marginTop:16, paddingTop:14 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, marginBottom:10 }}>
+                <div>
+                  <p style={{ margin:0, fontSize:12, fontWeight:900, color:"#4c1d95", letterSpacing:.4 }}>TEK DERSLER</p>
+                  <p style={{ margin:"3px 0 0", fontSize:11, color:"#64748b" }}>Paket ve mevcut Ek Ders kayıtlarından bağımsızdır.</p>
+                </div>
+                <span style={{ background:"#ede9fe", color:"#6d28d9", borderRadius:20, padding:"5px 9px", fontSize:11, fontWeight:900, whiteSpace:"nowrap" }}>Tek Ders ({linkedSingleLessons.length})</span>
+              </div>
+              {singleLessonsLoading ? <p style={{ textAlign:"center", color:"#94a3b8", padding:"16px 0", fontWeight:700 }}>Tek ders kayıtları yükleniyor...</p> : null}
+              {!singleLessonsLoading && linkedSingleLessons.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"16px 0", fontWeight:600 }}>Bu öğrenciye bağlı Tek Ders kaydı yok</p> : null}
+              {!singleLessonsLoading ? linkedSingleLessons.map(lesson => {
+                const free = lesson.billing_status === "free";
+                const paid = lesson.billing_status === "paid";
+                return <button type="button" key={lesson.id} onClick={()=>onSingleLessonOpen(lesson)} style={{ width:"100%", display:"block", textAlign:"left", background:paid?"#f0fdf4":free?"#faf5ff":"#fff7ed", border:"1px solid "+(paid?"#bbf7d0":free?"#ddd6fe":"#fed7aa"), borderLeft:"5px solid #7c3aed", borderRadius:10, padding:"10px 12px", marginBottom:8, cursor:"pointer", fontFamily:"inherit" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
+                    <div style={{ minWidth:0 }}>
+                      <p style={{ margin:0, fontWeight:800, fontSize:14, color:"#111" }}>{fmtDate(lesson.starts_at)}</p>
+                      <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b" }}>{timeFromISO(lesson.starts_at)} · {lesson.lesson_mode==="online"?"Online":"Fiziki"} · {singleLessonStatusLabel(lesson.lesson_status)}</p>
+                    </div>
+                    <div style={{ textAlign:"right", flexShrink:0 }}>
+                      <p style={{ margin:0, fontSize:13, fontWeight:900, color:free?"#6d28d9":"#111" }}>{free?"Ücretsiz":Number(lesson.fee).toLocaleString("tr-TR")+" TL"}</p>
+                      <p style={{ margin:"3px 0 0", fontSize:11, fontWeight:800, color:paid?"#047857":free?"#6d28d9":"#c2410c" }}>{singleLessonBillingLabel(lesson.billing_status)}</p>
+                    </div>
+                  </div>
+                </button>;
+              }) : null}
+            </div>
           </div>
         ) : null}
 
@@ -7000,7 +7034,7 @@ export default function App() {
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
