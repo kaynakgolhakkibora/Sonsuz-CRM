@@ -837,14 +837,15 @@ function calendarEventsFromSingleLessons(singleLessons) {
       if (isNaN(start.getTime())) return null;
       const duration = Math.max(15,parseInt(lesson.duration_minutes)||45);
       const mode = lesson.lesson_mode==="online" ? "Online" : "Fiziki";
+      const lessonType = singleLessonTypeLabel(lesson);
       return {
         uid:"tek-ders-"+lesson.id+"@sonsuz-sanat-crm",
         start,
         end:addMinutes(start,duration),
-        summary:"Tek Ders - "+lesson.participant_name,
+        summary:lessonType+" - "+lesson.participant_name,
         description:[
           "Katılımcı: "+lesson.participant_name,
-          "Ders: Tek Ders",
+          "Ders: "+lessonType,
           "Ders tipi: "+mode,
         ].join("\n"),
       };
@@ -3130,6 +3131,7 @@ function msgTelafiDersHatirlatma(student, record) {
 }
 function msgTekDersHatirlatma(lesson) {
   const mode = lesson?.lesson_mode === "online" ? "online " : "";
+  if (isTrialSingleLesson(lesson)) return "Günaydın :) Bugünkü "+mode+"deneme dersiniz saat "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
   return "Günaydın :) Bugünkü "+mode+(lesson?.instrument || "müzik")+" tek dersimizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
 }
 function msgTelafiHakki(student, record) {
@@ -3666,7 +3668,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       time:timeFromISO(startAt),
       duration:lesson.duration_minutes || 45,
       kind:"single-lesson",
-      subtitle:"Tek Ders · "+(lesson.lesson_mode==="online"?"Online":"Fiziki"),
+      subtitle:singleLessonTypeLabel(lesson)+" · "+(lesson.lesson_mode==="online"?"Online":"Fiziki"),
     });
   });
 
@@ -3997,9 +3999,10 @@ function BugünTekDersleri({ lessons, onWA, onReminderToggle, onOpen }) {
     <AçılırBugünBölümü title={`Bugünkü Tek Dersler (${todayLessons.length})`} color="#6d28d9" style={{ background:"#faf5ff", border:"1.5px solid #c4b5fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
       {todayLessons.map(lesson=>{
         const sent = !!lesson.reminder_sent_at;
+        const trial = isTrialSingleLesson(lesson);
         return <div key={lesson.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #ede9fe" }}>
           <div onClick={()=>onOpen(lesson)} style={{ cursor:"pointer", minWidth:0 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}><p style={{ margin:0, fontWeight:750, fontSize:14, color:"#111" }}>{lesson.participant_name}</p><TonePill tone="special">Tek Ders</TonePill>{lesson.participant_kind==="guest"?<TonePill>Misafir</TonePill>:null}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}><p style={{ margin:0, fontWeight:750, fontSize:14, color:"#111" }}>{lesson.participant_name}</p><TonePill tone="special">{singleLessonTypeLabel(lesson)}</TonePill>{lesson.participant_kind==="guest" && !trial?<TonePill>Misafir</TonePill>:null}</div>
             <p style={{ margin:"3px 0 0", fontSize:12, color:"#6d28d9", fontWeight:700 }}>{timeFromISO(lesson.starts_at)} · {lesson.instrument} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent?"Hatırlatma gönderildi":"Hatırlatma bekliyor"} · {singleLessonBillingLabel(lesson.billing_status)}</p>
           </div>
@@ -4797,6 +4800,14 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
   );
 }
 
+function isTrialSingleLesson(lesson) {
+  return lesson?.lesson_purpose === "trial";
+}
+
+function singleLessonTypeLabel(lesson) {
+  return isTrialSingleLesson(lesson) ? "Deneme Dersi" : "Tek Ders";
+}
+
 function singleLessonStatusLabel(status) {
   return ({ planned:"Planlandı", completed:"Yapıldı", no_show:"Gelmedi", cancelled:"İptal" })[status] || "Planlandı";
 }
@@ -4813,7 +4824,8 @@ function singleLessonDateTimeParts(value) {
 
 function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, saving=false }) {
   const initialParts = singleLessonDateTimeParts(lesson?.starts_at);
-  const [participantKind, setParticipantKind] = useState(lesson?.participant_kind || "guest");
+  const [participantKind, setParticipantKind] = useState(isTrialSingleLesson(lesson) ? "trial" : (lesson?.participant_kind || "guest"));
+  const [participantChoiceChanged, setParticipantChoiceChanged] = useState(false);
   const [studentId, setStudentId] = useState(lesson?.student_id || "");
   const [participantName, setParticipantName] = useState(lesson?.participant_name || "");
   const [participantPhone, setParticipantPhone] = useState(lesson?.participant_phone || "");
@@ -4830,6 +4842,7 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
   const selectableStudents = students.filter(student=>!isStudentDeleted(student)).sort((a,b)=>a.name.localeCompare(b.name,"tr"));
   const selectedStudent = selectableStudents.find(student=>student.id===studentId);
   const paidRecord = lesson?.billing_status === "paid";
+  const trialSelection = participantKind === "trial";
 
   const chooseStudent = id => {
     setStudentId(id);
@@ -4846,21 +4859,26 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
   };
 
   const submit = () => {
-    const cleanName = participantKind === "student" ? String(selectedStudent?.name || participantName).trim() : participantName.trim();
+    const linkedStudent = participantKind === "student";
+    const cleanName = linkedStudent ? String(selectedStudent?.name || participantName).trim() : participantName.trim();
     const teacher = teachers.find(item=>item.id===teacherId);
-    const amount = billingStatus === "free" ? 0 : Number(fee);
+    const effectiveBillingStatus = trialSelection ? "free" : (paidRecord ? "paid" : billingStatus);
+    const amount = effectiveBillingStatus === "free" ? 0 : (paidRecord ? Number(lesson.fee) : Number(fee));
+    const lessonPurpose = trialSelection ? "trial" : (!lesson || participantChoiceChanged ? "single" : (lesson.lesson_purpose || null));
     const startsAt = new Date(date+"T"+time+":00");
-    if (participantKind === "student" && !selectedStudent) return setError("Kayıtlı öğrenciyi seçin.");
+    if (linkedStudent && !selectedStudent) return setError("Kayıtlı öğrenciyi seçin.");
+    if (trialSelection && paidRecord) return setError("Deneme dersine çevirmeden önce alınmış ödemeyi geri alın.");
     if (!cleanName) return setError("Derse katılacak kişinin adını yazın.");
     if (!teacher) return setError("Öğretmeni seçin.");
     if (!instrument.trim()) return setError("Enstrümanı yazın.");
     if (!date || !time || isNaN(startsAt.getTime())) return setError("Geçerli tarih ve saat seçin.");
-    if (billingStatus !== "free" && (!Number.isFinite(amount) || amount <= 0)) return setError("Ücretli ders için sıfırdan büyük bir tutar yazın.");
+    if (effectiveBillingStatus !== "free" && (!Number.isFinite(amount) || amount <= 0)) return setError("Ücretli ders için sıfırdan büyük bir tutar yazın.");
     onSave({
-      participant_kind:participantKind,
-      student_id:participantKind === "student" ? selectedStudent.id : null,
+      participant_kind:linkedStudent ? "student" : "guest",
+      lesson_purpose:lessonPurpose,
+      student_id:linkedStudent ? selectedStudent.id : null,
       participant_name:cleanName,
-      participant_phone:participantKind === "student" ? (selectedStudent.phone || "") : participantPhone.trim(),
+      participant_phone:linkedStudent ? (selectedStudent.phone || "") : participantPhone.trim(),
       teacher_id:teacher.id,
       teacher_name:teacher.name,
       instrument:instrument.trim(),
@@ -4868,8 +4886,8 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
       duration_minutes:Number(duration) || 45,
       lesson_mode:lessonMode,
       lesson_status:lesson?.lesson_status || "planned",
-      billing_status:paidRecord ? "paid" : billingStatus,
-      fee:paidRecord ? Number(lesson.fee) : amount,
+      billing_status:effectiveBillingStatus,
+      fee:amount,
       paid_on:paidRecord ? lesson.paid_on : null,
       payment_recorded_at:paidRecord ? lesson.payment_recorded_at : null,
       note:note.trim(),
@@ -4882,9 +4900,10 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
         Bu kayıt öğrencinin paketini, kalan dersini, telafi hakkını veya puanlarını değiştirmez.
       </div>
       <label style={LBL}>Katılımcı</label>
-      <select style={INP} value={participantKind} onChange={event=>{ setParticipantKind(event.target.value); setError(""); }} disabled={saving}>
+      <select style={INP} value={participantKind} onChange={event=>{ const value=event.target.value; setParticipantKind(value); setParticipantChoiceChanged(true); if(value==="trial"){ setBillingStatus("free"); setFee("0"); } setError(""); }} disabled={saving}>
         <option value="guest">Kayıtsız / Misafir</option>
         <option value="student">Kayıtlı Öğrenci</option>
+        <option value="trial" disabled={paidRecord}>Deneme Dersi</option>
       </select>
       {participantKind === "student" ? (
         <>
@@ -4915,7 +4934,9 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
         <div><label style={LBL}>Ders Türü</label><select style={INP} value={lessonMode} onChange={event=>setLessonMode(event.target.value)} disabled={saving}><option value="physical">Fiziki</option><option value="online">Online</option></select></div>
       </div>
       <label style={LBL}>Ücretlendirme</label>
-      {paidRecord ? (
+      {trialSelection ? (
+        <div style={{ background:"#faf5ff", border:"1px solid #ddd6fe", borderRadius:11, padding:"11px 12px", color:"#5b21b6", fontSize:12, fontWeight:800 }}>Deneme dersi ücretsiz olarak kaydedilir ve Finans hesabına girmez.</div>
+      ) : paidRecord ? (
         <div style={{ background:"#ecfdf5", border:"1px solid #bbf7d0", borderRadius:11, padding:"11px 12px", color:"#166534", fontSize:12, fontWeight:800 }}>Bu dersin ödemesi alınmış. Ücret bilgisi için önce karttan “Ödemeyi Geri Al” işlemini kullanın.</div>
       ) : (
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
@@ -4954,10 +4975,11 @@ function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayme
         {visible.map(lesson=>{
           const busy = !!busyIds[lesson.id];
           const paid = lesson.billing_status==="paid";
+          const trial = isTrialSingleLesson(lesson);
           return <div key={lesson.id} style={{ ...CARD, padding:"15px 16px", borderLeft:"5px solid #7c3aed", opacity:busy?.65:1 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
               <div style={{ minWidth:0 }}>
-                <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}><p style={{ margin:0, fontSize:15, fontWeight:850, color:"#111" }}>{lesson.participant_name}</p><TonePill tone="special">Tek Ders</TonePill>{lesson.participant_kind==="student"?<TonePill tone="info">Kayıtlı</TonePill>:<TonePill>Misafir</TonePill>}</div>
+                <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}><p style={{ margin:0, fontSize:15, fontWeight:850, color:"#111" }}>{lesson.participant_name}</p><TonePill tone="special">{singleLessonTypeLabel(lesson)}</TonePill>{lesson.participant_kind==="student"?<TonePill tone="info">Kayıtlı</TonePill>:!trial?<TonePill>Misafir</TonePill>:null}</div>
                 <p style={{ margin:"6px 0 0", fontSize:13, color:"#475569", fontWeight:700 }}>{fmtDate(lesson.starts_at)} · {timeFromISO(lesson.starts_at)} · {lesson.duration_minutes} dk</p>
                 <p style={{ margin:"3px 0 0", fontSize:12, color:"#64748b" }}>{lesson.instrument} · {lesson.teacher_name} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
                 {lesson.note ? <p style={{ margin:"7px 0 0", padding:"7px 9px", background:"#f8fafc", borderRadius:8, fontSize:12, color:"#475569", fontStyle:"italic" }}>{lesson.note}</p> : null}
