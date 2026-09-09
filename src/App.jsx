@@ -4028,6 +4028,59 @@ function BugünTekDersleri({ lessons, onWA, onReminderToggle, onOpen }) {
   );
 }
 
+function singleLessonTurkeyDay(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone:"Europe/Istanbul", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(date);
+  const part = type => parts.find(item=>item.type===type)?.value;
+  return part("year")+"-"+part("month")+"-"+part("day");
+}
+
+function pendingSingleLessonResults(lessons, now = new Date()) {
+  const today = singleLessonTurkeyDay(now);
+  if (!today) return [];
+  return (lessons || []).filter(lesson=>{
+    if (!lesson || lesson.deleted_at || lesson.lesson_status!=="planned") return false;
+    const day = singleLessonTurkeyDay(lesson.starts_at);
+    return !!day && day < today;
+  }).sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at) || String(a.id).localeCompare(String(b.id)));
+}
+
+function singleLessonTransitionError(lesson, changes) {
+  const nextStatus = changes.lesson_status ?? lesson.lesson_status;
+  const nextBilling = changes.billing_status ?? lesson.billing_status;
+  const changed = nextStatus!==lesson.lesson_status || nextBilling!==lesson.billing_status;
+  if (changed && nextBilling==="paid" && ["no_show","cancelled"].includes(nextStatus)) {
+    return lesson.billing_status==="paid"
+      ? "Ödenmiş ders Gelmedi veya İptal yapılamaz. Önce Tek Ders ekranından ödemeyi geri alın."
+      : "Gelmedi veya İptal durumundaki ders için ödeme alınamaz. Ders sonucunu kontrol edin.";
+  }
+  return "";
+}
+
+function SonuçBekleyenTekDersler({ lessons, busyIds={}, onStatus, onOpen, onManage }) {
+  if (!lessons.length) return null;
+  return <AçılırBugünBölümü title={`Sonuç Bekleyen Tek Dersler (${lessons.length})`} color="#b45309" style={{ background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+    <p style={{ margin:"0 0 10px", fontSize:12, color:"#92400e" }}>Önceki günlerden kalan derslerin sonucunu işaretleyin. Ücretsiz ve deneme dersleri de dahildir.</p>
+    {lessons.map(lesson=>{
+      const busy = !!busyIds[lesson.id];
+      const paid = lesson.billing_status==="paid";
+      return <div key={lesson.id} style={{ padding:"12px 0", borderTop:"1px solid #fde68a", opacity:busy?.65:1 }}>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}><strong style={{ fontSize:14, overflowWrap:"anywhere" }}>{lesson.participant_name}</strong><TonePill tone="special">{singleLessonTypeLabel(lesson)}</TonePill><TonePill>{singleLessonBillingLabel(lesson.billing_status)}</TonePill></div>
+        <p style={{ margin:"5px 0", fontSize:12, color:"#92400e" }}>{new Date(lesson.starts_at).toLocaleString("tr-TR", { timeZone:"Europe/Istanbul", day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit" })} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginTop:8 }}>
+          {[ ["completed","Yapıldı","#dcfce7","#166534"], ["no_show","Gelmedi","#fee2e2","#991b1b"], ["cancelled","İptal","#f3f4f6","#475569"] ].map(([status,label,bg,color])=><button key={status} disabled={busy || (paid && status!=="completed")} onClick={()=>onStatus(lesson,status)} style={{ border:0, borderRadius:9, padding:"9px 12px", background:bg, color, fontWeight:800, cursor:"pointer", opacity:paid && status!=="completed"?.5:1 }}>{label}</button>)}
+          <button disabled={busy} onClick={()=>onOpen(lesson)} style={{ border:"1px solid #ddd6fe", borderRadius:9, padding:"9px 12px", background:"#fff", color:"#6d28d9", fontWeight:750 }}>Dersi Aç</button>
+        </div>
+        {busy ? <p role="status" style={{ fontSize:12, color:"#92400e" }}>İşlem doğrulanıyor...</p> : null}
+        {paid ? <p style={{ fontSize:12, color:"#92400e", margin:"8px 0 0" }}>Gelmedi veya İptal için önce ödemeyi geri alın. <button disabled={busy} onClick={onManage} style={{ border:0, background:"transparent", color:"#6d28d9", textDecoration:"underline", cursor:"pointer" }}>Tek Ders ekranına git</button></p> : null}
+      </div>;
+    })}
+    <p style={{ margin:"10px 0 0", fontSize:12, color:"#92400e" }}>Yanlış sonucu Tek Ders → Tüm Kayıtlar → Planlandıya Geri Al ile düzeltebilirsiniz.</p>
+  </AçılırBugünBölümü>;
+}
+
 function BekleyenTelafiler({ students, onStudentClick }) {
   const telafiler = [];
   students.forEach(student => {
@@ -5066,6 +5119,16 @@ export default function App() {
   const communicationQueueRef = useRef(Promise.resolve());
   const [filter, setFilter] = useState("all");
   const [mainTab, setMainTab] = useState("bugün");
+  const [singleLessonResultClock, setSingleLessonResultClock] = useState(()=>new Date());
+  useEffect(()=>{
+    if (mainTab!=="bugün") return;
+    const refresh = ()=>setSingleLessonResultClock(new Date());
+    refresh();
+    const timer = window.setInterval(refresh,60000);
+    window.addEventListener("focus",refresh);
+    return ()=>{ window.clearInterval(timer); window.removeEventListener("focus",refresh); };
+  },[mainTab]);
+  const pendingSingleResults = pendingSingleLessonResults(singleLessons,singleLessonResultClock);
   const [weekOffset, setWeekOffset] = useState(0);
   const [toast, setToast] = useState(null);
   const [mesajSt, setMesajSt] = useState(null);
@@ -5565,6 +5628,8 @@ export default function App() {
 
   const persistSingleLessonUpdate = async (lesson, changes, successMessage) => {
     if (!lesson?.id) return null;
+    const transitionError = singleLessonTransitionError(lesson,changes);
+    if (transitionError) { pop(transitionError,9000); return null; }
     if (singleLessonBusyIdsRef.current[lesson.id]) {
       pop("Bu Tek Ders için başka bir işlem hâlâ devam ediyor.",7000);
       return null;
@@ -7178,6 +7243,7 @@ export default function App() {
             })()}
             <BugünDersleri students={operationalStudents} onWA={handleWADers} onWATelafi={handleWATelafi} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} onTelafiClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
             <BugünTekDersleri lessons={singleLessons} onWA={handleWASingleLesson} onReminderToggle={handleSingleLessonReminderToggle} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
+            <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
             <BekleyenTelafiler students={operationalStudents} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
             {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
@@ -7208,7 +7274,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            {pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
