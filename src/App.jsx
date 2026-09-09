@@ -3580,7 +3580,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     const row = Math.round(((hour * 60 + minute) - startMinutes) / slotMinutes);
     if (row < 0 || row >= rowCount) return;
     const duration = Math.max(15, parseInt(item.duration)||45);
-    calendarItems.push({ ...item, row, span:Math.max(1, Math.min(rowCount-row, Math.ceil(duration/slotMinutes))) });
+    calendarItems.push({ ...item, durationMinutes:duration, row, span:Math.max(1, Math.min(rowCount-row, Math.ceil(duration/slotMinutes))) });
   };
 
   students.forEach(student => {
@@ -3697,11 +3697,17 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
         .week-calendar-v66-name { font-size:10px; line-height:1.05; font-weight:800; letter-spacing:-.1px; }
         .week-calendar-v66-time { font-size:9px; line-height:1; font-weight:700; font-variant-numeric:tabular-nums; }
         .week-calendar-v66-meta { font-size:7px; line-height:1; font-weight:750; opacity:.9; }
+        .week-calendar-v66-event-compact { padding:1px 4px; gap:1px; }
+        .week-calendar-v66-event-compact .week-calendar-v66-name { font-size:9px; line-height:1; }
+        .week-calendar-v66-compact-line { display:block; width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:6.5px; line-height:1; font-weight:750; letter-spacing:-.12px; font-variant-numeric:tabular-nums; }
         @media (max-width:700px) {
           .week-calendar-v66-grid { grid-template-columns:42px repeat(7,minmax(0,1fr)); }
           .week-calendar-v66-event { border-left-width:2px; padding:3px 2px; }
           .week-calendar-v66-name { font-size:8px; }
           .week-calendar-v66-time { font-size:7px; }
+          .week-calendar-v66-event-compact { padding:1px 2px; }
+          .week-calendar-v66-event-compact .week-calendar-v66-name { font-size:7px; }
+          .week-calendar-v66-compact-line { font-size:5.5px; }
         }
       `}</style>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
@@ -3734,10 +3740,16 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
             {group.items.map(item => {
               const colors = itemColors[item.kind] || itemColors.normal;
               const displayName = item.displayName || item.student?.name || "Ders";
-              return <button key={item.key} className="week-calendar-v66-event" onClick={()=>item.singleLesson?onSingleLessonClick(item.singleLesson):onStudentClick(item.student)} style={{ flex:1, background:colors.background, borderLeftColor:colors.border, opacity:colors.opacity }} aria-label={displayName+" · "+item.time+(item.subtitle?" · "+item.subtitle:"")}>
+              const compact = item.durationMinutes===30;
+              const compactSingleLessonLine = compact && item.singleLesson
+                ? item.time+" · "+(isTrialSingleLesson(item.singleLesson)?"Deneme":"Tek Ders")+" · "+(item.singleLesson.lesson_mode==="online"?"Online":"Fiziki")
+                : "";
+              return <button key={item.key} className={"week-calendar-v66-event"+(compact?" week-calendar-v66-event-compact":"")} onClick={()=>item.singleLesson?onSingleLessonClick(item.singleLesson):onStudentClick(item.student)} style={{ flex:1, background:colors.background, borderLeftColor:colors.border, opacity:colors.opacity }} aria-label={displayName+" · "+item.time+(item.subtitle?" · "+item.subtitle:"")}>
                 <span className="week-calendar-v66-name" style={{ fontSize:displayName.length>16?8:displayName.length>12?9:undefined }}>{displayName}</span>
-                <span className="week-calendar-v66-time">{item.time}</span>
-                {item.singleLesson ? <span className="week-calendar-v66-meta">{item.subtitle}</span> : null}
+                {compactSingleLessonLine ? <span className="week-calendar-v66-compact-line">{compactSingleLessonLine}</span> : <>
+                  <span className="week-calendar-v66-time">{item.time}</span>
+                  {item.singleLesson ? <span className="week-calendar-v66-meta">{item.subtitle}</span> : null}
+                </>}
               </button>;
             })}
           </div>)}
