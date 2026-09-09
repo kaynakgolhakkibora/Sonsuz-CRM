@@ -18,6 +18,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth:{ persistSession:true, ...(SUPABASE_AUTH_STORAGE ? { storage:SUPABASE_AUTH_STORAGE } : {}) },
 });
 const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
+const SINGLE_LESSON_ISSUE_KEY = "sonsuz_crm_single_lesson_issue_v1";
+const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
 const LIFECYCLE_TRACKING_START = "2026-08-01";
@@ -593,6 +595,65 @@ function readFailedOps() {
 
 function writeFailedOps(items) {
   localStorage.setItem(FAILED_OPS_KEY, JSON.stringify(items || []));
+}
+
+function readSingleLessonIssue() {
+  try {
+    const raw = localStorage.getItem(SINGLE_LESSON_ISSUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSingleLessonIssue(issue) {
+  if (typeof window === "undefined") return;
+  if (issue) localStorage.setItem(SINGLE_LESSON_ISSUE_KEY, JSON.stringify(issue));
+  else localStorage.removeItem(SINGLE_LESSON_ISSUE_KEY);
+}
+
+function singleLessonIssueMessage(issue) {
+  if (!issue) return "";
+  if (issue.kind === "setup") return "Tek Ders güvenlik kurulumu doğrulanamadı. v111 Supabase SQL dosyasını kontrol edin.";
+  if (issue.kind === "security") return "Tek Ders kayıtları yüklendi ancak işlem güvenliği doğrulanamadı. Sorun çözülene kadar Tek Ders değişiklikleri durduruldu.";
+  if (issue.kind === "operation") {
+    if (issue.state === "not_applied") return "Tek Ders işlemi veritabanında bulunamadı. Ekran güncellendi; işlemi gerekiyorsa yeniden yapın.";
+    return "Tek Ders işleminin sonucu kesinleştirilemedi. Sistem yalnızca veritabanını kontrol edecek; işlemi otomatik tekrarlamayacak.";
+  }
+  return "Tek Ders kayıtları yüklenemedi. Ekrandaki Tek Ders bilgileri eksik veya eski olabilir.";
+}
+
+async function timedSingleLessonRequest(buildRequest, timeoutMs = SINGLE_LESSON_REQUEST_TIMEOUT_MS) {
+  const controller = typeof AbortController === "undefined" ? null : new AbortController();
+  let timer = null;
+  let didTimeout = false;
+  try {
+    let request = buildRequest(controller?.signal || null);
+    if (controller && request && typeof request.abortSignal === "function") request = request.abortSignal(controller.signal);
+    const requestResult = Promise.resolve(request)
+      .then(result => ({ type:"result", result }))
+      .catch(error => ({ type:"error", error }));
+    const timeoutResult = new Promise(resolve => {
+      timer = setTimeout(() => {
+        didTimeout = true;
+        if (controller) controller.abort();
+        resolve({ type:"timeout" });
+      }, timeoutMs);
+    });
+    const outcome = await Promise.race([requestResult, timeoutResult]);
+    if (outcome.type === "timeout") return { data:null, error:new Error("SINGLE_LESSON_REQUEST_TIMEOUT"), timedOut:true };
+    if (outcome.type === "error") return { data:null, error:outcome.error, timedOut:didTimeout };
+    return { ...(outcome.result || {}), timedOut:false };
+  } catch (error) {
+    return { data:null, error, timedOut:didTimeout };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function waitMilliseconds(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function failedOperationLabel(op) {
@@ -4873,7 +4934,7 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
   );
 }
 
-function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayment, onDelete, busyId }) {
+function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayment, onDelete, busyIds={} }) {
   const [filter, setFilter] = useState("active");
   const visible = lessons
     .filter(lesson=>!lesson.deleted_at)
@@ -4891,7 +4952,7 @@ function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayme
       {!loading && visible.length===0 ? <div style={{ ...CARD, padding:"38px 20px", textAlign:"center", color:"#94a3b8" }}><p style={{ margin:"0 0 5px", fontSize:30 }}>◇</p><p style={{ margin:0, fontWeight:750 }}>Bu görünümde tek ders kaydı yok.</p></div> : null}
       <div style={{ display:"grid", gap:10 }}>
         {visible.map(lesson=>{
-          const busy = busyId===lesson.id;
+          const busy = !!busyIds[lesson.id];
           const paid = lesson.billing_status==="paid";
           return <div key={lesson.id} style={{ ...CARD, padding:"15px 16px", borderLeft:"5px solid #7c3aed", opacity:busy?.65:1 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
@@ -4942,7 +5003,16 @@ export default function App() {
   const [singleLessonsLoading, setSingleLessonsLoading] = useState(false);
   const [singleLessonSheet, setSingleLessonSheet] = useState(null);
   const [singleLessonSaving, setSingleLessonSaving] = useState(false);
-  const [singleLessonBusyId, setSingleLessonBusyId] = useState(null);
+  const [singleLessonBusyIds, setSingleLessonBusyIds] = useState({});
+  const [singleLessonIssue, setSingleLessonIssue] = useState(() => readSingleLessonIssue());
+  const [singleLessonIssueChecking, setSingleLessonIssueChecking] = useState(false);
+  const [singleLessonSecurityReady, setSingleLessonSecurityReady] = useState(false);
+  const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
+  const singleLessonBusyIdsRef = useRef({});
+  const singleLessonIssueRef = useRef(singleLessonIssue);
+  const singleLessonLoadSequenceRef = useRef(0);
+  const singleLessonSavingRef = useRef(false);
+  const pendingSingleLessonCreateRef = useRef(null);
   const [currentBranch, setCurrentBranch] = useState(null);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
@@ -4973,6 +5043,18 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [failedOps, setFailedOps] = useState(() => readFailedOps());
   const [retryingOps, setRetryingOps] = useState({});
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const online = () => setBrowserOnline(true);
+    const offline = () => setBrowserOnline(false);
+    window.addEventListener("online",online);
+    window.addEventListener("offline",offline);
+    return () => {
+      window.removeEventListener("online",online);
+      window.removeEventListener("offline",offline);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -5316,86 +5398,251 @@ export default function App() {
     }
   };
 
-  const loadSingleLessons = async () => {
+  const rememberSingleLessonIssue = issue => {
+    const stored = {
+      kind:issue.kind || "load",
+      state:issue.state || "unknown",
+      operationType:issue.operationType || "",
+      operationId:issue.operationId || "",
+      lessonId:issue.lessonId || "",
+      branchId:issue.branchId || "",
+      label:issue.label || "",
+      createdAt:issue.createdAt || new Date().toISOString(),
+    };
+    singleLessonIssueRef.current = stored;
+    setSingleLessonIssue(stored);
+    writeSingleLessonIssue(stored);
+    return stored;
+  };
+
+  const clearSingleLessonIssue = predicate => {
+    const current = singleLessonIssueRef.current;
+    if (!current || (predicate && !predicate(current))) return;
+    singleLessonIssueRef.current = null;
+    setSingleLessonIssue(null);
+    writeSingleLessonIssue(null);
+  };
+
+  const setSingleLessonRecordBusy = (lessonId, busy) => {
+    if (!lessonId) return;
+    const next = { ...singleLessonBusyIdsRef.current };
+    if (busy) next[lessonId] = true;
+    else delete next[lessonId];
+    singleLessonBusyIdsRef.current = next;
+    setSingleLessonBusyIds(next);
+  };
+
+  const loadSingleLessons = async (options={}) => {
+    const preserveIssue = options.preserveIssue === true;
+    const loadSequence = singleLessonLoadSequenceRef.current + 1;
+    singleLessonLoadSequenceRef.current = loadSequence;
     setSingleLessonsLoading(true);
-    const branchResult = await supabase.from("branches").select("id,code,name").eq("code",CURRENT_BRANCH_CODE).single();
+    const branchResult = await timedSingleLessonRequest(() => supabase.from("branches").select("id,code,name").eq("code",CURRENT_BRANCH_CODE).single());
+    if (loadSequence !== singleLessonLoadSequenceRef.current) return { ok:false, superseded:true };
     if (branchResult.error || !branchResult.data?.id) {
       console.error("Tek Ders şube kaydı yüklenemedi:",branchResult.error);
-      pop("Tek Ders için şube kaydı yüklenemedi.",7000);
+      setSingleLessonSecurityReady(false);
+      rememberSingleLessonIssue({ kind:"load", state:branchResult.timedOut?"timeout":"failed" });
       setSingleLessonsLoading(false);
-      return;
+      return { ok:false, error:branchResult.error };
     }
     setCurrentBranch(branchResult.data);
-    const result = await supabase.from("single_lessons").select("*").eq("branch_id",branchResult.data.id).order("starts_at",{ ascending:true });
-    if (result.error) {
-      console.error("Tek Ders kayıtları yüklenemedi:",result.error);
-      pop("Tek Ders kayıtları yüklenemedi. v106 Supabase kurulumunu kontrol edin.",8000);
-    } else setSingleLessons(result.data || []);
+    const [lessonResult, operationResult] = await Promise.all([
+      timedSingleLessonRequest(() => supabase.from("single_lessons").select("*").eq("branch_id",branchResult.data.id).order("starts_at",{ ascending:true })),
+      timedSingleLessonRequest(() => supabase.from("single_lesson_operations").select("operation_id").eq("branch_id",branchResult.data.id).limit(1)),
+    ]);
+    if (loadSequence !== singleLessonLoadSequenceRef.current) return { ok:false, superseded:true };
+    if (lessonResult.error) {
+      console.error("Tek Ders kayıtları yüklenemedi:",lessonResult.error);
+      setSingleLessonSecurityReady(false);
+      rememberSingleLessonIssue({ kind:"load", state:lessonResult.timedOut?"timeout":"failed" });
+      setSingleLessonsLoading(false);
+      return { ok:false, error:lessonResult.error };
+    }
+    setSingleLessons(lessonResult.data || []);
+    if (operationResult.error) {
+      console.error("Tek Ders işlem güvenliği doğrulanamadı:",operationResult.error);
+      setSingleLessonSecurityReady(false);
+      rememberSingleLessonIssue({ kind:operationResult.error?.code === "42P01" ? "setup" : "security", state:operationResult.timedOut?"timeout":"failed" });
+      setSingleLessonsLoading(false);
+      return { ok:false, error:operationResult.error, lessonsLoaded:true };
+    }
+    setSingleLessonSecurityReady(true);
+    if (!preserveIssue) clearSingleLessonIssue(issue=>issue.kind === "load" || issue.kind === "setup" || issue.kind === "security");
     setSingleLessonsLoading(false);
+    return { ok:true, data:lessonResult.data || [] };
   };
 
   useEffect(() => { loadStudents(); loadTeachers(); loadExpenses(); document.title = "Sonsuz Sanat CRM"; }, []);
   useEffect(() => { if (giris) loadSingleLessons(); }, [giris]);
 
-  const persistSingleLessonUpdate = async (lesson, changes, successMessage) => {
-    if (!lesson?.id || singleLessonBusyId) return null;
-    const writeId = uid();
-    setSingleLessonBusyId(lesson.id);
-    let result = null;
+  const reconcileSingleLessonOperation = async (operation, attempts=1) => {
+    if (!operation?.operationId) return { state:"unknown", data:null };
+    const operationBranchId = operation.branchId || currentBranch?.id;
+    if (!operationBranchId) {
+      rememberSingleLessonIssue({ ...operation, kind:"operation", state:"unknown" });
+      return { state:"unknown", data:null, error:new Error("SINGLE_LESSON_BRANCH_NOT_READY") };
+    }
+    setSingleLessonIssueChecking(true);
+    let lastError = null;
     try {
-      result = await supabase
+      for (let attempt=0; attempt<attempts; attempt+=1) {
+        if (attempt > 0) await waitMilliseconds(attempt === 1 ? 1500 : 4000);
+        const operationResult = await timedSingleLessonRequest(() => supabase
+          .from("single_lesson_operations")
+          .select("operation_id,single_lesson_id,resulting_record_version")
+          .eq("operation_id",operation.operationId)
+          .eq("branch_id",operationBranchId)
+          .maybeSingle());
+        if (operationResult.error) {
+          lastError = operationResult.error;
+          continue;
+        }
+        lastError = null;
+        if (!operationResult.data?.single_lesson_id) continue;
+        const lessonResult = await timedSingleLessonRequest(() => supabase
+          .from("single_lessons")
+          .select("*")
+          .eq("id",operationResult.data.single_lesson_id)
+          .single());
+        if (lessonResult.error || !lessonResult.data?.id) {
+          lastError = lessonResult.error || new Error("SINGLE_LESSON_RECONCILIATION_ROW_MISSING");
+          continue;
+        }
+        setSingleLessons(current => {
+          const exists = current.some(item=>item.id===lessonResult.data.id);
+          return exists ? current.map(item=>item.id===lessonResult.data.id?lessonResult.data:item) : [...current,lessonResult.data];
+        });
+        clearSingleLessonIssue(issue=>issue.kind === "operation" && issue.operationId === operation.operationId);
+        pop("Tek Ders işlemi Supabase kaydından doğrulandı.",6000);
+        return { state:"applied", data:lessonResult.data };
+      }
+      const refreshed = await loadSingleLessons({ preserveIssue:true });
+      if (refreshed.ok && !lastError) {
+        rememberSingleLessonIssue({ ...operation, kind:"operation", state:"not_applied" });
+        return { state:"not_applied", data:null };
+      }
+      rememberSingleLessonIssue({ ...operation, kind:"operation", state:"unknown" });
+      return { state:"unknown", data:null, error:lastError || refreshed.error };
+    } finally {
+      setSingleLessonIssueChecking(false);
+    }
+  };
+
+  const persistSingleLessonUpdate = async (lesson, changes, successMessage) => {
+    if (!lesson?.id) return null;
+    if (singleLessonBusyIdsRef.current[lesson.id]) {
+      pop("Bu Tek Ders için başka bir işlem hâlâ devam ediyor.",7000);
+      return null;
+    }
+    if (!singleLessonSecurityReady) {
+      rememberSingleLessonIssue({ kind:"setup", state:"failed" });
+      pop("Tek Ders güvenlik bağlantısı hazır değil; işlem yapılmadı.",8000);
+      return null;
+    }
+    if (singleLessonIssueRef.current?.kind === "operation" && singleLessonIssueRef.current.state !== "not_applied") {
+      pop("Önce sonucu belirsiz Tek Ders işlemini yeniden kontrol edin.",8000);
+      return null;
+    }
+    const operation = { kind:"operation", operationType:"update", operationId:uid(), lessonId:lesson.id, branchId:currentBranch.id, label:successMessage || "Tek Ders değişikliği" };
+    setSingleLessonRecordBusy(lesson.id,true);
+    try {
+      const result = await timedSingleLessonRequest(() => supabase
         .from("single_lessons")
-        .update({ ...changes, last_write_id:writeId })
+        .update({ ...changes, last_write_id:operation.operationId })
         .eq("id",lesson.id)
         .eq("record_version",lesson.record_version)
         .select("*")
-        .single();
-    } catch (error) {
-      result = { error };
-    } finally {
-      setSingleLessonBusyId(null);
-    }
-    if (result.error || !result.data?.id || result.data.last_write_id!==writeId || result.data.record_version!==lesson.record_version+1) {
+        .single());
+      if (!result.error && result.data?.id && result.data.last_write_id===operation.operationId && result.data.record_version===lesson.record_version+1) {
+        setSingleLessons(current=>current.map(item=>item.id===result.data.id?result.data:item));
+        clearSingleLessonIssue(issue=>issue.kind === "operation" && issue.operationId === operation.operationId);
+        if (successMessage) pop(successMessage);
+        return result.data;
+      }
       console.error("Tek Ders güncellemesi doğrulanamadı:",result.error);
-      pop("Tek Ders değişikliği doğrulanamadı; liste yenilendi.",8000);
-      await loadSingleLessons();
-      return null;
+      rememberSingleLessonIssue({ ...operation, state:result.timedOut?"timeout":"unknown" });
+      pop(result.timedOut ? "Tek Ders işlemi uzun sürdü; veritabanındaki sonucu kontrol ediyorum." : "Tek Ders değişikliği doğrulanamadı; veritabanındaki gerçek durum kontrol ediliyor.",9000);
+      const reconciled = await reconcileSingleLessonOperation(operation,result.timedOut?3:1);
+      return reconciled.state === "applied" ? reconciled.data : null;
+    } finally {
+      setSingleLessonRecordBusy(lesson.id,false);
     }
-    setSingleLessons(current=>current.map(item=>item.id===result.data.id?result.data:item));
-    if (successMessage) pop(successMessage);
-    return result.data;
   };
 
   const handleSingleLessonSave = async (payload, existingLesson) => {
-    if (singleLessonSaving) return;
+    if (singleLessonSavingRef.current) return;
     if (!currentBranch?.id) {
       pop("Şube bilgisi hazır değil; Tek Ders kaydedilmedi.",7000);
       return;
     }
+    if (!singleLessonSecurityReady) {
+      rememberSingleLessonIssue({ kind:"setup", state:"failed" });
+      pop("Tek Ders güvenlik bağlantısı hazır değil; kayıt yapılmadı.",8000);
+      return;
+    }
+    if (singleLessonIssueRef.current?.kind === "operation" && singleLessonIssueRef.current.state !== "not_applied") {
+      pop("Önce sonucu belirsiz Tek Ders işlemini yeniden kontrol edin.",8000);
+      return;
+    }
+    singleLessonSavingRef.current = true;
     setSingleLessonSaving(true);
     if (existingLesson?.id) {
       const saved = await persistSingleLessonUpdate(existingLesson,payload,"Tek Ders güncellendi");
       if (saved) setSingleLessonSheet(null);
+      singleLessonSavingRef.current = false;
       setSingleLessonSaving(false);
       return;
     }
-    const writeId = uid();
-    let result = null;
+    const payloadSignature = JSON.stringify(payload);
+    if (!pendingSingleLessonCreateRef.current || pendingSingleLessonCreateRef.current.payloadSignature !== payloadSignature) {
+      pendingSingleLessonCreateRef.current = { operationId:uid(), lessonId:uid(), payloadSignature };
+    }
+    const operation = {
+      kind:"operation",
+      operationType:"insert",
+      operationId:pendingSingleLessonCreateRef.current.operationId,
+      lessonId:pendingSingleLessonCreateRef.current.lessonId,
+      branchId:currentBranch.id,
+      label:"Yeni Tek Ders kaydı",
+    };
     try {
-      result = await supabase.from("single_lessons").insert({ ...payload, branch_id:currentBranch.id, last_write_id:writeId }).select("*").single();
-    } catch (error) {
-      result = { error };
+      const result = await timedSingleLessonRequest(() => supabase.from("single_lessons").insert({ ...payload, id:operation.lessonId, branch_id:currentBranch.id, last_write_id:operation.operationId }).select("*").single());
+      if (!result.error && result.data?.id===operation.lessonId && result.data.last_write_id===operation.operationId) {
+        setSingleLessons(current=>current.some(item=>item.id===result.data.id)?current.map(item=>item.id===result.data.id?result.data:item):[...current,result.data]);
+        pendingSingleLessonCreateRef.current = null;
+        clearSingleLessonIssue(issue=>issue.kind === "operation" && issue.operationId === operation.operationId);
+        setSingleLessonSheet(null);
+        pop("Tek Ders kaydedildi");
+        return;
+      }
+      console.error("Tek Ders kaydı doğrulanamadı:",result.error);
+      rememberSingleLessonIssue({ ...operation, state:result.timedOut?"timeout":"unknown" });
+      pop(result.timedOut ? "Tek Ders kaydı uzun sürdü; veritabanındaki sonucu kontrol ediyorum." : "Tek Ders kaydı doğrulanamadı; veritabanındaki gerçek durum kontrol ediliyor.",9000);
+      const reconciled = await reconcileSingleLessonOperation(operation,result.timedOut?3:1);
+      if (reconciled.state === "applied") {
+        pendingSingleLessonCreateRef.current = null;
+        setSingleLessonSheet(null);
+      }
     } finally {
+      singleLessonSavingRef.current = false;
       setSingleLessonSaving(false);
     }
-    if (result.error || !result.data?.id || result.data.last_write_id!==writeId) {
-      console.error("Tek Ders kaydı doğrulanamadı:",result.error);
-      pop("Tek Ders veritabanına kaydedilemedi.",8000);
+  };
+
+  const handleSingleLessonIssueCheck = async () => {
+    if (singleLessonIssueChecking) return;
+    const issue = singleLessonIssueRef.current;
+    if (issue?.kind === "operation" && issue.operationId) {
+      await reconcileSingleLessonOperation(issue,3);
       return;
     }
-    setSingleLessons(current=>[...current,result.data]);
-    setSingleLessonSheet(null);
-    pop("Tek Ders kaydedildi");
+    setSingleLessonIssueChecking(true);
+    try {
+      await loadSingleLessons();
+    } finally {
+      setSingleLessonIssueChecking(false);
+    }
   };
 
   const handleSingleLessonStatus = async (lesson, status) => {
@@ -6838,6 +7085,18 @@ export default function App() {
           </div>
         </header>
         <section className="crm-page">
+        {!browserOnline || singleLessonIssue ? (
+          <div role="alert" style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
+            <p style={{ margin:"0 0 6px", fontSize:13, fontWeight:850, color:"#991b1b" }}>{!browserOnline ? "İnternet bağlantısı yok" : "Tek Ders kayıt güvenliği uyarısı"}</p>
+            <p style={{ margin:"0 0 10px", fontSize:12, color:"#7f1d1d", fontWeight:650, lineHeight:1.5 }}>{!browserOnline ? "Bağlantı geri gelene kadar Tek Ders kayıtları yüklenemez veya güvenli biçimde değiştirilemez." : singleLessonIssueMessage(singleLessonIssue)}</p>
+            {singleLessonIssue?.label ? <p style={{ margin:"-4px 0 10px", fontSize:11, color:"#991b1b", fontWeight:800 }}>İşlem: {singleLessonIssue.label}</p> : null}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              <button onClick={handleSingleLessonIssueCheck} disabled={!browserOnline || singleLessonIssueChecking} style={{ border:"none", borderRadius:9, padding:"8px 11px", background:"#dc2626", color:"#fff", fontSize:12, fontWeight:850, cursor:(!browserOnline || singleLessonIssueChecking) ? "wait" : "pointer", opacity:(!browserOnline || singleLessonIssueChecking) ? 0.65 : 1 }}>{singleLessonIssueChecking ? "Kontrol Ediliyor..." : "Yeniden Kontrol Et"}</button>
+              {singleLessonIssue?.kind === "operation" && singleLessonIssue.state === "not_applied" ? <button onClick={()=>clearSingleLessonIssue()} style={{ border:"1px solid #fca5a5", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#991b1b", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
+            </div>
+            <p style={{ margin:"9px 0 0", fontSize:10, color:"#991b1b", fontWeight:650 }}>“Yeniden Kontrol Et” yalnızca Supabase'den okur; hiçbir yazma işlemini kendiliğinden tekrarlamaz.</p>
+          </div>
+        ) : null}
         {failedOps.length > 0 ? (
           <div style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:800, color:"#991b1b" }}>{failedOps.length} işlem kaydedilemedi</p>
@@ -6927,7 +7186,7 @@ export default function App() {
         {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} /> : null}
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} /> : null}
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
-        {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyId={singleLessonBusyId} /> : null}
+        {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
         {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
         {mainTab === "liste" ? (
@@ -7038,7 +7297,7 @@ export default function App() {
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
-      {singleLessonSheet ? <SingleLessonSheet lesson={singleLessonSheet.lesson || null} students={students} teachers={teachers} saving={singleLessonSaving} onClose={()=>setSingleLessonSheet(null)} onSave={handleSingleLessonSave} /> : null}
+      {singleLessonSheet ? <SingleLessonSheet lesson={singleLessonSheet.lesson || null} students={students} teachers={teachers} saving={singleLessonSaving} onClose={()=>{ if(singleLessonSheet.mode==="add") pendingSingleLessonCreateRef.current=null; setSingleLessonSheet(null); }} onSave={handleSingleLessonSave} /> : null}
       {welcomeStudentId && students.find(student=>student.id===welcomeStudentId) ? <YeniÖğrenciİletişimSheet student={students.find(student=>student.id===welcomeStudentId)} onClose={()=>setWelcomeStudentId(null)} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {periodEvaluationModal ? <DonemDegerlendirmeSheet student={students.find(student=>student.id===periodEvaluationModal.student.id) || periodEvaluationModal.student} info={periodEvaluationModal.info} onClose={()=>setPeriodEvaluationModal(null)} onSave={evaluation=>handleDonemDegerlendirmeKaydet(periodEvaluationModal.student.id, periodEvaluationModal.info, evaluation)} /> : null}
