@@ -3558,7 +3558,7 @@ function ZamSheet({ student, onClose, onSave }) {
   );
 }
 
-function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, teacherName = "" }) {
+function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "" }) {
   const now = new Date();
   const dow = now.getDay();
   const start = new Date(now);
@@ -3651,6 +3651,25 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
         subtitle:"Planlanmış telafi",
       });
     });
+
+    (student.ek_dersler || []).forEach(extra => {
+      if (isStudentDeleted(student) || !extra.date || !shouldShowExtraLessonOnCalendar(extra)) return;
+      if (teacherName && teacherForDate(student, extra.date, extra) !== teacherName) return;
+      const startAt = new Date(extra.date);
+      if (isNaN(startAt.getTime())) return;
+      const dayIndex = dayKeyToIndex.get(localDateKey(startAt));
+      if (dayIndex === undefined) return;
+      addItem({
+        key:"extra-lesson-"+student.id+"-"+(extra.id || localDateKey(startAt)+"-"+timeFromISO(startAt)),
+        student,
+        extraLesson:extra,
+        dayIndex,
+        time:timeFromISO(startAt),
+        duration:getLessonDuration(student, extra),
+        kind:"extra-lesson",
+        subtitle:"Ek Ders · "+ekDersTypeLabel(extra.type),
+      });
+    });
   });
 
   singleLessons.forEach(lesson=>{
@@ -3685,6 +3704,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     "package-ended":{ background:"#43a66c", border:"#267849", opacity:1 },
     "telafi-slot":{ background:"#526fd4", border:"#344fae", opacity:.28 },
     "planned-telafi":{ background:"#df8a37", border:"#a85c19", opacity:1 },
+    "extra-lesson":{ background:"#db2777", border:"#9d174d", opacity:1 },
     "single-lesson":{ background:"#7c3aed", border:"#5b21b6", opacity:1 },
   };
   return (
@@ -3724,6 +3744,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
           ["#43a66c",1,"Paket bitti · yer korunuyor"],
           ["#526fd4",.28,"Telafi hakkı · saat boş"],
           ["#df8a37",1,"Planlanmış telafi"],
+          ["#db2777",1,"Ek Ders"],
           ["#7c3aed",1,"Tek Ders"],
         ].map(([color,opacity,text])=><span key={text} style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:20, height:10, borderRadius:3, background:color, opacity }} />{text}</span>)}
       </div>
@@ -3741,14 +3762,16 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
               const colors = itemColors[item.kind] || itemColors.normal;
               const displayName = item.displayName || item.student?.name || "Ders";
               const compact = item.durationMinutes===30;
-              const compactSingleLessonLine = compact && item.singleLesson
-                ? item.time+" · "+(isTrialSingleLesson(item.singleLesson)?"Deneme":"Tek Ders")+" · "+(item.singleLesson.lesson_mode==="online"?"Online":"Fiziki")
+              const compactSpecialLessonLine = compact && (item.singleLesson || item.extraLesson)
+                ? item.singleLesson
+                  ? item.time+" · "+(isTrialSingleLesson(item.singleLesson)?"Deneme":"Tek Ders")+" · "+(item.singleLesson.lesson_mode==="online"?"Online":"Fiziki")
+                  : item.time+" · Ek Ders · "+ekDersTypeLabel(item.extraLesson.type)
                 : "";
-              return <button key={item.key} className={"week-calendar-v66-event"+(compact?" week-calendar-v66-event-compact":"")} onClick={()=>item.singleLesson?onSingleLessonClick(item.singleLesson):onStudentClick(item.student)} style={{ flex:1, background:colors.background, borderLeftColor:colors.border, opacity:colors.opacity }} aria-label={displayName+" · "+item.time+(item.subtitle?" · "+item.subtitle:"")}>
+              return <button key={item.key} className={"week-calendar-v66-event"+(compact?" week-calendar-v66-event-compact":"")} onClick={()=>item.singleLesson?onSingleLessonClick(item.singleLesson):item.extraLesson?onExtraLessonClick(item.student,item.extraLesson):onStudentClick(item.student)} style={{ flex:1, background:colors.background, borderLeftColor:colors.border, opacity:colors.opacity }} aria-label={displayName+" · "+item.time+(item.subtitle?" · "+item.subtitle:"")}>
                 <span className="week-calendar-v66-name" style={{ fontSize:displayName.length>16?8:displayName.length>12?9:undefined }}>{displayName}</span>
-                {compactSingleLessonLine ? <span className="week-calendar-v66-compact-line">{compactSingleLessonLine}</span> : <>
+                {compactSpecialLessonLine ? <span className="week-calendar-v66-compact-line">{compactSpecialLessonLine}</span> : <>
                   <span className="week-calendar-v66-time">{item.time}</span>
-                  {item.singleLesson ? <span className="week-calendar-v66-meta">{item.subtitle}</span> : null}
+                  {item.singleLesson || item.extraLesson ? <span className="week-calendar-v66-meta">{item.subtitle}</span> : null}
                 </>}
               </button>;
             })}
@@ -3769,7 +3792,7 @@ function studentAge(student) {
   return age >= 0 ? age : null;
 }
 
-function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentClick, onSingleLessonClick }) {
+function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentClick, onSingleLessonClick, onExtraLessonClick }) {
   const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [teacherWeekOffset, setTeacherWeekOffset] = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
@@ -3833,7 +3856,7 @@ function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentCl
 
       <section style={{ marginBottom:20 }}>
         <p style={{ margin:"0 0 9px", fontSize:13, fontWeight:850, color:"#374151" }}>Haftalık ders takvimi</p>
-        <WeekCal students={students} singleLessons={singleLessons} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} teacherName={selectedTeacher.name} />
+        <WeekCal students={students} singleLessons={singleLessons} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} onExtraLessonClick={onExtraLessonClick} teacherName={selectedTeacher.name} />
       </section>
 
       <section style={{ ...CARD, padding:"16px 18px", marginBottom:16 }}>
@@ -3998,6 +4021,36 @@ function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStuden
           </div>
         </div>
       );})}
+    </AçılırBugünBölümü>
+  );
+}
+
+function todayExtraLessons(students) {
+  const lessons = [];
+  (students || []).forEach(student => {
+    if (student.frozen || isStudentLeft(student) || isStudentDeleted(student)) return;
+    (student.ek_dersler || []).forEach(extra => {
+      if (!extra?.date || (extra.status || "planned") !== "planned" || !isToday(extra.date)) return;
+      lessons.push({ student, extra, time:timeFromISO(extra.date) });
+    });
+  });
+  return lessons.sort((a,b)=>a.time.localeCompare(b.time) || a.student.name.localeCompare(b.student.name,"tr"));
+}
+
+function BugünEkDersleri({ students, onOpen }) {
+  const lessons = todayExtraLessons(students);
+  if (!lessons.length) return null;
+  return (
+    <AçılırBugünBölümü title={`Bugünkü Ek Dersler (${lessons.length})`} color="#be185d" style={{ background:"#fdf2f8", border:"1.5px solid #f9a8d4", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+      {lessons.map(({student,extra,time}) => (
+        <div key={student.id+"-"+(extra.id || extra.date)} onClick={()=>onOpen(student,extra)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"9px 0", borderBottom:"1px solid #fce7f3", cursor:"pointer" }}>
+          <div style={{ minWidth:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}><p style={{ margin:0, fontWeight:750, fontSize:14, color:"#111" }}>{student.name}</p><TonePill tone="special">Ek Ders</TonePill></div>
+            <p style={{ margin:"3px 0 0", fontSize:12, color:"#be185d", fontWeight:700 }}>{time} · {student.instrument} · {ekDersTypeLabel(extra.type)}</p>
+          </div>
+          <span aria-hidden="true" style={{ color:"#be185d", fontSize:20, fontWeight:800, flexShrink:0 }}>›</span>
+        </div>
+      ))}
     </AçılırBugünBölümü>
   );
 }
@@ -7278,6 +7331,7 @@ export default function App() {
               );
             })()}
             <BugünDersleri students={operationalStudents} onWA={handleWADers} onWATelafi={handleWATelafi} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} onTelafiClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
+            <BugünEkDersleri students={operationalStudents} onOpen={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} />
             <BugünTekDersleri lessons={singleLessons} onWA={handleWASingleLesson} onReminderToggle={handleSingleLessonReminderToggle} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
             <GecikenTekDersÖdemeleri lessons={overdueSinglePayments} now={singleLessonResultClock} busyIds={singleLessonBusyIds} onPayment={handleSingleLessonPayment} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
@@ -7311,7 +7365,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            {overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -7320,8 +7374,8 @@ export default function App() {
           </div>
         ) : null}
 
-        {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} /> : null}
-        {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} /> : null}
+        {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} /> : null}
+        {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} /> : null}
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
