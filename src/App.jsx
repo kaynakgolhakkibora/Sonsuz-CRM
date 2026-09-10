@@ -3654,7 +3654,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   });
 
   singleLessons.forEach(lesson=>{
-    if (lesson.deleted_at || lesson.lesson_status!=="planned" || !lesson.starts_at) return;
+    if (lesson.deleted_at || !["planned","completed"].includes(lesson.lesson_status) || !lesson.starts_at) return;
     if (teacherName && lesson.teacher_name!==teacherName) return;
     const startAt = new Date(lesson.starts_at);
     if (isNaN(startAt.getTime())) return;
