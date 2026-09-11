@@ -1689,6 +1689,10 @@ function telafiReminderRef(record) {
   return "telafi-"+(record?.id || dateKey(telafiPlannedAt(record)));
 }
 
+function extraLessonReminderRef(extra) {
+  return "ek-ders-"+(extra?.id || [dateKey(extra?.date),timeFromISO(extra?.date).replace(":","")].filter(Boolean).join("-"));
+}
+
 function isPaymentDue(student) {
   return !!currentPaymentDueInfo(student);
 }
@@ -3129,6 +3133,10 @@ function msgTelafiDersHatirlatma(student, record) {
   const plannedAt = telafiPlannedAt(record);
   return "Günaydın :) Bugünkü telafi dersimizin saati "+timeFromISO(plannedAt)+". Lütfen 5 dakika önce hazır olun.";
 }
+function msgEkDersHatirlatma(extra) {
+  const mode = extra?.type === "online" ? "online " : "";
+  return "Günaydın :) Bugünkü "+mode+"ek dersimizin saati "+timeFromISO(extra?.date)+". Lütfen 5 dakika önce hazır olun.";
+}
 function msgTekDersHatirlatma(lesson) {
   const mode = lesson?.lesson_mode === "online" ? "online " : "";
   if (isTrialSingleLesson(lesson)) return "Günaydın :) Bugünkü "+mode+"deneme dersiniz saat "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
@@ -4037,20 +4045,26 @@ function todayExtraLessons(students) {
   return lessons.sort((a,b)=>a.time.localeCompare(b.time) || a.student.name.localeCompare(b.student.name,"tr"));
 }
 
-function BugünEkDersleri({ students, onOpen }) {
+function BugünEkDersleri({ students, onWA, onReminderToggle, onOpen }) {
   const lessons = todayExtraLessons(students);
   if (!lessons.length) return null;
   return (
     <AçılırBugünBölümü title={`Bugünkü Ek Dersler (${lessons.length})`} color="#be185d" style={{ background:"#fdf2f8", border:"1.5px solid #f9a8d4", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-      {lessons.map(({student,extra,time}) => (
-        <div key={student.id+"-"+(extra.id || extra.date)} onClick={()=>onOpen(student,extra)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"9px 0", borderBottom:"1px solid #fce7f3", cursor:"pointer" }}>
-          <div style={{ minWidth:0 }}>
+      {lessons.map(({student,extra,time}) => {
+        const sent = !!lessonReminderSentInfo(student,{ id:extraLessonReminderRef(extra) });
+        return (
+        <div key={student.id+"-"+(extra.id || extra.date)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"9px 0", borderBottom:"1px solid #fce7f3" }}>
+          <div onClick={()=>onOpen(student,extra)} style={{ minWidth:0, cursor:"pointer" }}>
             <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}><p style={{ margin:0, fontWeight:750, fontSize:14, color:"#111" }}>{student.name}</p><TonePill tone="special">Ek Ders</TonePill></div>
             <p style={{ margin:"3px 0 0", fontSize:12, color:"#be185d", fontWeight:700 }}>{time} · {student.instrument} · {ekDersTypeLabel(extra.type)}</p>
+            <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent?"Hatırlatma gönderildi":"Hatırlatma bekliyor"}</p>
           </div>
-          <span aria-hidden="true" style={{ color:"#be185d", fontSize:20, fontWeight:800, flexShrink:0 }}>›</span>
+          <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+            {student.phone ? <button onClick={()=>onWA(student,extra)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:10, padding:"7px 12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>WA</button> : null}
+            <button onClick={()=>onReminderToggle(student.id,extra,!sent)} style={{ background:sent?"#dcfce7":"#fff", color:sent?"#166534":"#475569", border:"1px solid #f9a8d4", borderRadius:10, padding:"7px 10px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>{sent?"Geri Al":"İşaretle"}</button>
+          </div>
         </div>
-      ))}
+      );})}
     </AçılırBugünBölümü>
   );
 }
@@ -6919,6 +6933,26 @@ export default function App() {
     pop(sent ? "Hatırlatma gönderildi işaretlendi" : "Hatırlatma işareti kaldırıldı");
   };
 
+  const handleExtraLessonReminderToggle = async (sid, extra, sent) => {
+    await handleReminderToggle(sid, extraLessonReminderRef(extra), sent);
+  };
+
+  const handleWAExtraLesson = async (student, extra) => {
+    const text = msgEkDersHatirlatma(extra);
+    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
+    else {
+      try {
+        await navigator.clipboard.writeText(text);
+        pop("Ek Ders hatırlatma mesajı kopyalandı");
+      } catch {
+        pop("Telefon bulunamadı; Ek Ders hatırlatma mesajı kopyalanamadı.",7000);
+        return;
+      }
+    }
+    await handleExtraLessonReminderToggle(student.id,extra,true);
+  };
+
   const handleWADers = async (student, lesson) => {
     const text = msgDersHatirlatma(student);
     const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
@@ -7331,7 +7365,7 @@ export default function App() {
               );
             })()}
             <BugünDersleri students={operationalStudents} onWA={handleWADers} onWATelafi={handleWATelafi} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} onTelafiClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
-            <BugünEkDersleri students={operationalStudents} onOpen={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} />
+            <BugünEkDersleri students={operationalStudents} onWA={handleWAExtraLesson} onReminderToggle={handleExtraLessonReminderToggle} onOpen={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} />
             <BugünTekDersleri lessons={singleLessons} onWA={handleWASingleLesson} onReminderToggle={handleSingleLessonReminderToggle} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
             <GecikenTekDersÖdemeleri lessons={overdueSinglePayments} now={singleLessonResultClock} busyIds={singleLessonBusyIds} onPayment={handleSingleLessonPayment} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
