@@ -418,6 +418,19 @@ function localDateKey(value = new Date()) {
   if (isNaN(d.getTime())) return "";
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 }
+function turkeyDateKey(value = new Date()) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone:"Europe/Istanbul", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(d);
+  const part = type => parts.find(item=>item.type===type)?.value || "";
+  return [part("year"),part("month"),part("day")].join("-");
+}
+function isValidLocalDateInput(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
+  const [year,month,day] = value.split("-").map(Number);
+  const parsed = new Date(year,month-1,day);
+  return parsed.getFullYear()===year && parsed.getMonth()===month-1 && parsed.getDate()===day;
+}
 function expenseAppliesToMonth(expense, targetMonth) {
   if (!expense || expense.deleted_at || !expense.expense_date) return false;
   const start = new Date(expense.expense_date+"T00:00:00");
@@ -2556,6 +2569,35 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
   );
 }
 
+function EkDersOdemeSheet({ student, extra, onClose, onConfirm }) {
+  const [date,setDate] = useState(turkeyDateKey());
+  const [saving,setSaving] = useState(false);
+  const amount = extra?.fee || ekDersFee(student);
+  const submit = async () => {
+    if (!isValidLocalDateInput(date) || saving) return;
+    setSaving(true);
+    try {
+      const saved = await onConfirm(student.id,extra.id,date);
+      if (saved !== false) onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Sheet title="Ek Ders Ödemesi" subtitle={student.name} onClose={()=>{ if(!saving) onClose(); }}>
+      <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
+        <p style={{ margin:0, fontSize:13, fontWeight:800, color:"#166534" }}>Ek Ders: {amount.toLocaleString("tr-TR")} TL</p>
+        <p style={{ margin:"4px 0 0", fontSize:12, color:"#166534" }}>{fmtDate(extra.date)} · {timeFromISO(extra.date)} · {ekDersTypeLabel(extra.type)}</p>
+      </div>
+      <label style={LBL}>Ödeme Tarihi</label>
+      <input style={INP} type="date" value={date} onChange={event=>setDate(event.target.value)} disabled={saving} />
+      <p style={{ margin:"6px 0 14px", fontSize:12, lineHeight:1.5, color:"#64748b" }}>Bu işlem yalnız bu Ek Dersin ayrı tahsilatını kaydeder. İptal edersen Ek Ders ödenmemiş kalır ve takip eden paket ödemesine dahil edilmeye devam eder.</p>
+      <button type="button" disabled={saving || !isValidLocalDateInput(date)} onClick={submit} style={{ width:"100%", background:saving?"#86efac":"#10b981", color:"#fff", border:"none", borderRadius:14, padding:"13px 16px", fontWeight:800, fontSize:14, cursor:saving?"wait":"pointer", fontFamily:"inherit", marginBottom:8 }}>{saving?"Kaydediliyor...":"Ödemeyi Kaydet"}</button>
+      <button type="button" disabled={saving} onClick={onClose} style={{ width:"100%", background:"transparent", color:"#111", border:"2px solid #111", borderRadius:14, padding:"11px 16px", fontWeight:700, fontSize:14, cursor:saving?"not-allowed":"pointer", fontFamily:"inherit" }}>İptal</button>
+    </Sheet>
+  );
+}
+
 function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentDelete }) {
   const info = paymentDisplayInfo(student, payment, index);
   const [open, setOpen] = useState(false);
@@ -2675,6 +2717,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
   const [showZam, setShowZam] = useState(false);
   const [showResumeProgram, setShowResumeProgram] = useState(false);
   const [showPieceAdd, setShowPieceAdd] = useState(false);
+  const [ekDersOdemeSel, setEkDersOdemeSel] = useState(null);
   const [mevcutAcik, setMevcutAcik] = useState(true);
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
@@ -2973,7 +3016,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
                     </div>
                     {e.note ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>{e.note}</p> : null}
                     <div style={{ display:"grid", gridTemplateColumns:e.odendi?"1fr 1fr":"1fr 1fr 1fr", gap:8, marginTop:8 }}>
-                      {!e.odendi ? <button onClick={() => onEkDersOdeme(student.id, e.id, new Date().toISOString().split("T")[0])} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Ödeme Alındı</button> : null}
+                      {!e.odendi ? <button onClick={() => setEkDersOdemeSel(e)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Ödeme Alındı</button> : null}
                       <button onClick={() => onEkDersDurum(student.id, e.id, e.status === "done" ? "planned" : "done")} style={{ background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"8px 10px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>{e.status === "done" ? "Planlandı Yap" : "Yapıldı Yap"}</button>
                       <button onClick={() => {
                         if (e.odendi) {
@@ -3046,6 +3089,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
       {showResumeProgram ? <ResumeProgramSheet student={student} onClose={() => setShowResumeProgram(false)} onResume={(startDate) => onToggleFreeze(student.id, false, startDate)} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
+      {ekDersOdemeSel ? <EkDersOdemeSheet student={student} extra={ekDersOdemeSel} onClose={()=>setEkDersOdemeSel(null)} onConfirm={onEkDersOdeme} /> : null}
       {showDuzenle ? <DuzenleSheet student={student} teachers={teachers} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} /> : null}
       {showPieceAdd ? <PieceAddSheet student={student} onClose={()=>setShowPieceAdd(false)} onSave={piece=>onPieceAdd(student.id,piece)} /> : null}
     </>
@@ -6857,7 +6901,11 @@ export default function App() {
   };
 
   const handleEkDersOdeme = async (sid, ekId, tarih) => {
-    const odemeDate = tarih || new Date().toISOString().split("T")[0];
+    if (!isValidLocalDateInput(tarih)) {
+      pop("Geçerli bir ödeme tarihi seçin",5000);
+      return false;
+    }
+    const odemeDate = tarih;
     const updated = students.map(s => {
       if (s.id!==sid) return s;
       const ek = (s.ek_dersler||[]).find(e=>e.id===ekId);
@@ -6880,6 +6928,7 @@ export default function App() {
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
     pop("Ek ders ödemesi kaydedildi");
+    return true;
   };
 
   const handleEkDersSil = async (sid, ekId) => {
