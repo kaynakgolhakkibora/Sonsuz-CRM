@@ -19,6 +19,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
 const SINGLE_LESSON_ISSUE_KEY = "sonsuz_crm_single_lesson_issue_v1";
+const EXTRA_LESSON_PAYMENT_ISSUE_KEY = "sonsuz_crm_extra_lesson_payment_issue_v1";
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -624,6 +625,34 @@ function writeSingleLessonIssue(issue) {
   if (typeof window === "undefined") return;
   if (issue) localStorage.setItem(SINGLE_LESSON_ISSUE_KEY, JSON.stringify(issue));
   else localStorage.removeItem(SINGLE_LESSON_ISSUE_KEY);
+}
+
+function readExtraLessonPaymentIssue() {
+  try {
+    const raw = localStorage.getItem(EXTRA_LESSON_PAYMENT_ISSUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" && parsed.operationId ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeExtraLessonPaymentIssue(issue) {
+  if (typeof window === "undefined") return false;
+  try {
+    if (issue) localStorage.setItem(EXTRA_LESSON_PAYMENT_ISSUE_KEY, JSON.stringify(issue));
+    else localStorage.removeItem(EXTRA_LESSON_PAYMENT_ISSUE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function extraLessonPaymentIssueMessage(issue) {
+  if (!issue) return "";
+  if (issue.state === "not_applied") return "Ek Ders ödemesi Supabase'de bulunamadı. Ödeme oluşmadı; gerekiyorsa işlemi yeniden yapın.";
+  if (issue.state === "applied_pending_refresh") return "Ek Ders ödemesi Supabase'e kaydedildi; öğrenci ekranı henüz yenilenemedi. İkinci ödeme göndermeyin.";
+  return "Ek Ders ödeme işleminin sonucu henüz kesinleştirilemedi. Sistem ikinci bir ödeme göndermeden Supabase kaydını kontrol edecek.";
 }
 
 function singleLessonIssueMessage(issue) {
@@ -1706,6 +1735,10 @@ function extraLessonReminderRef(extra) {
   return "ek-ders-"+(extra?.id || [dateKey(extra?.date),timeFromISO(extra?.date).replace(":","")].filter(Boolean).join("-"));
 }
 
+function extraLessonPaymentRef(extra) {
+  return extra?.id || "legacy:"+String(extra?.date || "");
+}
+
 function isPaymentDue(student) {
   return !!currentPaymentDueInfo(student);
 }
@@ -2577,7 +2610,7 @@ function EkDersOdemeSheet({ student, extra, onClose, onConfirm }) {
     if (!isValidLocalDateInput(date) || saving) return;
     setSaving(true);
     try {
-      const saved = await onConfirm(student.id,extra.id,date);
+      const saved = await onConfirm(student.id,extra,date);
       if (saved !== false) onClose();
     } finally {
       setSaving(false);
@@ -5240,12 +5273,18 @@ export default function App() {
   const [singleLessonIssue, setSingleLessonIssue] = useState(() => readSingleLessonIssue());
   const [singleLessonIssueChecking, setSingleLessonIssueChecking] = useState(false);
   const [singleLessonSecurityReady, setSingleLessonSecurityReady] = useState(false);
+  const [extraLessonPaymentIssue, setExtraLessonPaymentIssue] = useState(() => readExtraLessonPaymentIssue());
+  const [extraLessonPaymentIssueChecking, setExtraLessonPaymentIssueChecking] = useState(false);
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
   const singleLessonBusyIdsRef = useRef({});
   const singleLessonIssueRef = useRef(singleLessonIssue);
   const singleLessonLoadSequenceRef = useRef(0);
   const singleLessonSavingRef = useRef(false);
   const pendingSingleLessonCreateRef = useRef(null);
+  const extraLessonPaymentIssueRef = useRef(extraLessonPaymentIssue);
+  const extraLessonPaymentWritingRef = useRef(false);
+  const extraLessonPaymentCheckingRef = useRef(false);
+  const extraLessonPaymentAutoCheckRef = useRef("");
   const [currentBranch, setCurrentBranch] = useState(null);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
@@ -5298,6 +5337,17 @@ export default function App() {
       window.removeEventListener("online",online);
       window.removeEventListener("offline",offline);
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const warnWhileExtraLessonPaymentIsWriting = event => {
+      if (!extraLessonPaymentWritingRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload",warnWhileExtraLessonPaymentIsWriting);
+    return () => window.removeEventListener("beforeunload",warnWhileExtraLessonPaymentIsWriting);
   }, []);
 
   useEffect(() => {
@@ -5665,6 +5715,32 @@ export default function App() {
     singleLessonIssueRef.current = null;
     setSingleLessonIssue(null);
     writeSingleLessonIssue(null);
+  };
+
+  const rememberExtraLessonPaymentIssue = issue => {
+    const stored = {
+      operationId:issue.operationId,
+      studentId:issue.studentId || "",
+      studentName:issue.studentName || "Öğrenci",
+      extraRef:issue.extraRef || "",
+      extraDate:issue.extraDate || "",
+      paidOn:issue.paidOn || "",
+      amount:Number(issue.amount) || 0,
+      state:issue.state || "unknown",
+      createdAt:issue.createdAt || new Date().toISOString(),
+    };
+    if (!writeExtraLessonPaymentIssue(stored)) return false;
+    extraLessonPaymentIssueRef.current = stored;
+    setExtraLessonPaymentIssue(stored);
+    return true;
+  };
+
+  const clearExtraLessonPaymentIssue = operationId => {
+    const current = extraLessonPaymentIssueRef.current;
+    if (operationId && current?.operationId !== operationId) return;
+    writeExtraLessonPaymentIssue(null);
+    extraLessonPaymentIssueRef.current = null;
+    setExtraLessonPaymentIssue(null);
   };
 
   const setSingleLessonRecordBusy = (lessonId, busy) => {
@@ -6682,7 +6758,7 @@ export default function App() {
       return {
         ...s,
         odemeler: (s.odemeler||[]).map((o,i)=>i===index ? nextPayment : o),
-        ek_dersler: (s.ek_dersler||[]).map(e => original?.ekDersIds?.includes(e.id) ? {...e, paidAt:nextPayment.tarih||e.paidAt} : e),
+        ek_dersler: (s.ek_dersler||[]).map(e => original?.ekDersIds?.includes(extraLessonPaymentRef(e)) ? {...e, paidAt:nextPayment.tarih||e.paidAt} : e),
       };
     });
     setStudents(updated);
@@ -6696,7 +6772,7 @@ export default function App() {
       odemeler: (s.odemeler||[]).filter((_,i)=>i!==index),
       ek_dersler: (s.ek_dersler||[]).map(e => {
         const deleted = (s.odemeler||[])[index];
-        return deleted?.ekDersIds?.includes(e.id) ? {...e, odendi:false, paidAt:null} : e;
+        return deleted?.ekDersIds?.includes(extraLessonPaymentRef(e)) ? {...e, odendi:false, paidAt:null} : e;
       })
     });
     setStudents(updated);
@@ -6900,36 +6976,157 @@ export default function App() {
     pop("Ek ders eklendi");
   };
 
-  const handleEkDersOdeme = async (sid, ekId, tarih) => {
+  const reconcileExtraLessonPaymentOperation = async (issue=extraLessonPaymentIssueRef.current, options={}) => {
+    if (!issue?.operationId) return { state:"none" };
+    if (extraLessonPaymentCheckingRef.current) return { state:"checking" };
+    if (!browserOnline) {
+      rememberExtraLessonPaymentIssue({ ...issue, state:"unknown" });
+      if (options.announce !== false) pop("İnternet bağlantısı yok; Ek Ders ödemesi henüz kontrol edilemedi.",7000);
+      return { state:"unknown" };
+    }
+    extraLessonPaymentCheckingRef.current = true;
+    setExtraLessonPaymentIssueChecking(true);
+    try {
+      const operationCheck = await timedSingleLessonRequest(() => supabase
+        .from("extra_lesson_payment_operations")
+        .select("operation_id,student_id")
+        .eq("operation_id",issue.operationId)
+        .maybeSingle());
+      if (operationCheck.error) {
+        rememberExtraLessonPaymentIssue({ ...issue, state:"unknown" });
+        if (options.announce !== false) pop("Ek Ders ödeme işlemi henüz doğrulanamadı; uyarı korunuyor.",8000);
+        return { state:"unknown", error:operationCheck.error };
+      }
+      if (operationCheck.data?.operation_id===issue.operationId) {
+        const studentResult = await timedSingleLessonRequest(() => supabase
+          .from("students")
+          .select("*")
+          .eq("id",operationCheck.data.student_id || issue.studentId)
+          .single());
+        if (studentResult.error || !studentResult.data?.id) {
+          rememberExtraLessonPaymentIssue({ ...issue, state:"applied_pending_refresh" });
+          if (options.announce !== false) pop("Ek Ders ödemesi Supabase'e kaydedildi; ekran yenilenemedi. Uyarı korunuyor.",8000);
+          return { state:"applied_pending_refresh", error:studentResult.error };
+        }
+        setStudents(current=>current.map(student=>student.id===studentResult.data.id?studentResult.data:student));
+        clearExtraLessonPaymentIssue(issue.operationId);
+        if (options.announce !== false) pop("Ek Ders ödemesi Supabase kaydından doğrulandı.",7000);
+        return { state:"applied" };
+      }
+      await loadStudents();
+      rememberExtraLessonPaymentIssue({ ...issue, state:"not_applied" });
+      if (options.announce !== false) pop("Ek Ders ödemesi oluşmamış; gerekiyorsa işlemi yeniden yapın.",8000);
+      return { state:"not_applied" };
+    } finally {
+      extraLessonPaymentCheckingRef.current = false;
+      setExtraLessonPaymentIssueChecking(false);
+    }
+  };
+
+  const handleEkDersOdeme = async (sid, selectedExtra, tarih) => {
     if (!isValidLocalDateInput(tarih)) {
       pop("Geçerli bir ödeme tarihi seçin",5000);
       return false;
     }
-    const odemeDate = tarih;
-    const updated = students.map(s => {
-      if (s.id!==sid) return s;
-      const ek = (s.ek_dersler||[]).find(e=>e.id===ekId);
-      if (!ek) return s;
-      const tutar = ek.fee || ekDersFee(s);
-      const odemeler = [...(s.odemeler||[]), {
-        tarih: odemeDate,
-        tutar,
-        paketUcret:0,
-        ekDersSayisi:1,
-        ekTutar:tutar,
-        ekDersIds:[ekId],
-        donem: "Ek ders - "+fmtShort(ek.date),
-        sadeceEkDers:true,
-        odendi:true
-      }];
-      const ekDersler = (s.ek_dersler||[]).map(e=>e.id===ekId ? {...e, odendi:true, paidAt:odemeDate} : e);
-      return {...s, odemeler, ek_dersler:ekDersler};
-    });
-    setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
-    pop("Ek ders ödemesi kaydedildi");
-    return true;
+    if (extraLessonPaymentIssueRef.current) {
+      pop("Önce bekleyen Ek Ders ödeme uyarısını kontrol edin.",7000);
+      return false;
+    }
+    const student = students.find(s=>s.id===sid);
+    const extraRef = extraLessonPaymentRef(selectedExtra);
+    const extra = (student?.ek_dersler||[]).find(e=>extraLessonPaymentRef(e)===extraRef);
+    if (!student || !extra) {
+      pop("Ek ders kaydı bulunamadı; öğrenci bilgileri yenilendi.",6000);
+      await loadStudents();
+      return false;
+    }
+    if (extra.odendi || (student.odemeler||[]).some(payment=>(payment.ekDersIds||[]).includes(extraRef))) {
+      pop("Bu ek dersin ödemesi zaten kayıtlı; ikinci ödeme oluşturulmadı.",7000);
+      await loadStudents();
+      return false;
+    }
+
+    const operationId = uid();
+    const tutar = extra.fee || ekDersFee(student);
+    const paymentLabel = "Ek ders - "+fmtShort(extra.date);
+    const operation = {
+      operationId,
+      studentId:sid,
+      studentName:student.name || "Öğrenci",
+      extraRef,
+      extraDate:extra.date || "",
+      paidOn:tarih,
+      amount:tutar,
+      state:"pending",
+      createdAt:new Date().toISOString(),
+    };
+    if (!rememberExtraLessonPaymentIssue(operation)) {
+      pop("Tarayıcı işlem güvenliği hazırlanamadı; Ek Ders ödemesi gönderilmedi.",8000);
+      return false;
+    }
+
+    extraLessonPaymentWritingRef.current = true;
+    try {
+      const result = await timedSingleLessonRequest(() => supabase.rpc("record_extra_lesson_payment",{
+        p_student_id:sid,
+        p_extra_lesson_ref:extraRef,
+        p_paid_on:tarih,
+        p_amount:tutar,
+        p_payment_label:paymentLabel,
+        p_operation_id:operationId,
+      }).single());
+
+      if (!result.error && result.data?.student_record?.id) {
+        const savedStudent = result.data.student_record;
+        const savedExtra = (savedStudent.ek_dersler||[]).find(e=>extraLessonPaymentRef(e)===extraRef);
+        const savedPayment = (savedStudent.odemeler||[]).find(payment=>payment.operationId===operationId || (payment.ekDersIds||[]).includes(extraRef));
+        if (savedExtra?.odendi && savedPayment) {
+          setStudents(prev=>prev.map(item=>item.id===savedStudent.id?savedStudent:item));
+          clearExtraLessonPaymentIssue(operationId);
+          pop("Ek ders ödemesi kaydedildi");
+          return true;
+        }
+      }
+
+      const alreadyPaid = String(result.error?.message||"").includes("EXTRA_LESSON_ALREADY_PAID");
+      if (alreadyPaid) {
+        await loadStudents();
+        clearExtraLessonPaymentIssue(operationId);
+        pop("Bu ek dersin ödemesi zaten kayıtlı; ikinci ödeme oluşturulmadı.",7000);
+        return false;
+      }
+
+      console.error("Ek ders ödeme yanıtı doğrulanamadı:",result.error);
+      const reconciled = await reconcileExtraLessonPaymentOperation(operation,{ announce:false });
+      if (reconciled.state === "applied") {
+        pop("Ek ders ödemesi Supabase'de doğrulandı ve ekran yenilendi.",7000);
+        return true;
+      }
+      if (reconciled.state === "applied_pending_refresh") {
+        pop("Ek ders ödemesi Supabase'e kaydedildi; ekran yenilenemedi. İkinci ödeme göndermeyin.",9000);
+        return true;
+      }
+      pop(reconciled.state === "not_applied"
+        ? "Ek ders ödemesi kaydedilmedi. İkinci ödeme gönderilmedi; gerekiyorsa yeniden deneyin."
+        : "Ek ders ödeme işlemi kesinleştirilemedi. İkinci ödeme gönderilmedi; uyarı korunuyor.",9000);
+      return false;
+    } finally {
+      extraLessonPaymentWritingRef.current = false;
+    }
   };
+
+  const handleExtraLessonPaymentIssueCheck = async () => {
+    await reconcileExtraLessonPaymentOperation(extraLessonPaymentIssueRef.current,{ announce:true });
+  };
+
+  useEffect(() => {
+    const issue = extraLessonPaymentIssueRef.current;
+    if (!giris || !browserOnline || !issue?.operationId || issue.state === "not_applied" || extraLessonPaymentWritingRef.current) return;
+    const checkKey = issue.operationId+"|online";
+    if (extraLessonPaymentAutoCheckRef.current === checkKey) return;
+    extraLessonPaymentAutoCheckRef.current = checkKey;
+    void reconcileExtraLessonPaymentOperation(issue,{ announce:true });
+  }, [giris,browserOnline,extraLessonPaymentIssue?.operationId,extraLessonPaymentIssue?.state]);
 
   const handleEkDersSil = async (sid, ekId) => {
     let blocked = false;
@@ -7366,6 +7563,18 @@ export default function App() {
               {singleLessonIssue?.kind === "operation" && singleLessonIssue.state === "not_applied" ? <button onClick={()=>clearSingleLessonIssue()} style={{ border:"1px solid #fca5a5", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#991b1b", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
             </div>
             <p style={{ margin:"9px 0 0", fontSize:10, color:"#991b1b", fontWeight:650 }}>“Yeniden Kontrol Et” yalnızca Supabase'den okur; hiçbir yazma işlemini kendiliğinden tekrarlamaz.</p>
+          </div>
+        ) : null}
+        {extraLessonPaymentIssue ? (
+          <div role="alert" style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap", background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:12, padding:"10px 12px", marginBottom:12 }}>
+            <div style={{ minWidth:0, flex:"1 1 280px" }}>
+              <p style={{ margin:0, fontSize:12, fontWeight:850, color:"#9a3412" }}>Ek Ders ödeme kontrolü gerekli · {extraLessonPaymentIssue.studentName}</p>
+              <p style={{ margin:"3px 0 0", fontSize:11, color:"#9a3412", lineHeight:1.45 }}>{extraLessonPaymentIssueMessage(extraLessonPaymentIssue)}</p>
+            </div>
+            <div style={{ display:"flex", gap:7, flexShrink:0 }}>
+              {extraLessonPaymentIssue.state !== "not_applied" ? <button onClick={handleExtraLessonPaymentIssueCheck} disabled={!browserOnline || extraLessonPaymentIssueChecking} style={{ border:"none", borderRadius:8, padding:"7px 10px", background:"#c2410c", color:"#fff", fontSize:11, fontWeight:850, cursor:(!browserOnline || extraLessonPaymentIssueChecking)?"wait":"pointer", opacity:(!browserOnline || extraLessonPaymentIssueChecking)?.65:1 }}>{extraLessonPaymentIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button> : null}
+              {extraLessonPaymentIssue.state === "not_applied" ? <button onClick={()=>clearExtraLessonPaymentIssue(extraLessonPaymentIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:8, padding:"7px 10px", background:"#fff", color:"#9a3412", fontSize:11, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
+            </div>
           </div>
         ) : null}
         {failedOps.length > 0 ? (
