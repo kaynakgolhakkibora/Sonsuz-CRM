@@ -4450,7 +4450,7 @@ function studentWasActiveAt(student,cutoff) {
   return !student.frozen && !isStudentDeleted(student);
 }
 
-function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth, branch) {
+function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth, branch, singleLessons=[]) {
   const payments = [];
   const normalLessons = [];
   const noShows = [];
@@ -4528,7 +4528,10 @@ function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth
     acc[category] = (acc[category] || 0) + (Number(expense.amount) || 0);
     return acc;
   },{});
-  const revenue = payments.reduce((sum,payment)=>sum+payment.amount,0);
+  const studentRevenue = payments.reduce((sum,payment)=>sum+payment.amount,0);
+  const singleLessonPayments = singleLessonPaymentsForMonth(singleLessons,targetMonth);
+  const singleLessonRevenue = singleLessonPayments.reduce((sum,payment)=>sum+(Number(payment.tutar)||0),0);
+  const revenue = studentRevenue+singleLessonRevenue;
   const expenseTotal = monthExpenses.reduce((sum,expense)=>sum+(Number(expense.amount)||0),0);
   const operational = (students || []).filter(student=>!isStudentDeleted(student));
   const activeStudents = operational.filter(student=>studentWasActiveAt(student,monthEnd));
@@ -4537,7 +4540,7 @@ function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth
   const periodAverage = periodEvaluations.length ? roundedScore(periodEvaluations.reduce((sum,evaluation)=>sum+(Number(evaluation.periodScore)||0),0)/periodEvaluations.length) : null;
 
   return {
-    schemaVersion:1,
+    schemaVersion:2,
     branchCode:branch?.code || CURRENT_BRANCH_CODE,
     branchName:branch?.name || "Bodrum Sonsuz Sanat",
     key:monthReportKey(targetMonth),
@@ -4546,9 +4549,13 @@ function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth
     periodEnd:localDateKey(monthEnd),
     generatedAt:new Date().toISOString(),
     revenue,
+    studentRevenue,
+    singleLessonRevenue,
     expenseTotal,
     netProfit:revenue-expenseTotal,
-    paymentCount:payments.length,
+    paymentCount:payments.length+singleLessonPayments.length,
+    studentPaymentCount:payments.length,
+    singleLessonPaymentCount:singleLessonPayments.length,
     expenseCount:monthExpenses.length,
     expenseCategories:Object.entries(expenseCategories).sort((a,b)=>b[1]-a[1]),
     activeStudentCount:activeStudents.length,
@@ -4691,6 +4698,7 @@ function monthlyReportCanvas(report) {
 
   drawSection("Finans",[
     `${report.paymentCount} ödeme · ${report.expenseCount} gider kaydı`,
+    ...(Number(report.schemaVersion)>=2 ? [`Paket ve Ek Ders: ${(Number(report.studentRevenue)||0).toLocaleString("tr-TR")} TL · Tek Ders: ${(Number(report.singleLessonRevenue)||0).toLocaleString("tr-TR")} TL`] : []),
     report.expenseCategories.length ? "Gider dağılımı: "+report.expenseCategories.map(([category,amount])=>category+" "+amount.toLocaleString("tr-TR")+" TL").join(" · ") : "Bu ay gider kaydı yok",
   ],"#047857");
   drawSection("Dersler",[
@@ -4743,6 +4751,7 @@ function MonthlyReportPreviewSheet({ report, onClose, onDownload, downloading })
       <MiniMetric label="Net Kâr" value={report.netProfit.toLocaleString("tr-TR")+" TL"} tone="special" />
       <MiniMetric label="Ay Sonu Aktif" value={report.activeStudentCount} tone="info" />
     </div>
+    {Number(report.schemaVersion)>=2 ? <div style={{ ...SECTION, padding:"13px 14px" }}><p style={{ margin:"0 0 7px", fontSize:12, fontWeight:800 }}>Gelir Dağılımı</p><p style={{ margin:0, fontSize:12, color:"#64748b", lineHeight:1.6 }}>Paket ve Ek Ders: {(Number(report.studentRevenue)||0).toLocaleString("tr-TR")} TL · Tek Ders: {(Number(report.singleLessonRevenue)||0).toLocaleString("tr-TR")} TL</p></div> : null}
     <div style={{ ...SECTION, padding:"13px 14px" }}><p style={{ margin:"0 0 7px", fontSize:12, fontWeight:800 }}>Dersler</p><p style={{ margin:0, fontSize:12, color:"#64748b", lineHeight:1.6 }}>{report.normalLessonCount} normal · {report.makeupCompletedCount} telafi · {report.extraLessonCount} ek ders · {report.noShowCount} no-show</p></div>
     <div style={{ ...SECTION, padding:"13px 14px" }}><p style={{ margin:"0 0 7px", fontSize:12, fontWeight:800 }}>Öğrenciler</p><p style={{ margin:0, fontSize:12, color:"#64748b", lineHeight:1.6 }}>{report.newStudentCount} yeni kayıt · {report.frozenCount} donduran · {report.leftCount} ayrılan</p></div>
     <div style={{ ...SECTION, padding:"13px 14px" }}><p style={{ margin:"0 0 7px", fontSize:12, fontWeight:800 }}>Eğitim</p><p style={{ margin:0, fontSize:12, color:"#64748b", lineHeight:1.6 }}>Ders ortalaması: {report.lessonAverage===null?"—":fmtNumber(report.lessonAverage)+"/100"} · Dönem ortalaması: {report.periodAverage===null?"—":fmtNumber(report.periodAverage)+"/100"} · {report.pieces.length} parça kaydı</p></div>
@@ -5304,6 +5313,7 @@ export default function App() {
   const [expenses, setExpenses] = useState([]);
   const [singleLessons, setSingleLessons] = useState([]);
   const [singleLessonsLoading, setSingleLessonsLoading] = useState(false);
+  const [singleLessonsLoaded, setSingleLessonsLoaded] = useState(false);
   const [singleLessonSheet, setSingleLessonSheet] = useState(null);
   const [singleLessonSaving, setSingleLessonSaving] = useState(false);
   const [singleLessonBusyIds, setSingleLessonBusyIds] = useState({});
@@ -5825,6 +5835,7 @@ export default function App() {
     const loadSequence = singleLessonLoadSequenceRef.current + 1;
     singleLessonLoadSequenceRef.current = loadSequence;
     setSingleLessonsLoading(true);
+    setSingleLessonsLoaded(false);
     const branchResult = await timedSingleLessonRequest(() => supabase.from("branches").select("id,code,name").eq("code",CURRENT_BRANCH_CODE).single());
     if (loadSequence !== singleLessonLoadSequenceRef.current) return { ok:false, superseded:true };
     if (branchResult.error || !branchResult.data?.id) {
@@ -5848,6 +5859,7 @@ export default function App() {
       return { ok:false, error:lessonResult.error };
     }
     setSingleLessons(lessonResult.data || []);
+    setSingleLessonsLoaded(true);
     if (operationResult.error) {
       console.error("Tek Ders işlem güvenliği doğrulanamadı:",operationResult.error);
       setSingleLessonSecurityReady(false);
@@ -6091,7 +6103,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!giris || !loadedSources.students || !loadedSources.teachers || !loadedSources.expenses || reportInitializationRef.current) return;
+    if (!giris || !loadedSources.students || !loadedSources.teachers || !loadedSources.expenses || !singleLessonsLoaded || reportInitializationRef.current) return;
     reportInitializationRef.current = true;
     const initialize = async () => {
       const branchResult = await supabase.from("branches").select("id,code,name").eq("code",CURRENT_BRANCH_CODE).single();
@@ -6110,7 +6122,7 @@ export default function App() {
       let rows = reportResult.data || [];
       const missingMonths = reportMonthsToEnsure(rows);
       for (const targetMonth of missingMonths) {
-        const snapshot = buildMonthlyInstitutionReport(students,teachers,expenses,targetMonth,branch);
+        const snapshot = buildMonthlyInstitutionReport(students,teachers,expenses,targetMonth,branch,singleLessons);
         const insertResult = await supabase.from("monthly_reports").insert({ branch_id:branch.id, report_month:monthReportDate(targetMonth), report_data:snapshot }).select("*").single();
         if (insertResult.error) {
           const duplicate = String(insertResult.error.code || "") === "23505";
@@ -6132,7 +6144,7 @@ export default function App() {
       console.error("Aylık rapor başlatma hatası:",error);
       pop("Ay sonu raporu hazırlanamadı.",9000);
     });
-  },[giris,loadedSources.students,loadedSources.teachers,loadedSources.expenses,students,teachers,expenses]);
+  },[giris,loadedSources.students,loadedSources.teachers,loadedSources.expenses,singleLessonsLoaded,students,teachers,expenses,singleLessons]);
 
   const handleMonthlyReportDownload = async report => {
     if (!report?.id || downloadingReportId) return;
