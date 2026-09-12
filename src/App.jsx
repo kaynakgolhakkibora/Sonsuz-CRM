@@ -5228,14 +5228,21 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
   );
 }
 
+function isPayableSingleLesson(lesson) {
+  if (!lesson || lesson.deleted_at || lesson.billing_status !== "unpaid" || isTrialSingleLesson(lesson)) return false;
+  if (!["planned","completed"].includes(lesson.lesson_status)) return false;
+  const fee = Number(lesson.fee);
+  return Number.isFinite(fee) && fee > 0;
+}
+
 function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayment, onDelete, busyIds={} }) {
   const [filter, setFilter] = useState("active");
   const visible = lessons
     .filter(lesson=>!lesson.deleted_at)
-    .filter(lesson=>filter==="all" || (filter==="active" && lesson.lesson_status==="planned") || (filter==="unpaid" && lesson.billing_status==="unpaid"))
+    .filter(lesson=>filter==="all" || (filter==="active" && lesson.lesson_status==="planned") || (filter==="unpaid" && isPayableSingleLesson(lesson)))
     .sort((a,b)=>filter==="all" ? new Date(b.starts_at)-new Date(a.starts_at) : new Date(a.starts_at)-new Date(b.starts_at));
   const activeCount = lessons.filter(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned").length;
-  const unpaidCount = lessons.filter(lesson=>!lesson.deleted_at && lesson.billing_status==="unpaid").length;
+  const unpaidCount = lessons.filter(isPayableSingleLesson).length;
   return (
     <div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:14 }}>
@@ -5262,7 +5269,7 @@ function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayme
             <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginTop:13 }}>
               <button disabled={busy} onClick={()=>onEdit(lesson)} style={{ border:"1px solid #ddd6fe", background:"#faf5ff", color:"#6d28d9", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Düzenle</button>
               {lesson.lesson_status==="planned" ? <><button disabled={busy} onClick={()=>onStatus(lesson,"completed")} style={{ border:"none", background:"#dcfce7", color:"#166534", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Yapıldı</button><button disabled={busy} onClick={()=>onStatus(lesson,"no_show")} style={{ border:"none", background:"#fee2e2", color:"#991b1b", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Gelmedi</button><button disabled={busy} onClick={()=>onStatus(lesson,"cancelled")} style={{ border:"none", background:"#f3f4f6", color:"#475569", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>İptal</button></> : <button disabled={busy} onClick={()=>onStatus(lesson,"planned")} style={{ border:"none", background:"#dbeafe", color:"#1d4ed8", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Planlandıya Geri Al</button>}
-              {lesson.billing_status==="unpaid" ? <button disabled={busy} onClick={()=>onPayment(lesson,"paid")} style={{ border:"none", background:"#10b981", color:"#fff", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Ödeme Al</button> : paid ? <button disabled={busy} onClick={()=>onPayment(lesson,"unpaid")} style={{ border:"1px solid #fca5a5", background:"#fff", color:"#b91c1c", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Ödemeyi Geri Al</button> : null}
+              {isPayableSingleLesson(lesson) ? <button disabled={busy} onClick={()=>onPayment(lesson,"paid")} style={{ border:"none", background:"#10b981", color:"#fff", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Ödeme Al</button> : paid ? <button disabled={busy} onClick={()=>onPayment(lesson,"unpaid")} style={{ border:"1px solid #fca5a5", background:"#fff", color:"#b91c1c", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Ödemeyi Geri Al</button> : null}
               <button disabled={busy} onClick={()=>onDelete(lesson)} style={{ marginLeft:"auto", border:"none", background:"#fff1f2", color:"#be123c", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Sil</button>
             </div>
           </div>;
