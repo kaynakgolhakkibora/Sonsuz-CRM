@@ -20,6 +20,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
 const SINGLE_LESSON_ISSUE_KEY = "sonsuz_crm_single_lesson_issue_v1";
 const EXTRA_LESSON_PAYMENT_ISSUE_KEY = "sonsuz_crm_extra_lesson_payment_issue_v1";
+const PACKAGE_PAYMENT_ISSUE_KEY = "sonsuz_crm_package_payment_issue_v1";
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -653,6 +654,34 @@ function extraLessonPaymentIssueMessage(issue) {
   if (issue.state === "not_applied") return "Ek Ders ödemesi Supabase'de bulunamadı. Ödeme oluşmadı; gerekiyorsa işlemi yeniden yapın.";
   if (issue.state === "applied_pending_refresh") return "Ek Ders ödemesi Supabase'e kaydedildi; öğrenci ekranı henüz yenilenemedi. İkinci ödeme göndermeyin.";
   return "Ek Ders ödeme işleminin sonucu henüz kesinleştirilemedi. Sistem ikinci bir ödeme göndermeden Supabase kaydını kontrol edecek.";
+}
+
+function readPackagePaymentIssue() {
+  try {
+    const raw = localStorage.getItem(PACKAGE_PAYMENT_ISSUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" && parsed.operationId ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePackagePaymentIssue(issue) {
+  if (typeof window === "undefined") return false;
+  try {
+    if (issue) localStorage.setItem(PACKAGE_PAYMENT_ISSUE_KEY, JSON.stringify(issue));
+    else localStorage.removeItem(PACKAGE_PAYMENT_ISSUE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function packagePaymentIssueMessage(issue) {
+  if (!issue) return "";
+  if (issue.state === "not_applied") return "Paket ödemesi Supabase'de bulunamadı. Ödeme oluşmadı; gerekiyorsa işlemi yeniden yapın.";
+  if (issue.state === "applied_pending_refresh") return "Paket ödemesi Supabase'e kaydedildi; öğrenci ekranı henüz yenilenemedi. İkinci ödeme göndermeyin.";
+  return "Paket ödeme işleminin sonucu henüz kesinleştirilemedi. Sistem ikinci bir ödeme göndermeden Supabase kaydını kontrol edecek.";
 }
 
 function singleLessonIssueMessage(issue) {
@@ -1855,9 +1884,9 @@ function MiniMetric({ label, value, tone="neutral" }) {
   );
 }
 
-function Btn({ children, onClick, bg="#111", color="#fff", outline=false, mb=8 }) {
+function Btn({ children, onClick, bg="#111", color="#fff", outline=false, mb=8, disabled=false }) {
   return (
-    <button onClick={onClick} style={{ width:"100%", background:outline?"transparent":bg, color:outline?bg:color, border:outline?`2px solid ${bg}`:"none", borderRadius:14, padding:"13px 16px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit", marginBottom:mb, display:"block" }}>
+    <button onClick={onClick} disabled={disabled} style={{ width:"100%", background:outline?"transparent":bg, color:outline?bg:color, border:outline?`2px solid ${bg}`:"none", borderRadius:14, padding:"13px 16px", fontWeight:700, fontSize:14, cursor:disabled?"not-allowed":"pointer", opacity:disabled ? .65 : 1, fontFamily:"inherit", marginBottom:mb, display:"block" }}>
       {children}
     </button>
   );
@@ -2739,7 +2768,7 @@ function studentLinkedSingleLessons(singleLessons, studentId) {
     .sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at));
 }
 
-function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onMesaj, onÖdemeAl, onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -3117,7 +3146,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
       </Sheet>
       {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { onTelafiDone(student.id, id, payload); setTelafiSel(null); }} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => { onMoveOne(student.id, lid, date, time); setShiftSel(null); }} /> : null}
-      {showOdemeAl ? <OdemeAlSheet student={student} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
+      {showOdemeAl ? <OdemeAlSheet student={student} saving={paymentSavingId===student.id} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
       {showResumeProgram ? <ResumeProgramSheet student={student} onClose={() => setShowResumeProgram(false)} onResume={(startDate) => onToggleFreeze(student.id, false, startDate)} /> : null}
@@ -3589,7 +3618,7 @@ function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
   );
 }
 
-function OdemeAlSheet({ student, onClose, onÖdemeAl }) {
+function OdemeAlSheet({ student, onClose, onÖdemeAl, saving=false }) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const packageInfo = currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
   const ekDersler = unpaidEkDersler(student);
@@ -3598,7 +3627,7 @@ function OdemeAlSheet({ student, onClose, onÖdemeAl }) {
   const paketTutar = packageInfo ? (student.ucret||0) * (paketDersSayisi / PAYMENT_PACK_SIZE) : 0;
   const toplam = paketTutar + ekToplam;
   return (
-    <Sheet title="Ödeme Al" subtitle={student.name} onClose={onClose}>
+    <Sheet title="Ödeme Al" subtitle={student.name} onClose={()=>{ if(!saving) onClose(); }}>
       <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
         {packageInfo ? (
           <>
@@ -3612,10 +3641,10 @@ function OdemeAlSheet({ student, onClose, onÖdemeAl }) {
         <p style={{ margin:"10px 0 0", fontSize:15, fontWeight:900, color:"#111" }}>Toplam: {toplam.toLocaleString("tr-TR")} TL</p>
       </div>
       <label style={LBL}>Ödeme Tarihi</label>
-      <input style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+      <input style={INP} type="date" value={date} disabled={saving} onChange={e=>setDate(e.target.value)} />
       <div style={{ marginTop:16 }}>
-        {toplam > 0 ? <Btn bg="#10b981" onClick={() => { onÖdemeAl(student.id, date); onClose(); }}>Ödemeyi Kaydet</Btn> : <p style={{ margin:"0 0 12px", fontSize:13, color:"#999", fontWeight:700, textAlign:"center" }}>Kaydedilecek ödeme yok</p>}
-        <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
+        {toplam > 0 ? <Btn bg="#10b981" disabled={saving} onClick={async() => { if(await onÖdemeAl(student.id, date)) onClose(); }}>{saving ? "Kaydediliyor…" : "Ödemeyi Kaydet"}</Btn> : <p style={{ margin:"0 0 12px", fontSize:13, color:"#999", fontWeight:700, textAlign:"center" }}>Kaydedilecek ödeme yok</p>}
+        <Btn bg="#111" outline disabled={saving} onClick={onClose}>İptal</Btn>
       </div>
     </Sheet>
   );
@@ -4300,7 +4329,7 @@ function BekleyenTelafiler({ students, onStudentClick }) {
   );
 }
 
-function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
+function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, onStudentClick }) {
   const todayMid = midday();
   const [odemeModal, setÖdemeModal] = useState(null);
   const [odemeDate, setÖdemeDate] = useState(new Date().toISOString().split("T")[0]);
@@ -4367,12 +4396,12 @@ function BugünÖdemeleri({ students, onÖdemeAl, onMesaj, onStudentClick }) {
       ) : null}
     </div>
     {odemeModal ? (
-      <Sheet title="Ödeme Alındı" subtitle={odemeModal.name} onClose={() => setÖdemeModal(null)}>
+      <Sheet title="Ödeme Alındı" subtitle={odemeModal.name} onClose={() => { if(paymentSavingId!==odemeModal.id) setÖdemeModal(null); }}>
         <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ödeme tarihi:</p>
-        <input style={INP} type="date" value={odemeDate} onChange={e=>setÖdemeDate(e.target.value)} />
+        <input style={INP} type="date" value={odemeDate} disabled={paymentSavingId===odemeModal.id} onChange={e=>setÖdemeDate(e.target.value)} />
         <div style={{ marginTop:16 }}>
-          <Btn bg="#10b981" onClick={() => { onÖdemeAl(odemeModal.id, odemeDate); setÖdemeModal(null); }}>Kaydet</Btn>
-          <Btn bg="#111" outline onClick={() => setÖdemeModal(null)}>İptal</Btn>
+          <Btn bg="#10b981" disabled={paymentSavingId===odemeModal.id} onClick={async() => { if(await onÖdemeAl(odemeModal.id, odemeDate)) setÖdemeModal(null); }}>{paymentSavingId===odemeModal.id ? "Kaydediliyor…" : "Kaydet"}</Btn>
+          <Btn bg="#111" outline disabled={paymentSavingId===odemeModal.id} onClick={() => setÖdemeModal(null)}>İptal</Btn>
         </div>
       </Sheet>
     ) : null}
@@ -5275,6 +5304,9 @@ export default function App() {
   const [singleLessonSecurityReady, setSingleLessonSecurityReady] = useState(false);
   const [extraLessonPaymentIssue, setExtraLessonPaymentIssue] = useState(() => readExtraLessonPaymentIssue());
   const [extraLessonPaymentIssueChecking, setExtraLessonPaymentIssueChecking] = useState(false);
+  const [packagePaymentIssue, setPackagePaymentIssue] = useState(() => readPackagePaymentIssue());
+  const [packagePaymentIssueChecking, setPackagePaymentIssueChecking] = useState(false);
+  const [paymentSavingId, setPaymentSavingId] = useState("");
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
   const singleLessonBusyIdsRef = useRef({});
   const singleLessonIssueRef = useRef(singleLessonIssue);
@@ -5285,6 +5317,10 @@ export default function App() {
   const extraLessonPaymentWritingRef = useRef(false);
   const extraLessonPaymentCheckingRef = useRef(false);
   const extraLessonPaymentAutoCheckRef = useRef("");
+  const packagePaymentIssueRef = useRef(packagePaymentIssue);
+  const packagePaymentWritingRef = useRef(false);
+  const packagePaymentCheckingRef = useRef(false);
+  const packagePaymentAutoCheckRef = useRef("");
   const [currentBranch, setCurrentBranch] = useState(null);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
@@ -5341,13 +5377,13 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const warnWhileExtraLessonPaymentIsWriting = event => {
-      if (!extraLessonPaymentWritingRef.current) return;
+    const warnWhilePaymentIsWriting = event => {
+      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
-    window.addEventListener("beforeunload",warnWhileExtraLessonPaymentIsWriting);
-    return () => window.removeEventListener("beforeunload",warnWhileExtraLessonPaymentIsWriting);
+    window.addEventListener("beforeunload",warnWhilePaymentIsWriting);
+    return () => window.removeEventListener("beforeunload",warnWhilePaymentIsWriting);
   }, []);
 
   useEffect(() => {
@@ -5741,6 +5777,30 @@ export default function App() {
     writeExtraLessonPaymentIssue(null);
     extraLessonPaymentIssueRef.current = null;
     setExtraLessonPaymentIssue(null);
+  };
+
+  const rememberPackagePaymentIssue = issue => {
+    const stored = {
+      operationId:issue.operationId,
+      studentId:issue.studentId || "",
+      studentName:issue.studentName || "Öğrenci",
+      packageRef:issue.packageRef || "",
+      paidOn:issue.paidOn || "",
+      state:issue.state || "unknown",
+      createdAt:issue.createdAt || new Date().toISOString(),
+    };
+    if (!writePackagePaymentIssue(stored)) return false;
+    packagePaymentIssueRef.current = stored;
+    setPackagePaymentIssue(stored);
+    return true;
+  };
+
+  const clearPackagePaymentIssue = operationId => {
+    const current = packagePaymentIssueRef.current;
+    if (operationId && current?.operationId !== operationId) return;
+    writePackagePaymentIssue(null);
+    packagePaymentIssueRef.current = null;
+    setPackagePaymentIssue(null);
   };
 
   const setSingleLessonRecordBusy = (lessonId, busy) => {
@@ -6670,23 +6730,139 @@ export default function App() {
     return { updated, odemeDate };
   };
 
-  const handleÖdemeKaydet = async (sid, tarih) => {
-    const { updated, odemeDate } = buildPaymentUpdate(students, sid, tarih);
-    const student = updated.find(s=>s.id===sid);
-    const originalStudent = students.find(s=>s.id===sid);
-    const operation = {
-      type:"payment",
-      studentId:sid,
-      studentName:originalStudent?.name || student?.name || "Öğrenci",
-      date:odemeDate,
-      label:(originalStudent?.name || student?.name || "Öğrenci") + " - ödeme kaydı",
-      detail:fmtMed(odemeDate),
-    };
-    setStudents(updated);
+  const reconcilePackagePaymentOperation = async (issue=packagePaymentIssueRef.current, options={}) => {
+    if (!issue?.operationId) return { state:"none" };
+    if (packagePaymentCheckingRef.current) return { state:"checking" };
+    if (!browserOnline) {
+      rememberPackagePaymentIssue({ ...issue, state:"unknown" });
+      if (options.announce !== false) pop("İnternet bağlantısı yok; paket ödemesi henüz kontrol edilemedi.",7000);
+      return { state:"unknown" };
+    }
+    packagePaymentCheckingRef.current = true;
+    setPackagePaymentIssueChecking(true);
     try {
-      await saveStudentWithRetry(student, operation);
-      pop("Ödeme kaydedildi");
-    } catch {}
+      const operationCheck = await timedSingleLessonRequest(() => supabase
+        .from("package_payment_operations")
+        .select("operation_id,student_id")
+        .eq("operation_id",issue.operationId)
+        .maybeSingle());
+      if (operationCheck.error) {
+        rememberPackagePaymentIssue({ ...issue, state:"unknown" });
+        if (options.announce !== false) pop("Paket ödeme işlemi henüz doğrulanamadı; uyarı korunuyor.",8000);
+        return { state:"unknown", error:operationCheck.error };
+      }
+      if (operationCheck.data?.operation_id===issue.operationId) {
+        const studentResult = await timedSingleLessonRequest(() => supabase
+          .from("students").select("*")
+          .eq("id",operationCheck.data.student_id || issue.studentId).single());
+        if (studentResult.error || !studentResult.data?.id) {
+          rememberPackagePaymentIssue({ ...issue, state:"applied_pending_refresh" });
+          if (options.announce !== false) pop("Paket ödemesi Supabase'e kaydedildi; ekran yenilenemedi. Uyarı korunuyor.",8000);
+          return { state:"applied_pending_refresh", error:studentResult.error };
+        }
+        setStudents(current=>current.map(student=>student.id===studentResult.data.id?studentResult.data:student));
+        clearPackagePaymentIssue(issue.operationId);
+        if (options.announce !== false) pop("Paket ödemesi Supabase kaydından doğrulandı.",7000);
+        return { state:"applied" };
+      }
+      await loadStudents();
+      rememberPackagePaymentIssue({ ...issue, state:"not_applied" });
+      if (options.announce !== false) pop("Paket ödemesi oluşmamış; gerekiyorsa işlemi yeniden yapın.",8000);
+      return { state:"not_applied" };
+    } finally {
+      packagePaymentCheckingRef.current = false;
+      setPackagePaymentIssueChecking(false);
+    }
+  };
+
+  const handleÖdemeKaydet = async (sid, tarih) => {
+    if (!isValidLocalDateInput(tarih)) {
+      pop("Geçerli bir ödeme tarihi seçin",5000);
+      return false;
+    }
+    if (paymentSavingId || packagePaymentWritingRef.current) return false;
+    if (packagePaymentIssueRef.current) {
+      pop("Önce bekleyen paket ödeme uyarısını kontrol edin.",7000);
+      return false;
+    }
+    const sourceStudent = students.find(s=>s.id===sid);
+    const packageInfo = sourceStudent ? (currentPaymentDueInfo(sourceStudent) || nextPayablePackageInfo(sourceStudent)) : null;
+    if (!sourceStudent || !packageInfo || ![4,8,12,16].includes(packageInfo.packageSize) || (packageInfo.lessonIds||[]).length!==packageInfo.packageSize) {
+      pop("Ödenecek paket güvenli biçimde belirlenemedi; öğrenci bilgileri yenilendi.",7000);
+      await loadStudents();
+      return false;
+    }
+    const unpaidExtras = unpaidEkDersler(sourceStudent);
+    const operationId = uid();
+    const operation = {
+      operationId,
+      studentId:sid,
+      studentName:sourceStudent.name || "Öğrenci",
+      packageRef:packageInfo.packageId ? "id:"+packageInfo.packageId : "period:"+packageInfo.startKey+":"+packageInfo.endKey,
+      paidOn:tarih,
+      state:"pending",
+      createdAt:new Date().toISOString(),
+    };
+    if (!rememberPackagePaymentIssue(operation)) {
+      pop("Tarayıcı işlem güvenliği hazırlanamadı; paket ödemesi gönderilmedi.",8000);
+      return false;
+    }
+
+    packagePaymentWritingRef.current = true;
+    setPaymentSavingId(sid);
+    try {
+      const result = await timedSingleLessonRequest(() => supabase.rpc("record_package_payment",{
+        p_student_id:sid,
+        p_paid_on:tarih,
+        p_package_id:packageInfo.packageId || null,
+        p_package_index:Number.isInteger(packageInfo.packageIndex) ? packageInfo.packageIndex : null,
+        p_package_lesson_count:packageInfo.packageSize,
+        p_package_lesson_ids:packageInfo.lessonIds || [],
+        p_package_start:packageInfo.startKey,
+        p_package_end:packageInfo.endKey,
+        p_payment_label:packageInfo.donem || "",
+        p_program_snapshot:studentScheduleLabel(sourceStudent),
+        p_extra_lesson_refs:unpaidExtras.map(extraLessonPaymentRef),
+        p_operation_id:operationId,
+      }).single());
+
+      if (!result.error && result.data?.student_record?.id) {
+        const savedStudent = result.data.student_record;
+        const savedPayment = (savedStudent.odemeler||[]).find(payment=>payment.operationId===operationId);
+        const extrasApplied = unpaidExtras.every(extra => (savedStudent.ek_dersler||[]).find(item=>extraLessonPaymentRef(item)===extraLessonPaymentRef(extra))?.odendi);
+        if (savedPayment && extrasApplied) {
+          setStudents(prev=>prev.map(item=>item.id===savedStudent.id?savedStudent:item));
+          clearPackagePaymentIssue(operationId);
+          pop("Ödeme kaydedildi");
+          return true;
+        }
+      }
+
+      const alreadyPaid = String(result.error?.message||"").includes("PACKAGE_ALREADY_PAID");
+      if (alreadyPaid) {
+        await loadStudents();
+        clearPackagePaymentIssue(operationId);
+        pop("Bu paketin ödemesi zaten kayıtlı; ikinci ödeme oluşturulmadı.",7000);
+        return false;
+      }
+      console.error("Paket ödeme yanıtı doğrulanamadı:",result.error);
+      const reconciled = await reconcilePackagePaymentOperation(operation,{ announce:false });
+      if (reconciled.state === "applied") {
+        pop("Paket ödemesi Supabase'de doğrulandı ve ekran yenilendi.",7000);
+        return true;
+      }
+      if (reconciled.state === "applied_pending_refresh") {
+        pop("Paket ödemesi Supabase'e kaydedildi; ekran yenilenemedi. İkinci ödeme göndermeyin.",9000);
+        return true;
+      }
+      pop(reconciled.state === "not_applied"
+        ? "Paket ödemesi kaydedilmedi. İkinci ödeme gönderilmedi; gerekiyorsa yeniden deneyin."
+        : "Paket ödeme işlemi kesinleştirilemedi. İkinci ödeme gönderilmedi; uyarı korunuyor.",9000);
+      return false;
+    } finally {
+      packagePaymentWritingRef.current = false;
+      setPaymentSavingId("");
+    }
   };
 
   const removeFailedOperation = (id) => {
@@ -6702,8 +6878,6 @@ export default function App() {
       let built = null;
       if (op.type === "lessonAction") {
         built = buildActionUpdate([data], op.studentId, op.action, op.note, op.lessonId);
-      } else if (op.type === "payment") {
-        built = buildPaymentUpdate([data], op.studentId, op.date);
       }
       const nextStudent = built?.updated?.[0];
       if (!nextStudent) throw new Error("İşlem tekrar hazırlanamadı");
@@ -7119,6 +7293,10 @@ export default function App() {
     await reconcileExtraLessonPaymentOperation(extraLessonPaymentIssueRef.current,{ announce:true });
   };
 
+  const handlePackagePaymentIssueCheck = async () => {
+    await reconcilePackagePaymentOperation(packagePaymentIssueRef.current,{ announce:true });
+  };
+
   useEffect(() => {
     const issue = extraLessonPaymentIssueRef.current;
     if (!giris || !browserOnline || !issue?.operationId || issue.state === "not_applied" || extraLessonPaymentWritingRef.current) return;
@@ -7127,6 +7305,15 @@ export default function App() {
     extraLessonPaymentAutoCheckRef.current = checkKey;
     void reconcileExtraLessonPaymentOperation(issue,{ announce:true });
   }, [giris,browserOnline,extraLessonPaymentIssue?.operationId,extraLessonPaymentIssue?.state]);
+
+  useEffect(() => {
+    const issue = packagePaymentIssueRef.current;
+    if (!giris || !browserOnline || !issue?.operationId || issue.state === "not_applied" || packagePaymentWritingRef.current) return;
+    const checkKey = issue.operationId+"|online";
+    if (packagePaymentAutoCheckRef.current === checkKey) return;
+    packagePaymentAutoCheckRef.current = checkKey;
+    void reconcilePackagePaymentOperation(issue,{ announce:false });
+  }, [giris,browserOnline,packagePaymentIssue?.operationId,packagePaymentIssue?.state]);
 
   const handleEkDersSil = async (sid, ekId) => {
     let blocked = false;
@@ -7577,6 +7764,18 @@ export default function App() {
             </div>
           </div>
         ) : null}
+        {packagePaymentIssue ? (
+          <div role="alert" style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap", background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:12, padding:"10px 12px", marginBottom:12 }}>
+            <div style={{ minWidth:0, flex:"1 1 280px" }}>
+              <p style={{ margin:0, fontSize:12, fontWeight:850, color:"#9a3412" }}>Paket ödeme kontrolü gerekli · {packagePaymentIssue.studentName}</p>
+              <p style={{ margin:"3px 0 0", fontSize:11, color:"#9a3412", lineHeight:1.45 }}>{packagePaymentIssueMessage(packagePaymentIssue)}</p>
+            </div>
+            <div style={{ display:"flex", gap:7, flexShrink:0 }}>
+              {packagePaymentIssue.state !== "not_applied" ? <button onClick={handlePackagePaymentIssueCheck} disabled={!browserOnline || packagePaymentIssueChecking} style={{ border:"none", borderRadius:8, padding:"7px 10px", background:"#c2410c", color:"#fff", fontSize:11, fontWeight:850, cursor:(!browserOnline || packagePaymentIssueChecking)?"wait":"pointer", opacity:(!browserOnline || packagePaymentIssueChecking)?.65:1 }}>{packagePaymentIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button> : null}
+              {packagePaymentIssue.state === "not_applied" ? <button onClick={()=>clearPackagePaymentIssue(packagePaymentIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:8, padding:"7px 10px", background:"#fff", color:"#9a3412", fontSize:11, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
+            </div>
+          </div>
+        ) : null}
         {failedOps.length > 0 ? (
           <div style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:800, color:"#991b1b" }}>{failedOps.length} işlem kaydedilemedi</p>
@@ -7656,7 +7855,7 @@ export default function App() {
                 })}
               </AçılırBugünBölümü>
             ) : null}
-            <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
+            <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
             {overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
@@ -7776,7 +7975,7 @@ export default function App() {
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
@@ -7788,12 +7987,12 @@ export default function App() {
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
 
       {odemeKaydetModal ? (
-        <Sheet title="Ödeme Alındı" subtitle={odemeKaydetModal.name} onClose={() => setÖdemeKaydetModal(null)}>
+        <Sheet title="Ödeme Alındı" subtitle={odemeKaydetModal.name} onClose={() => { if(paymentSavingId!==odemeKaydetModal.id) setÖdemeKaydetModal(null); }}>
           <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ödeme tarihi:</p>
-          <input style={INP} type="date" value={odemeKaydetDate} onChange={e=>setÖdemeKaydetDate(e.target.value)} />
+          <input style={INP} type="date" value={odemeKaydetDate} disabled={paymentSavingId===odemeKaydetModal.id} onChange={e=>setÖdemeKaydetDate(e.target.value)} />
           <div style={{ marginTop:16 }}>
-            <Btn bg="#10b981" onClick={() => { handleÖdemeKaydet(odemeKaydetModal.id, odemeKaydetDate); setÖdemeKaydetModal(null); }}>Kaydet</Btn>
-            <Btn bg="#111" outline onClick={() => setÖdemeKaydetModal(null)}>İptal</Btn>
+            <Btn bg="#10b981" disabled={paymentSavingId===odemeKaydetModal.id} onClick={async() => { if(await handleÖdemeKaydet(odemeKaydetModal.id, odemeKaydetDate)) setÖdemeKaydetModal(null); }}>{paymentSavingId===odemeKaydetModal.id ? "Kaydediliyor…" : "Kaydet"}</Btn>
+            <Btn bg="#111" outline disabled={paymentSavingId===odemeKaydetModal.id} onClick={() => setÖdemeKaydetModal(null)}>İptal</Btn>
           </div>
         </Sheet>
       ) : null}
