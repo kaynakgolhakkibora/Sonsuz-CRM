@@ -3619,7 +3619,7 @@ function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
 }
 
 function OdemeAlSheet({ student, onClose, onÖdemeAl, saving=false }) {
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(turkeyDateKey());
   const packageInfo = currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
   const ekDersler = unpaidEkDersler(student);
   const ekToplam = ekDersler.reduce((sum,e)=>sum+(e.fee||ekDersFee(student)),0);
@@ -4332,7 +4332,7 @@ function BekleyenTelafiler({ students, onStudentClick }) {
 function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, onStudentClick }) {
   const todayMid = midday();
   const [odemeModal, setÖdemeModal] = useState(null);
-  const [odemeDate, setÖdemeDate] = useState(new Date().toISOString().split("T")[0]);
+  const [odemeDate, setÖdemeDate] = useState(turkeyDateKey());
 
   const ödemeInfo = (student) => currentPaymentDueInfo(student);
   const bugünÖdeme = students.filter(s => {
@@ -4365,7 +4365,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, o
               </div>
               <div style={{ display:"flex", gap:6 }}>
                 <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgIlkDersÖdeme(s)),"_blank"); else onMesaj(s); }} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Mesaj</button>
-                <button onClick={() => { setÖdemeDate(new Date().toISOString().split("T")[0]); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
+                <button onClick={() => { setÖdemeDate(turkeyDateKey()); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
               </div>
             </div>
             );
@@ -4387,7 +4387,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, o
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma()),"_blank"); }} style={{ background:"#dcfce7", color:"#166534", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 1</button>
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma2(s)),"_blank"); }} style={{ background:"#fef9c3", color:"#854d0e", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 2</button>
                   <button onClick={() => { const p=s.phone?s.phone.replace(/[^0-9]/g,""):""; if(p) window.open("https://wa.me/"+p+"?text="+encodeURIComponent(msgÖdemeHatirlatma3(s)),"_blank"); }} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>WA 3</button>
-                  <button onClick={() => { setÖdemeDate(new Date().toISOString().split("T")[0]); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
+                  <button onClick={() => { setÖdemeDate(turkeyDateKey()); setÖdemeModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Yapıldı</button>
                 </div>
               </div>
             );
@@ -5376,7 +5376,7 @@ export default function App() {
   const [summaryOpeningId, setSummaryOpeningId] = useState(null);
   const [odemeSt, setÖdemeSt] = useState(null);
   const [odemeKaydetModal, setÖdemeKaydetModal] = useState(null);
-  const [odemeKaydetDate, setÖdemeKaydetDate] = useState(new Date().toISOString().split("T")[0]);
+  const [odemeKaydetDate, setÖdemeKaydetDate] = useState(turkeyDateKey());
   const [search, setSearch] = useState("");
   const [failedOps, setFailedOps] = useState(() => readFailedOps());
   const [retryingOps, setRetryingOps] = useState({});
@@ -7953,7 +7953,7 @@ export default function App() {
                       </div>
                       <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:10, flexShrink:0 }}>
                         <button onClick={()=>s.frozen ? setDetailSt(s) : setActionModal({student:s,lessonId:null})} style={{ background:left?"#ffe4e6":s.frozen?"#e0f2fe":"#111", color:left?"#be123c":s.frozen?"#0369a1":"#fff", border:"none", borderRadius:10, padding:"8px 12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>{left ? "Görüntüle" : s.frozen ? "Devam" : "İşlem"}</button>
-                        {payDue ? <button onClick={()=>setÖdemeKaydetModal(s)} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:800, cursor:"pointer", flexShrink:0 }}>💳</button> : null}
+                        {payDue ? <button onClick={()=>{ setÖdemeKaydetDate(turkeyDateKey()); setÖdemeKaydetModal(s); }} style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:10, padding:"8px 10px", fontSize:12, fontWeight:800, cursor:"pointer", flexShrink:0 }}>💳</button> : null}
                         <button onClick={()=>setMesajSt(s)} style={{ background:"#ecfdf5", color:"#166534", border:"1px solid #bbf7d0", borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer", flexShrink:0 }}>💬</button>
                       </div>
                     </div>
