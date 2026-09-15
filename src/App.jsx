@@ -2580,8 +2580,7 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
 }
 
 function EkDersSheet({ student, onClose, onEkDersEkle }) {
-  const now = new Date();
-  const [date, setDate] = useState(now.toISOString().split("T")[0]);
+  const [date, setDate] = useState(turkeyDateKey());
   const [time, setTime] = useState("10:00");
   const [type, setType] = useState("physical");
   const [status, setStatus] = useState("planned");
