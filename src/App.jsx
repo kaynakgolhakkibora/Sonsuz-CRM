@@ -3651,7 +3651,7 @@ function OdemeAlSheet({ student, onClose, onÖdemeAl, saving=false }) {
 
 function ZamSheet({ student, onClose, onSave }) {
   const [fee, setFee] = useState(student.ucret || "");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(turkeyDateKey());
   const next = nextRaiseDate(student);
   return (
     <Sheet title="Zam Yap" subtitle={student.name} onClose={onClose}>
@@ -7155,7 +7155,7 @@ export default function App() {
     const updated = students.map(s => s.id!==sid ? s : {
       ...s,
       ucret: parseInt(fee)||s.ucret||0,
-      last_raise_date: date || new Date().toISOString().split("T")[0]
+      last_raise_date: date || turkeyDateKey()
     });
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
