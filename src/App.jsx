@@ -2663,7 +2663,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
   const info = paymentDisplayInfo(student, payment, index);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [date, setDate] = useState(payment.tarih || new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(payment.tarih || turkeyDateKey());
   const [amount, setAmount] = useState(typeof payment.tutar === "number" ? String(payment.tutar) : "");
   const [startKey, setStartKey] = useState(payment.packageStart || info.startKey || "");
   const [endKey, setEndKey] = useState(payment.packageEnd || payment.packageStart || info.endKey || info.startKey || "");
@@ -5338,6 +5338,7 @@ export default function App() {
   const packagePaymentWritingRef = useRef(false);
   const packagePaymentCheckingRef = useRef(false);
   const packagePaymentAutoCheckRef = useRef("");
+  const protectedDataLoadGenerationRef = useRef(0);
   const [currentBranch, setCurrentBranch] = useState(null);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
@@ -5708,8 +5709,9 @@ export default function App() {
     persistFailedOps([nextOp, ...failedOps.filter(op => op.id !== nextOp.id)]);
   };
 
-  const loadStudents = async () => {
+  const loadStudents = async (expectedGeneration=protectedDataLoadGenerationRef.current) => {
     const { data, error } = await supabase.from("students").select("*").order("created_at");
+    if (expectedGeneration !== protectedDataLoadGenerationRef.current) return { ok:false, superseded:true };
     if (!error && data) {
       setStudents(data.map(s => ({ ...s, record_version: typeof s.record_version === "number" ? s.record_version : 0 })));
       setLoadedSources(current=>({ ...current, students:true }));
@@ -5719,10 +5721,12 @@ export default function App() {
       pop("Veriler yüklenemedi. Bağlantı veya Supabase yetkisini kontrol et.", 6000);
     }
     setLoading(false);
+    return { ok:!error, data:data || [], error };
   };
 
-  const loadTeachers = async () => {
+  const loadTeachers = async (expectedGeneration=protectedDataLoadGenerationRef.current) => {
     const { data, error } = await supabase.from("teachers").select("*").order("name");
+    if (expectedGeneration !== protectedDataLoadGenerationRef.current) return { ok:false, superseded:true };
     if (!error && data) {
       setTeachers(data);
       setLoadedSources(current=>({ ...current, teachers:true }));
@@ -5731,10 +5735,12 @@ export default function App() {
       console.error("Öğretmen listesi yükleme hatası:", error);
       pop("Öğretmen listesi yüklenemedi. v58 Supabase SQL dosyasını kontrol edin.", 8000);
     }
+    return { ok:!error, data:data || [], error };
   };
 
-  const loadExpenses = async () => {
+  const loadExpenses = async (expectedGeneration=protectedDataLoadGenerationRef.current) => {
     const { data, error } = await supabase.from("expenses").select("*").order("expense_date");
+    if (expectedGeneration !== protectedDataLoadGenerationRef.current) return { ok:false, superseded:true };
     if (!error && data) {
       setExpenses(data);
       setLoadedSources(current=>({ ...current, expenses:true }));
@@ -5743,6 +5749,7 @@ export default function App() {
       console.error("Gider listesi yükleme hatası:", error);
       pop("Giderler yüklenemedi. v61 Supabase SQL dosyasını çalıştırdığınızdan emin olun.", 8000);
     }
+    return { ok:!error, data:data || [], error };
   };
 
   const rememberSingleLessonIssue = issue => {
@@ -5872,8 +5879,39 @@ export default function App() {
     return { ok:true, data:lessonResult.data || [] };
   };
 
-  useEffect(() => { loadStudents(); loadTeachers(); loadExpenses(); document.title = "Sonsuz Sanat CRM"; }, []);
-  useEffect(() => { if (giris) loadSingleLessons(); }, [giris]);
+  useEffect(() => { document.title = "Sonsuz Sanat CRM"; }, []);
+  useEffect(() => {
+    const generation = protectedDataLoadGenerationRef.current + 1;
+    protectedDataLoadGenerationRef.current = generation;
+    if (!giris) {
+      singleLessonLoadSequenceRef.current += 1;
+      reportInitializationRef.current = false;
+      setStudents([]);
+      setTeachers([]);
+      setExpenses([]);
+      setSingleLessons([]);
+      setSingleLessonsLoaded(false);
+      setSingleLessonsLoading(false);
+      setSingleLessonSecurityReady(false);
+      setCurrentBranch(null);
+      setMonthlyReports([]);
+      setLoadedSources({ students:false, teachers:false, expenses:false });
+      setLoading(true);
+      setDetailSt(null);
+      setActionModal(null);
+      setMesajSt(null);
+      setÖdemeSt(null);
+      setÖdemeKaydetModal(null);
+      setSingleLessonSheet(null);
+      return;
+    }
+    setLoading(true);
+    setLoadedSources({ students:false, teachers:false, expenses:false });
+    loadStudents(generation);
+    loadTeachers(generation);
+    loadExpenses(generation);
+    loadSingleLessons();
+  }, [giris]);
 
   const reconcileSingleLessonOperation = async (operation, attempts=1) => {
     if (!operation?.operationId) return { state:"unknown", data:null };
