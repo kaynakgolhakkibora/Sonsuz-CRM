@@ -6490,7 +6490,7 @@ export default function App() {
   };
 
   const handleStudentLeft = async (sid) => {
-    const leftAt = new Date().toISOString().split("T")[0];
+    const leftAt = turkeyDateKey();
     const updated = students.map(s => s.id!==sid ? s : withStatusEvent({ ...s, frozen:true, left_at:leftAt }, "left", leftAt));
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
@@ -6609,7 +6609,7 @@ export default function App() {
     const source = students.find(student=>student.id===sid);
     if (!source) return false;
     const deletedAt = new Date().toISOString();
-    const archived = withStatusEvent({ ...source, frozen:true, left_at:dateKey(deletedAt) }, "deleted", deletedAt);
+    const archived = withStatusEvent({ ...source, frozen:true, left_at:turkeyDateKey(deletedAt) }, "deleted", deletedAt);
     setStudents(prev=>prev.map(student=>student.id===sid?archived:student));
     try {
       await saveStudent(archived);
