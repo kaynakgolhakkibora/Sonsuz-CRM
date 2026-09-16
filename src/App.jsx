@@ -2301,7 +2301,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
   const previousHomework = homeworkForTelafiCheck(student, record);
   const checkedHomework = homeworkCheckedInOccurrence(student, telafiCheckRef);
   const homeworkToEvaluate = previousHomework || checkedHomework;
-  const plannedDate = plannedAt ? dateKey(plannedAt) : new Date().toISOString().split("T")[0];
+  const plannedDate = plannedAt ? dateKey(plannedAt) : turkeyDateKey();
   const plannedTime = plannedAt ? timeFromISO(plannedAt) : (student?.time || "10:00");
   const [step, setStep] = useState(plannedAt || record.done ? "main" : "plan");
   const [date, setDate] = useState(plannedDate);
@@ -3158,7 +3158,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
 }
 
 function AddSheet({ teachers, onClose, onAdd }) {
-  const todayISO = new Date().toISOString().split("T")[0];
+  const todayISO = turkeyDateKey();
   const firstTeacher = teachers.find(t => t.active);
   const [f, setF] = useState({ name:"", teacher_id:firstTeacher?.id || "", phone:"", veli_adi:"", dogum_tarihi:"", lesson_start_date:todayISO, instrument:"Davul", lessonDuration:45, lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"", last_raise_date:"" });
   const [saving, setSaving] = useState(false);
@@ -6653,7 +6653,7 @@ export default function App() {
   };
 
   const handleAdd = async (f) => {
-    const from = new Date((f.firstDate||new Date().toISOString().split("T")[0])+"T12:00:00");
+    const from = new Date((f.firstDate||turkeyDateKey())+"T12:00:00");
     const slots = normalizeSlots(f.lessonSlots);
     const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
     const teacher = teachers.find(t => t.id === f.teacher_id);
