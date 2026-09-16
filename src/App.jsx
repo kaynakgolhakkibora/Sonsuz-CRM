@@ -2503,7 +2503,7 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
   const [f, setF] = useState({
     name: student.name,
     teacher_id: currentTeacherId,
-    teacher_change_date: new Date().toISOString().split("T")[0],
+    teacher_change_date: turkeyDateKey(),
     phone: student.phone || "",
     veli_adi: student.veli_adi || "",
     dogum_tarihi: student.dogum_tarihi || "",
@@ -7123,8 +7123,8 @@ export default function App() {
         teacher_history: (s.teacher_id || teachers.find(t => t.name === studentTeacherName(s))?.id) === selectedTeacher.id
           ? (s.teacher_history || [])
           : [
-              ...(s.teacher_history || []).filter(entry => dateKey(entry.from) !== (f.teacher_change_date || new Date().toISOString().split("T")[0])),
-              { teacherId:selectedTeacher.id, teacherName:selectedTeacher.name, from:f.teacher_change_date || new Date().toISOString().split("T")[0] }
+              ...(s.teacher_history || []).filter(entry => dateKey(entry.from) !== (f.teacher_change_date || turkeyDateKey())),
+              { teacherId:selectedTeacher.id, teacherName:selectedTeacher.name, from:f.teacher_change_date || turkeyDateKey() }
             ].sort((a,b)=>dateKey(a.from).localeCompare(dateKey(b.from))),
         phone: f.phone,
         veli_adi: f.veli_adi||"",
