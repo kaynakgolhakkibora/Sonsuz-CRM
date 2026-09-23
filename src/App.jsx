@@ -1771,7 +1771,7 @@ function isPaymentDue(student) {
 }
 
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
-const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
+const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"];
 const FOCUS_SECTIONS = ["Teknik çalışma","Ritim","Nota okuma","Parça çalışması","Doğaçlama","Teori","Tekrar"];
 const EXPENSE_CATEGORIES = ["Kira","Elektrik","Su","İnternet","Öğretmen/Personel","Muhasebe/Vergi","Malzeme","Reklam","Diğer"];
 const TIMES = [];
