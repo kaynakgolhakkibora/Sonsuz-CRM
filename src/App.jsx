@@ -955,8 +955,6 @@ function buildGoogleCalendarICS(students, singleLessons=[]) {
   return { content: lines.join("\r\n"), count: events.length };
 }
 
-const CALENDAR_FEED_VERSION = "2026-06-18-v17";
-
 function downloadGoogleCalendarICS(students, singleLessons=[]) {
   const { content, count } = buildGoogleCalendarICS(students,singleLessons);
   const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
@@ -7464,16 +7462,6 @@ export default function App() {
     pop(count ? count + " ders Google Takvim dosyasına aktarıldı" : "Aktarılacak ders bulunamadı");
   };
 
-  const handleCalendarLinkCopy = async () => {
-    const url = window.location.origin + "/api/calendar?v=" + CALENDAR_FEED_VERSION;
-    try {
-      await navigator.clipboard.writeText(url);
-      pop("Takvim abonelik linki kopyalandı");
-    } catch {
-      window.prompt("Google Takvim'e URL ile ekle:", url);
-    }
-  };
-
   const handleTeacherAdd = async (name) => {
     const cleanName = name.trim();
     if (!cleanName) return false;
@@ -7784,7 +7772,6 @@ export default function App() {
         </nav>
         <div className="crm-sidebar-bottom">
           <div className="crm-tip"><strong>Bugünün özeti</strong>{stats.active} aktif öğrenci · {stats.odeme} ödeme bekliyor · {telafiWarnList.length} telafi uyarısı.</div>
-          <button className="crm-side-action" onClick={handleCalendarLinkCopy}>⌁ Takvim linkini kopyala</button>
           <button className="crm-side-action" onClick={handleGoogleCalendarExport}>⇧ Google Takvim'e aktar</button>
         </div>
       </aside>
