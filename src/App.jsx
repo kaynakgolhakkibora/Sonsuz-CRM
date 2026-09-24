@@ -5323,6 +5323,7 @@ export default function App() {
   const [packagePaymentIssueChecking, setPackagePaymentIssueChecking] = useState(false);
   const [paymentSavingId, setPaymentSavingId] = useState("");
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
+  const [connectionRevalidationRequired, setConnectionRevalidationRequired] = useState(false);
   const singleLessonBusyIdsRef = useRef({});
   const singleLessonIssueRef = useRef(singleLessonIssue);
   const singleLessonLoadSequenceRef = useRef(0);
@@ -5336,11 +5337,14 @@ export default function App() {
   const packagePaymentWritingRef = useRef(false);
   const packagePaymentCheckingRef = useRef(false);
   const packagePaymentAutoCheckRef = useRef("");
+  const connectionAutoRetryRef = useRef(false);
   const protectedDataLoadGenerationRef = useRef(0);
   const [currentBranch, setCurrentBranch] = useState(null);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
   const [loadedSources, setLoadedSources] = useState({ students:false, teachers:false, expenses:false });
+  const [protectedDataLoadIssues, setProtectedDataLoadIssues] = useState({ students:false, teachers:false, expenses:false });
+  const [protectedDataRetrying, setProtectedDataRetrying] = useState(false);
   const reportInitializationRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [actionModal, setActionModal] = useState(null);
@@ -5382,7 +5386,22 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const online = () => setBrowserOnline(true);
-    const offline = () => setBrowserOnline(false);
+    const offline = () => {
+      setBrowserOnline(false);
+      setConnectionRevalidationRequired(true);
+      connectionAutoRetryRef.current = false;
+      protectedDataLoadGenerationRef.current += 1;
+      singleLessonLoadSequenceRef.current += 1;
+      setLoading(false);
+      setDetailSt(null);
+      setActionModal(null);
+      setMesajSt(null);
+      setÖdemeSt(null);
+      setÖdemeKaydetModal(null);
+      setSingleLessonSheet(null);
+      setShowAdd(false);
+      pendingSingleLessonCreateRef.current = null;
+    };
     window.addEventListener("online",online);
     window.addEventListener("offline",offline);
     return () => {
@@ -5707,48 +5726,130 @@ export default function App() {
     persistFailedOps([nextOp, ...failedOps.filter(op => op.id !== nextOp.id)]);
   };
 
+  const protectedSourceLabel = source => ({
+    students:"öğrenci kayıtları",
+    teachers:"öğretmen listesi",
+    expenses:"gider kayıtları",
+  })[source] || "gerekli kayıtlar";
+
+  const requireProtectedSources = (sources, actionLabel="Bu işlem") => {
+    const missing = sources.filter(source=>!loadedSources[source]);
+    if (!missing.length) return true;
+    pop(actionLabel+", "+missing.map(protectedSourceLabel).join(" ve ")+" Supabase'den doğrulanmadan yapılamaz. Üstteki Yeniden Kontrol Et düğmesini kullanın.",8000);
+    return false;
+  };
+
   const loadStudents = async (expectedGeneration=protectedDataLoadGenerationRef.current) => {
-    const { data, error } = await supabase.from("students").select("*").order("created_at");
+    let data = null;
+    let error = null;
+    try {
+      const result = await timedSingleLessonRequest(() => supabase.from("students").select("*").order("created_at"));
+      data = result.data;
+      error = result.error;
+    } catch (caught) {
+      error = caught;
+    }
     if (expectedGeneration !== protectedDataLoadGenerationRef.current) return { ok:false, superseded:true };
-    if (!error && data) {
+    if (!error && Array.isArray(data)) {
       setStudents(data.map(s => ({ ...s, record_version: typeof s.record_version === "number" ? s.record_version : 0 })));
       setLoadedSources(current=>({ ...current, students:true }));
-    }
-    if (error) {
+      setProtectedDataLoadIssues(current=>({ ...current, students:false }));
+    } else {
+      setStudents([]);
+      setDetailSt(null);
+      setActionModal(null);
+      setÖdemeSt(null);
+      setÖdemeKaydetModal(null);
+      setShowAdd(false);
+      setLoadedSources(current=>({ ...current, students:false }));
+      setProtectedDataLoadIssues(current=>({ ...current, students:true }));
       console.error("Veri yükleme hatası:", error);
       pop("Veriler yüklenemedi. Bağlantı veya Supabase yetkisini kontrol et.", 6000);
     }
-    setLoading(false);
-    return { ok:!error, data:data || [], error };
+    return { ok:!error && Array.isArray(data), data:data || [], error:error || null };
   };
 
   const loadTeachers = async (expectedGeneration=protectedDataLoadGenerationRef.current) => {
-    const { data, error } = await supabase.from("teachers").select("*").order("name");
+    let data = null;
+    let error = null;
+    try {
+      const result = await timedSingleLessonRequest(() => supabase.from("teachers").select("*").order("name"));
+      data = result.data;
+      error = result.error;
+    } catch (caught) {
+      error = caught;
+    }
     if (expectedGeneration !== protectedDataLoadGenerationRef.current) return { ok:false, superseded:true };
-    if (!error && data) {
+    if (!error && Array.isArray(data)) {
       setTeachers(data);
       setLoadedSources(current=>({ ...current, teachers:true }));
-    }
-    if (error) {
+      setProtectedDataLoadIssues(current=>({ ...current, teachers:false }));
+    } else {
+      setTeachers([]);
+      setLoadedSources(current=>({ ...current, teachers:false }));
+      setProtectedDataLoadIssues(current=>({ ...current, teachers:true }));
       console.error("Öğretmen listesi yükleme hatası:", error);
       pop("Öğretmen listesi yüklenemedi. v58 Supabase SQL dosyasını kontrol edin.", 8000);
     }
-    return { ok:!error, data:data || [], error };
+    return { ok:!error && Array.isArray(data), data:data || [], error:error || null };
   };
 
   const loadExpenses = async (expectedGeneration=protectedDataLoadGenerationRef.current) => {
-    const { data, error } = await supabase.from("expenses").select("*").order("expense_date");
+    let data = null;
+    let error = null;
+    try {
+      const result = await timedSingleLessonRequest(() => supabase.from("expenses").select("*").order("expense_date"));
+      data = result.data;
+      error = result.error;
+    } catch (caught) {
+      error = caught;
+    }
     if (expectedGeneration !== protectedDataLoadGenerationRef.current) return { ok:false, superseded:true };
-    if (!error && data) {
+    if (!error && Array.isArray(data)) {
       setExpenses(data);
       setLoadedSources(current=>({ ...current, expenses:true }));
-    }
-    if (error) {
+      setProtectedDataLoadIssues(current=>({ ...current, expenses:false }));
+    } else {
+      setExpenses([]);
+      setLoadedSources(current=>({ ...current, expenses:false }));
+      setProtectedDataLoadIssues(current=>({ ...current, expenses:true }));
       console.error("Gider listesi yükleme hatası:", error);
       pop("Giderler yüklenemedi. v61 Supabase SQL dosyasını çalıştırdığınızdan emin olun.", 8000);
     }
-    return { ok:!error, data:data || [], error };
+    return { ok:!error && Array.isArray(data), data:data || [], error:error || null };
   };
+
+  const handleProtectedDataRetry = async (forceAll=false) => {
+    if (protectedDataRetrying || !browserOnline) return;
+    const sources = forceAll
+      ? Object.keys(loadedSources)
+      : Object.keys(loadedSources).filter(source=>protectedDataLoadIssues[source] || !loadedSources[source]);
+    const singleLessonLoadBlocked = !singleLessonsLoaded || !singleLessonSecurityReady || ["load","setup","security"].includes(singleLessonIssueRef.current?.kind);
+    if (!sources.length && !singleLessonLoadBlocked && !forceAll) return;
+    const generation = protectedDataLoadGenerationRef.current + 1;
+    protectedDataLoadGenerationRef.current = generation;
+    setProtectedDataRetrying(true);
+    try {
+      const retryLoads = [];
+      if (sources.includes("students")) retryLoads.push(loadStudents(generation));
+      if (sources.includes("teachers")) retryLoads.push(loadTeachers(generation));
+      if (sources.includes("expenses")) retryLoads.push(loadExpenses(generation));
+      if (singleLessonLoadBlocked || forceAll) retryLoads.push(loadSingleLessons());
+      const results = await Promise.all(retryLoads);
+      if (results.length && results.every(result=>result.ok)) {
+        setConnectionRevalidationRequired(false);
+        pop("CRM verileri Supabase'den yeniden yüklendi.",6000);
+      }
+    } finally {
+      setProtectedDataRetrying(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!giris || loading || !browserOnline || !connectionRevalidationRequired || protectedDataRetrying || connectionAutoRetryRef.current) return;
+    connectionAutoRetryRef.current = true;
+    handleProtectedDataRetry(true);
+  }, [giris,loading,browserOnline,connectionRevalidationRequired,protectedDataRetrying]);
 
   const rememberSingleLessonIssue = issue => {
     const stored = {
@@ -5894,6 +5995,10 @@ export default function App() {
       setCurrentBranch(null);
       setMonthlyReports([]);
       setLoadedSources({ students:false, teachers:false, expenses:false });
+      setProtectedDataLoadIssues({ students:false, teachers:false, expenses:false });
+      setProtectedDataRetrying(false);
+      setConnectionRevalidationRequired(!browserOnline);
+      connectionAutoRetryRef.current = false;
       setLoading(true);
       setDetailSt(null);
       setActionModal(null);
@@ -5904,11 +6009,24 @@ export default function App() {
       return;
     }
     setLoading(true);
+    setConnectionRevalidationRequired(!browserOnline);
+    connectionAutoRetryRef.current = false;
     setLoadedSources({ students:false, teachers:false, expenses:false });
-    loadStudents(generation);
-    loadTeachers(generation);
-    loadExpenses(generation);
-    loadSingleLessons();
+    setProtectedDataLoadIssues({ students:false, teachers:false, expenses:false });
+    setProtectedDataRetrying(false);
+    Promise.all([
+      loadStudents(generation),
+      loadTeachers(generation),
+      loadExpenses(generation),
+      loadSingleLessons(),
+    ]).then(results=>{
+      if (generation === protectedDataLoadGenerationRef.current && results.every(result=>result.ok)) {
+        setConnectionRevalidationRequired(false);
+        connectionAutoRetryRef.current = true;
+      }
+    }).finally(()=>{
+      if (generation === protectedDataLoadGenerationRef.current) setLoading(false);
+    });
   }, [giris]);
 
   const reconcileSingleLessonOperation = async (operation, attempts=1) => {
@@ -6247,6 +6365,7 @@ export default function App() {
   };
 
   const saveStudent = async (student) => {
+    if (!requireProtectedSources(["students"],"Öğrenci kaydı")) throw new Error("STUDENTS_NOT_LOADED");
     const currentVersion = typeof student.record_version === "number" ? student.record_version : 0;
     const writeId = uid();
     const nextVersion = currentVersion + 1;
@@ -6689,6 +6808,7 @@ export default function App() {
   };
 
   const handleAdd = async (f) => {
+    if (!requireProtectedSources(["students","teachers"],"Öğrenci ekleme")) return null;
     const from = new Date((f.firstDate||turkeyDateKey())+"T12:00:00");
     const slots = normalizeSlots(f.lessonSlots);
     const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
@@ -6831,6 +6951,7 @@ export default function App() {
   };
 
   const handleÖdemeKaydet = async (sid, tarih) => {
+    if (!requireProtectedSources(["students"],"Paket ödemesi")) return false;
     if (!isValidLocalDateInput(tarih)) {
       pop("Geçerli bir ödeme tarihi seçin",5000);
       return false;
@@ -7103,6 +7224,7 @@ export default function App() {
   };
 
   const handleDuzenle = async (sid, f) => {
+    if (!requireProtectedSources(["students","teachers"],"Öğrenci düzenleme")) return false;
     const slots = normalizeSlots(f.lessonSlots, f.day, f.time);
     const duration = parseInt(f.lessonDuration)||45;
     const selectedTeacher = teachers.find(t => t.id === f.teacher_id);
@@ -7253,6 +7375,7 @@ export default function App() {
   };
 
   const handleEkDersOdeme = async (sid, selectedExtra, tarih) => {
+    if (!requireProtectedSources(["students"],"Ek Ders ödemesi")) return false;
     if (!isValidLocalDateInput(tarih)) {
       pop("Geçerli bir ödeme tarihi seçin",5000);
       return false;
@@ -7463,6 +7586,7 @@ export default function App() {
   };
 
   const handleTeacherAdd = async (name) => {
+    if (!requireProtectedSources(["teachers"],"Öğretmen ekleme")) return false;
     const cleanName = name.trim();
     if (!cleanName) return false;
     if (teachers.some(t => t.name.toLocaleLowerCase("tr-TR") === cleanName.toLocaleLowerCase("tr-TR"))) {
@@ -7481,6 +7605,7 @@ export default function App() {
   };
 
   const handleTeacherToggle = async (teacher) => {
+    if (!requireProtectedSources(["teachers"],"Öğretmen durumu değişikliği")) return false;
     if (teacher.active && teachers.filter(t=>t.active).length <= 1) {
       pop("En az bir aktif öğretmen kalmalıdır", 5000);
       return;
@@ -7498,6 +7623,7 @@ export default function App() {
   };
 
   const handleExpenseAdd = async expense => {
+    if (!requireProtectedSources(["expenses"],"Gider kaydı")) return false;
     const payload = {
       title:expense.title,
       category:expense.category,
@@ -7520,6 +7646,7 @@ export default function App() {
   };
 
   const handleExpenseRemove = async (expense, targetMonth) => {
+    if (!requireProtectedSources(["expenses"],"Gider değişikliği")) return false;
     const updatedAt = new Date().toISOString();
     const changes = expense.is_recurring
       ? { recurring_until:localDateKey(new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 0)), updated_at:updatedAt }
@@ -7576,6 +7703,12 @@ export default function App() {
     gelir:{ eyebrow:"Finansal Görünüm", title:"Finans", subtitle:"Tahsilat, gider ve net kârını aylık olarak takip et." },
     ozet:{ eyebrow:"AYLIK YÖNETİM", title:"Kurum özeti", subtitle:"Ders, gelir, kayıt, öğrenci durumu ve öğretmen dağılımını ay ay izle." },
   }[mainTab];
+  const protectedDataIssueLabels = Object.keys(protectedDataLoadIssues)
+    .filter(source=>protectedDataLoadIssues[source])
+    .map(protectedSourceLabel);
+  const singleLessonLoadBlocked = !singleLessonsLoaded || !singleLessonSecurityReady;
+  if (singleLessonLoadBlocked && !protectedDataIssueLabels.includes("Tek Ders kayıtları")) protectedDataIssueLabels.push("Tek Ders kayıtları");
+  const operationalDataReady = browserOnline && !connectionRevalidationRequired && loadedSources.students && loadedSources.teachers && loadedSources.expenses && !singleLessonLoadBlocked;
 
   if (!giris) {
     return (
@@ -7747,6 +7880,25 @@ export default function App() {
         <div>
           <div className="crm-loading-mark">S</div>
           <p style={{ fontWeight:750, color:"#77717d" }}>Çalışma alanın hazırlanıyor...</p>
+        </div>
+      </div>
+      </>
+    );
+  }
+
+  if (!operationalDataReady) {
+    return (
+      <>
+      <style>{MIZAN_UI_CSS}</style>
+      <div className="crm-loading">
+        <div style={{ width:"min(460px,calc(100vw - 32px))", background:"#fff", border:"1.5px solid #fca5a5", borderRadius:18, padding:"26px", boxShadow:"0 18px 50px rgba(127,29,29,.10)" }}>
+          <div className="crm-loading-mark">S</div>
+          <h2 style={{ margin:"16px 0 8px", color:"#991b1b", fontSize:22 }}>{browserOnline ? "CRM verileri doğrulanıyor" : "İnternet bağlantısı kesildi"}</h2>
+          <p style={{ margin:"0 0 8px", color:"#7f1d1d", fontSize:13, fontWeight:650, lineHeight:1.55 }}>{browserOnline ? "Güvenli çalışma için gerekli bütün veriler henüz doğrulanamadı. Hiçbir kurum verisi gösterilmiyor ve işlem yapılamıyor." : "Bağlantı geri gelip bütün CRM verileri Supabase'den yeniden doğrulanana kadar hiçbir kurum verisi gösterilmiyor ve işlem yapılamıyor."}</p>
+          <p style={{ margin:"0 0 16px", color:"#991b1b", fontSize:12, fontWeight:800 }}>Yüklenemeyen: {protectedDataIssueLabels.join(", ") || "CRM kayıtları"}</p>
+          <button onClick={()=>handleProtectedDataRetry(connectionRevalidationRequired)} disabled={!browserOnline || protectedDataRetrying} style={{ width:"100%", border:"none", borderRadius:10, padding:"11px 14px", background:"#dc2626", color:"#fff", fontSize:13, fontWeight:850, cursor:(!browserOnline || protectedDataRetrying)?"wait":"pointer", opacity:(!browserOnline || protectedDataRetrying)?0.65:1 }}>{protectedDataRetrying?"Yeniden Yükleniyor...":"Yeniden Dene"}</button>
+          <button onClick={()=>handleSecureLogout(false)} disabled={authBusy || protectedDataRetrying} style={{ width:"100%", marginTop:9, border:"1px solid #fecaca", borderRadius:10, padding:"10px 14px", background:"#fff", color:"#991b1b", fontSize:12, fontWeight:800, cursor:(authBusy || protectedDataRetrying)?"wait":"pointer" }}>Güvenli çıkış yap</button>
+          <p style={{ margin:"12px 0 0", color:"#991b1b", fontSize:10, fontWeight:650 }}>“Yeniden Dene” yalnızca Supabase'den veri okur; hiçbir ödeme veya değişiklik göndermez.</p>
         </div>
       </div>
       </>
