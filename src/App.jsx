@@ -50,6 +50,22 @@ function authErrorMessage(error) {
   return "Giriş doğrulanamadı. Lütfen tekrar deneyin.";
 }
 
+function accessBranchOptions(context) {
+  const organizations = Array.isArray(context?.organizations) ? context.organizations : [];
+  return organizations.flatMap(organization => {
+    const branches = Array.isArray(organization?.branches) ? organization.branches : [];
+    return branches.map(branch => ({
+      organization,
+      branch,
+      organizationId:organization.id,
+      organizationName:organization.name || "Kurum",
+      branchId:branch.id,
+      branchName:branch.name || "Şube",
+      selectable:branch.selectable === true && branch.active !== false,
+    }));
+  });
+}
+
 async function activeStaffProfile(userId) {
   if (!userId) return null;
   const { data, error } = await supabase
@@ -1830,7 +1846,7 @@ const MIZAN_UI_CSS = `
   .crm-topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px}
   .crm-eyebrow{margin:0 0 8px;color:#9d96a4;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
   .crm-title{margin:0;font-size:clamp(29px,3vw,39px);font-weight:780;letter-spacing:-.045em}.crm-subtitle{margin:7px 0 0;color:var(--crm-muted);font-size:14px}
-  .crm-header-actions{display:flex;gap:10px;padding-top:10px}.crm-primary,.crm-secondary{border:0;border-radius:12px;padding:12px 17px;font-weight:800;cursor:pointer;transition:.2s;white-space:nowrap}.crm-primary{background:var(--crm-purple);color:#fff;box-shadow:0 7px 20px rgba(91,66,214,.18)}.crm-primary:hover{background:var(--crm-purple-dark);transform:translateY(-1px)}.crm-secondary{background:#fff;border:1px solid var(--crm-border)}.crm-secondary:hover{border-color:#c7bfd6;color:var(--crm-purple)}
+  .crm-header-actions{display:flex;gap:10px;padding-top:10px}.crm-primary,.crm-secondary{border:0;border-radius:12px;padding:12px 17px;font-weight:800;cursor:pointer;transition:.2s;white-space:nowrap}.crm-primary{background:var(--crm-purple);color:#fff;box-shadow:0 7px 20px rgba(91,66,214,.18)}.crm-primary:hover{background:var(--crm-purple-dark);transform:translateY(-1px)}.crm-secondary{background:#fff;border:1px solid var(--crm-border)}.crm-secondary:hover{border-color:#c7bfd6;color:var(--crm-purple)}.crm-branch-switch{border:1px solid #ddd6fe;border-radius:12px;padding:10px 13px;background:#fff;color:#5b42d6;font:800 12px inherit;cursor:pointer;white-space:nowrap;max-width:190px;overflow:hidden;text-overflow:ellipsis}
   .crm-page{max-width:1120px}.crm-page>div>div,.crm-page>div>div>div{transition:border-color .2s,box-shadow .2s}
   .crm-mobile-nav{display:none}
   .crm-login{min-height:100vh;display:grid;grid-template-columns:.82fr 1.18fr;background:#fbfaf7}.crm-login-brand{padding:clamp(42px,8vw,120px);display:flex;flex-direction:column;justify-content:center;background:var(--crm-purple);color:#fff;position:relative;overflow:hidden}.crm-login-brand:after{content:"";position:absolute;width:420px;height:420px;border:82px solid rgba(255,255,255,.045);border-radius:50%;right:-220px;bottom:-190px}.crm-login-brand .crm-brand-mark{background:#fff;color:var(--crm-purple);width:52px;height:52px;font-size:25px}.crm-login-brand h1{margin:20px 0 8px;font-size:42px;letter-spacing:-.05em}.crm-login-brand p{max-width:330px;color:rgba(255,255,255,.72);line-height:1.6}.crm-login-panel{display:grid;place-items:center;padding:28px}.crm-login-card{width:min(100%,430px)}.crm-login-card .crm-eyebrow{color:var(--crm-purple)}.crm-login-card h2{margin:0 0 8px;font-size:31px;letter-spacing:-.04em}.crm-login-card>p{margin:0 0 28px;color:var(--crm-muted);font-size:13px}.crm-login-card label{display:block;margin:0 0 7px;color:#756f7a;font-size:11px;font-weight:800}.crm-login-card input{width:100%;border:1px solid #ded9d3;background:#fff;border-radius:11px;padding:13px 14px;outline:none;color:var(--crm-ink)}.crm-login-card input:focus{border-color:var(--crm-purple);box-shadow:0 0 0 3px #eeeafd}.crm-login-card button{width:100%;margin-top:15px;border:0;border-radius:12px;padding:13px;background:var(--crm-purple);color:#fff;font-weight:800;cursor:pointer}
@@ -1843,7 +1859,7 @@ const MIZAN_UI_CSS = `
   .crm-student-info-item{min-width:0;padding:8px 13px;border-left:1px solid #ece8e4;font-size:12px;line-height:1.4}
   .crm-student-info-item:nth-child(3n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+4){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}
   .crm-student-info-label{display:block;margin-bottom:3px;color:#7b7680;font-size:10px;font-weight:850;letter-spacing:.05em;text-transform:uppercase}.crm-student-info-value{display:block;color:#1c1921;font-weight:750;overflow-wrap:anywhere}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(9,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-branch-switch{max-width:105px;padding:9px 10px;font-size:10px}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(9,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -4576,7 +4592,7 @@ function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth
 }
 
 function reportFromRow(row) {
-  return { ...(row?.report_data || {}), id:row?.id, reportMonth:row?.report_month, downloadedAt:row?.downloaded_at || null };
+  return { ...(row?.report_data || {}), id:row?.id, branchId:row?.branch_id || "", reportMonth:row?.report_month, downloadedAt:row?.downloaded_at || null };
 }
 
 function concatPdfBytes(parts) {
@@ -5339,7 +5355,15 @@ export default function App() {
   const packagePaymentAutoCheckRef = useRef("");
   const connectionAutoRetryRef = useRef(false);
   const protectedDataLoadGenerationRef = useRef(0);
+  const accessContextLoadSequenceRef = useRef(0);
+  const monthlyReportLoadSequenceRef = useRef(0);
+  const branchScopedWriteCountRef = useRef(0);
+  const [accessContext, setAccessContext] = useState(null);
+  const [accessContextLoading, setAccessContextLoading] = useState(false);
+  const [accessContextError, setAccessContextError] = useState("");
+  const [activeOrganization, setActiveOrganization] = useState(null);
   const [currentBranch, setCurrentBranch] = useState(null);
+  const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
   const [loadedSources, setLoadedSources] = useState({ students:false, teachers:false, expenses:false });
@@ -5698,11 +5722,30 @@ export default function App() {
     setMfaEnrollment(null);
     setRememberDevice(true);
     setShowSecurityMenu(false);
+    accessContextLoadSequenceRef.current += 1;
+    protectedDataLoadGenerationRef.current += 1;
+    singleLessonLoadSequenceRef.current += 1;
+    monthlyReportLoadSequenceRef.current += 1;
+    setAccessContext(null);
+    setAccessContextLoading(false);
+    setAccessContextError("");
+    setActiveOrganization(null);
+    setCurrentBranch(null);
+    setShowBranchMenu(false);
     setGiris(false);
     setAuthBusy(false);
   };
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
+
+  const runBranchScopedWrite = async task => {
+    branchScopedWriteCountRef.current += 1;
+    try {
+      return await task();
+    } finally {
+      branchScopedWriteCountRef.current = Math.max(0,branchScopedWriteCountRef.current - 1);
+    }
+  };
 
   const openMesaj = (student, initialKey = "") => {
     setMesajInitialKey(initialKey);
@@ -5719,6 +5762,7 @@ export default function App() {
     const nextOp = {
       ...operation,
       id: operation.id || uid(),
+      branchId: operation.branchId || currentBranch?.id || "",
       failedAt: new Date().toISOString(),
       attempts: operation.attempts || MAX_SAVE_RETRIES,
       error: error?.message || "Kayıt doğrulanamadı",
@@ -5739,11 +5783,12 @@ export default function App() {
     return false;
   };
 
-  const loadStudents = async (expectedGeneration=protectedDataLoadGenerationRef.current) => {
+  const loadStudents = async (expectedGeneration=protectedDataLoadGenerationRef.current, branchId=currentBranch?.id) => {
     let data = null;
     let error = null;
     try {
-      const result = await timedSingleLessonRequest(() => supabase.from("students").select("*").order("created_at"));
+      if (!branchId) throw new Error("ACTIVE_BRANCH_REQUIRED");
+      const result = await timedSingleLessonRequest(() => supabase.from("students").select("*").eq("branch_id",branchId).order("created_at"));
       data = result.data;
       error = result.error;
     } catch (caught) {
@@ -5769,11 +5814,12 @@ export default function App() {
     return { ok:!error && Array.isArray(data), data:data || [], error:error || null };
   };
 
-  const loadTeachers = async (expectedGeneration=protectedDataLoadGenerationRef.current) => {
+  const loadTeachers = async (expectedGeneration=protectedDataLoadGenerationRef.current, organizationId=activeOrganization?.id) => {
     let data = null;
     let error = null;
     try {
-      const result = await timedSingleLessonRequest(() => supabase.from("teachers").select("*").order("name"));
+      if (!organizationId) throw new Error("ACTIVE_ORGANIZATION_REQUIRED");
+      const result = await timedSingleLessonRequest(() => supabase.from("teachers").select("*").eq("organization_id",organizationId).order("name"));
       data = result.data;
       error = result.error;
     } catch (caught) {
@@ -5794,11 +5840,12 @@ export default function App() {
     return { ok:!error && Array.isArray(data), data:data || [], error:error || null };
   };
 
-  const loadExpenses = async (expectedGeneration=protectedDataLoadGenerationRef.current) => {
+  const loadExpenses = async (expectedGeneration=protectedDataLoadGenerationRef.current, branchId=currentBranch?.id) => {
     let data = null;
     let error = null;
     try {
-      const result = await timedSingleLessonRequest(() => supabase.from("expenses").select("*").order("expense_date"));
+      if (!branchId) throw new Error("ACTIVE_BRANCH_REQUIRED");
+      const result = await timedSingleLessonRequest(() => supabase.from("expenses").select("*").eq("branch_id",branchId).order("expense_date"));
       data = result.data;
       error = result.error;
     } catch (caught) {
@@ -5821,6 +5868,20 @@ export default function App() {
 
   const handleProtectedDataRetry = async (forceAll=false) => {
     if (protectedDataRetrying || !browserOnline) return;
+    let retryBranch = currentBranch;
+    let retryOrganization = activeOrganization;
+    if (forceAll) {
+      const contextResult = await loadAccessContext({ preserveSelection:true, applySelection:false });
+      if (!contextResult.ok || !contextResult.selectedOption) return;
+      retryBranch = {
+        ...contextResult.selectedOption.branch,
+        id:contextResult.selectedOption.branchId,
+        name:contextResult.selectedOption.branchName,
+        organization_id:contextResult.selectedOption.organizationId,
+      };
+      retryOrganization = contextResult.selectedOption.organization;
+    }
+    if (!retryBranch?.id || !retryOrganization?.id) return;
     const sources = forceAll
       ? Object.keys(loadedSources)
       : Object.keys(loadedSources).filter(source=>protectedDataLoadIssues[source] || !loadedSources[source]);
@@ -5831,10 +5892,10 @@ export default function App() {
     setProtectedDataRetrying(true);
     try {
       const retryLoads = [];
-      if (sources.includes("students")) retryLoads.push(loadStudents(generation));
-      if (sources.includes("teachers")) retryLoads.push(loadTeachers(generation));
-      if (sources.includes("expenses")) retryLoads.push(loadExpenses(generation));
-      if (singleLessonLoadBlocked || forceAll) retryLoads.push(loadSingleLessons());
+      if (sources.includes("students")) retryLoads.push(loadStudents(generation,retryBranch.id));
+      if (sources.includes("teachers")) retryLoads.push(loadTeachers(generation,retryOrganization.id));
+      if (sources.includes("expenses")) retryLoads.push(loadExpenses(generation,retryBranch.id));
+      if (singleLessonLoadBlocked || forceAll) retryLoads.push(loadSingleLessons({ branch:retryBranch }));
       const results = await Promise.all(retryLoads);
       if (results.length && results.every(result=>result.ok)) {
         setConnectionRevalidationRequired(false);
@@ -5846,10 +5907,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!giris || loading || !browserOnline || !connectionRevalidationRequired || protectedDataRetrying || connectionAutoRetryRef.current) return;
+    if (!giris || !currentBranch?.id || !activeOrganization?.id || loading || !browserOnline || !connectionRevalidationRequired || protectedDataRetrying || connectionAutoRetryRef.current) return;
     connectionAutoRetryRef.current = true;
     handleProtectedDataRetry(true);
-  }, [giris,loading,browserOnline,connectionRevalidationRequired,protectedDataRetrying]);
+  }, [giris,currentBranch?.id,activeOrganization?.id,loading,browserOnline,connectionRevalidationRequired,protectedDataRetrying]);
 
   const rememberSingleLessonIssue = issue => {
     const stored = {
@@ -5879,6 +5940,7 @@ export default function App() {
   const rememberExtraLessonPaymentIssue = issue => {
     const stored = {
       operationId:issue.operationId,
+      branchId:issue.branchId || currentBranch?.id || "",
       studentId:issue.studentId || "",
       studentName:issue.studentName || "Öğrenci",
       extraRef:issue.extraRef || "",
@@ -5905,6 +5967,7 @@ export default function App() {
   const rememberPackagePaymentIssue = issue => {
     const stored = {
       operationId:issue.operationId,
+      branchId:issue.branchId || currentBranch?.id || "",
       studentId:issue.studentId || "",
       studentName:issue.studentName || "Öğrenci",
       packageRef:issue.packageRef || "",
@@ -5937,23 +6000,22 @@ export default function App() {
 
   const loadSingleLessons = async (options={}) => {
     const preserveIssue = options.preserveIssue === true;
+    const branch = options.branch || currentBranch;
     const loadSequence = singleLessonLoadSequenceRef.current + 1;
     singleLessonLoadSequenceRef.current = loadSequence;
     setSingleLessonsLoading(true);
     setSingleLessonsLoaded(false);
-    const branchResult = await timedSingleLessonRequest(() => supabase.from("branches").select("id,code,name").eq("code",CURRENT_BRANCH_CODE).single());
-    if (loadSequence !== singleLessonLoadSequenceRef.current) return { ok:false, superseded:true };
-    if (branchResult.error || !branchResult.data?.id) {
-      console.error("Tek Ders şube kaydı yüklenemedi:",branchResult.error);
+    if (!branch?.id) {
+      const branchError = new Error("ACTIVE_BRANCH_REQUIRED");
+      console.error("Tek Ders şube bağlamı hazır değil:",branchError);
       setSingleLessonSecurityReady(false);
-      rememberSingleLessonIssue({ kind:"load", state:branchResult.timedOut?"timeout":"failed" });
+      rememberSingleLessonIssue({ kind:"load", state:"failed" });
       setSingleLessonsLoading(false);
-      return { ok:false, error:branchResult.error };
+      return { ok:false, error:branchError };
     }
-    setCurrentBranch(branchResult.data);
     const [lessonResult, operationResult] = await Promise.all([
-      timedSingleLessonRequest(() => supabase.from("single_lessons").select("*").eq("branch_id",branchResult.data.id).order("starts_at",{ ascending:true })),
-      timedSingleLessonRequest(() => supabase.from("single_lesson_operations").select("operation_id").eq("branch_id",branchResult.data.id).limit(1)),
+      timedSingleLessonRequest(() => supabase.from("single_lessons").select("*").eq("branch_id",branch.id).order("starts_at",{ ascending:true })),
+      timedSingleLessonRequest(() => supabase.from("single_lesson_operations").select("operation_id").eq("branch_id",branch.id).limit(1)),
     ]);
     if (loadSequence !== singleLessonLoadSequenceRef.current) return { ok:false, superseded:true };
     if (lessonResult.error) {
@@ -5978,12 +6040,153 @@ export default function App() {
     return { ok:true, data:lessonResult.data || [] };
   };
 
+  const pendingBranchIds = () => [...new Set([
+    packagePaymentIssueRef.current?.branchId,
+    extraLessonPaymentIssueRef.current?.branchId,
+    singleLessonIssueRef.current?.kind === "operation" ? singleLessonIssueRef.current?.branchId : "",
+    ...failedOps.map(operation=>operation.branchId || ""),
+  ].filter(Boolean))];
+
+  const selectBranchContext = (option, options={}) => {
+    if (!option?.selectable || !option.branchId || !option.organizationId) {
+      pop("Bu şube etkin veya hesabınıza atanmış değil.",7000);
+      return false;
+    }
+    const changingBranch = !!currentBranch?.id && currentBranch.id !== option.branchId;
+    const requiredBranches = pendingBranchIds();
+    const currentBranchHasUnresolvedWrite = !!currentBranch?.id && requiredBranches.includes(currentBranch.id);
+    const activeWrite = packagePaymentWritingRef.current
+      || extraLessonPaymentWritingRef.current
+      || singleLessonSavingRef.current
+      || Object.keys(singleLessonBusyIdsRef.current).length > 0
+      || branchScopedWriteCountRef.current > 0
+      || !!downloadingReportId;
+    if (changingBranch && (currentBranchHasUnresolvedWrite || activeWrite)) {
+      pop("Devam eden veya sonucu kontrol edilmesi gereken işlem varken şube değiştirilemez. Önce mevcut uyarıyı sonuçlandırın.",9000);
+      return false;
+    }
+    if (changingBranch && requiredBranches.length > 0 && !currentBranchHasUnresolvedWrite && !requiredBranches.includes(option.branchId)) {
+      pop("Önce sonuç bekleyen işlemin ait olduğu şubeye geçin.",9000);
+      return false;
+    }
+    if (!currentBranch?.id && requiredBranches.length > 0 && !requiredBranches.includes(option.branchId)) {
+      pop("Bekleyen işlemin ait olduğu şube açılmadan başka şube seçilemez.",9000);
+      return false;
+    }
+
+    protectedDataLoadGenerationRef.current += 1;
+    singleLessonLoadSequenceRef.current += 1;
+    monthlyReportLoadSequenceRef.current += 1;
+    reportInitializationRef.current = false;
+    setStudents([]);
+    setTeachers([]);
+    setExpenses([]);
+    setSingleLessons([]);
+    setMonthlyReports([]);
+    setLoadedSources({ students:false, teachers:false, expenses:false });
+    setProtectedDataLoadIssues({ students:false, teachers:false, expenses:false });
+    setSingleLessonsLoaded(false);
+    setSingleLessonsLoading(false);
+    setSingleLessonSecurityReady(false);
+    setDetailSt(null);
+    setActionModal(null);
+    setMesajSt(null);
+    setÖdemeSt(null);
+    setÖdemeKaydetModal(null);
+    setSingleLessonSheet(null);
+    setShowAdd(false);
+    setShowSecurityMenu(false);
+    setShowBranchMenu(false);
+    pendingSingleLessonCreateRef.current = null;
+    clearSingleLessonIssue(issue=>issue.kind !== "operation");
+    setActiveOrganization(option.organization);
+    setCurrentBranch({
+      ...option.branch,
+      id:option.branchId,
+      name:option.branchName,
+      organization_id:option.organizationId,
+      organizationName:option.organizationName,
+    });
+    setLoading(true);
+    if (!options.initial) pop(option.branchName+" şubesine geçiliyor.",5000);
+    return true;
+  };
+
+  const loadAccessContext = async (options={}) => {
+    const sequence = accessContextLoadSequenceRef.current + 1;
+    accessContextLoadSequenceRef.current = sequence;
+    setAccessContextLoading(true);
+    setAccessContextError("");
+    try {
+      const result = await timedSingleLessonRequest(() => supabase.rpc("get_my_access_context"));
+      if (sequence !== accessContextLoadSequenceRef.current) return { ok:false, superseded:true };
+      if (result.error || !result.data || !Array.isArray(result.data.organizations)) {
+        const error = result.error || new Error("ACCESS_CONTEXT_INVALID");
+        setAccessContext(null);
+        setActiveOrganization(null);
+        setCurrentBranch(null);
+        setAccessContextError("Kurum ve şube yetkileri Supabase'den doğrulanamadı.");
+        console.error("Kurum/şube yetkisi yüklenemedi:",error);
+        return { ok:false, error };
+      }
+      const availableOptions = accessBranchOptions(result.data);
+      const selectable = availableOptions.filter(option=>option.selectable);
+      setAccessContext(result.data);
+      if (!selectable.length) {
+        setActiveOrganization(null);
+        setCurrentBranch(null);
+        setAccessContextError("Bu hesap için kullanılabilir aktif şube bulunamadı.");
+        return { ok:false, error:new Error("ACCESS_CONTEXT_NO_SELECTABLE_BRANCH") };
+      }
+      const requiredBranches = pendingBranchIds();
+      const unavailablePendingBranches = requiredBranches.filter(branchId=>!selectable.some(option=>option.branchId===branchId));
+      if (unavailablePendingBranches.length) {
+        setActiveOrganization(null);
+        setCurrentBranch(null);
+        setAccessContextError("Sonucu bekleyen bir işlemin şubesine artık erişilemiyor. Yetki düzeltilmeden işlem güvenle kontrol edilemez.");
+        return { ok:false, error:new Error("ACCESS_CONTEXT_PENDING_BRANCH_UNAVAILABLE") };
+      }
+      const pendingOption = requiredBranches.length === 1
+        ? selectable.find(option=>option.branchId===requiredBranches[0])
+        : null;
+      const preservedOption = options.preserveSelection && currentBranch?.id
+        ? selectable.find(option=>option.branchId===currentBranch.id)
+        : null;
+      const selectedOption = pendingOption || preservedOption || (selectable.length === 1 ? selectable[0] : null);
+      if (selectedOption && options.applySelection !== false) {
+        selectBranchContext(selectedOption,{ initial:true });
+      } else if (!selectedOption) {
+        setActiveOrganization(null);
+        setCurrentBranch(null);
+        setLoading(false);
+      }
+      return { ok:true, data:result.data, selectedOption };
+    } finally {
+      if (sequence === accessContextLoadSequenceRef.current) setAccessContextLoading(false);
+    }
+  };
+
   useEffect(() => { document.title = "Sonsuz Sanat CRM"; }, []);
+  useEffect(() => {
+    if (!giris) {
+      accessContextLoadSequenceRef.current += 1;
+      setAccessContext(null);
+      setAccessContextLoading(false);
+      setAccessContextError("");
+      setActiveOrganization(null);
+      setCurrentBranch(null);
+      setShowBranchMenu(false);
+      return;
+    }
+    void loadAccessContext();
+  }, [giris,authSession?.user?.id]);
+
   useEffect(() => {
     const generation = protectedDataLoadGenerationRef.current + 1;
     protectedDataLoadGenerationRef.current = generation;
-    if (!giris) {
+    if (!giris || !activeOrganization?.id || !currentBranch?.id) {
       singleLessonLoadSequenceRef.current += 1;
+      monthlyReportLoadSequenceRef.current += 1;
       reportInitializationRef.current = false;
       setStudents([]);
       setTeachers([]);
@@ -5992,14 +6195,13 @@ export default function App() {
       setSingleLessonsLoaded(false);
       setSingleLessonsLoading(false);
       setSingleLessonSecurityReady(false);
-      setCurrentBranch(null);
       setMonthlyReports([]);
       setLoadedSources({ students:false, teachers:false, expenses:false });
       setProtectedDataLoadIssues({ students:false, teachers:false, expenses:false });
       setProtectedDataRetrying(false);
-      setConnectionRevalidationRequired(!browserOnline);
+      setConnectionRevalidationRequired(giris ? false : !browserOnline);
       connectionAutoRetryRef.current = false;
-      setLoading(true);
+      setLoading(giris && accessContextLoading);
       setDetailSt(null);
       setActionModal(null);
       setMesajSt(null);
@@ -6015,10 +6217,10 @@ export default function App() {
     setProtectedDataLoadIssues({ students:false, teachers:false, expenses:false });
     setProtectedDataRetrying(false);
     Promise.all([
-      loadStudents(generation),
-      loadTeachers(generation),
-      loadExpenses(generation),
-      loadSingleLessons(),
+      loadStudents(generation,currentBranch.id),
+      loadTeachers(generation,activeOrganization.id),
+      loadExpenses(generation,currentBranch.id),
+      loadSingleLessons({ branch:currentBranch }),
     ]).then(results=>{
       if (generation === protectedDataLoadGenerationRef.current && results.every(result=>result.ok)) {
         setConnectionRevalidationRequired(false);
@@ -6027,7 +6229,7 @@ export default function App() {
     }).finally(()=>{
       if (generation === protectedDataLoadGenerationRef.current) setLoading(false);
     });
-  }, [giris]);
+  }, [giris,activeOrganization?.id,currentBranch?.id]);
 
   const reconcileSingleLessonOperation = async (operation, attempts=1) => {
     if (!operation?.operationId) return { state:"unknown", data:null };
@@ -6057,6 +6259,7 @@ export default function App() {
           .from("single_lessons")
           .select("*")
           .eq("id",operationResult.data.single_lesson_id)
+          .eq("branch_id",operationBranchId)
           .single());
         if (lessonResult.error || !lessonResult.data?.id) {
           lastError = lessonResult.error || new Error("SINGLE_LESSON_RECONCILIATION_ROW_MISSING");
@@ -6084,6 +6287,11 @@ export default function App() {
 
   const persistSingleLessonUpdate = async (lesson, changes, successMessage) => {
     if (!lesson?.id) return null;
+    const branchId = currentBranch?.id;
+    if (!branchId || lesson.branch_id !== branchId) {
+      pop("Seçili şubeyle Tek Ders kaydı uyuşmuyor; işlem yapılmadı.",8000);
+      return null;
+    }
     const transitionError = singleLessonTransitionError(lesson,changes);
     if (transitionError) { pop(transitionError,9000); return null; }
     if (singleLessonBusyIdsRef.current[lesson.id]) {
@@ -6106,6 +6314,7 @@ export default function App() {
         .from("single_lessons")
         .update({ ...changes, last_write_id:operation.operationId })
         .eq("id",lesson.id)
+        .eq("branch_id",branchId)
         .eq("record_version",lesson.record_version)
         .select("*")
         .single());
@@ -6140,6 +6349,7 @@ export default function App() {
       pop("Önce sonucu belirsiz Tek Ders işlemini yeniden kontrol edin.",8000);
       return;
     }
+    const branchId = currentBranch.id;
     singleLessonSavingRef.current = true;
     setSingleLessonSaving(true);
     if (existingLesson?.id) {
@@ -6158,11 +6368,11 @@ export default function App() {
       operationType:"insert",
       operationId:pendingSingleLessonCreateRef.current.operationId,
       lessonId:pendingSingleLessonCreateRef.current.lessonId,
-      branchId:currentBranch.id,
+      branchId,
       label:"Yeni Tek Ders kaydı",
     };
     try {
-      const result = await timedSingleLessonRequest(() => supabase.from("single_lessons").insert({ ...payload, id:operation.lessonId, branch_id:currentBranch.id, last_write_id:operation.operationId }).select("*").single());
+      const result = await timedSingleLessonRequest(() => supabase.from("single_lessons").insert({ ...payload, id:operation.lessonId, branch_id:branchId, last_write_id:operation.operationId }).select("*").single());
       if (!result.error && result.data?.id===operation.lessonId && result.data.last_write_id===operation.operationId) {
         setSingleLessons(current=>current.some(item=>item.id===result.data.id)?current.map(item=>item.id===result.data.id?result.data:item):[...current,result.data]);
         pendingSingleLessonCreateRef.current = null;
@@ -6256,16 +6466,13 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!giris || !loadedSources.students || !loadedSources.teachers || !loadedSources.expenses || !singleLessonsLoaded || reportInitializationRef.current) return;
+    if (!giris || !currentBranch?.id || !activeOrganization?.id || !loadedSources.students || !loadedSources.teachers || !loadedSources.expenses || !singleLessonsLoaded || reportInitializationRef.current) return;
     reportInitializationRef.current = true;
+    const reportSequence = monthlyReportLoadSequenceRef.current + 1;
+    monthlyReportLoadSequenceRef.current = reportSequence;
+    branchScopedWriteCountRef.current += 1;
     const initialize = async () => {
-      const branchResult = await supabase.from("branches").select("id,code,name").eq("code",CURRENT_BRANCH_CODE).single();
-      if (branchResult.error || !branchResult.data?.id) {
-        console.error("Aylık rapor şube kaydı yüklenemedi:",branchResult.error);
-        pop("Ay sonu raporu kurulumu eksik. v83 Supabase SQL dosyasını çalıştırın.",9000);
-        return;
-      }
-      const branch = branchResult.data;
+      const branch = currentBranch;
       const reportResult = await supabase.from("monthly_reports").select("*").eq("branch_id",branch.id).order("report_month",{ ascending:false });
       if (reportResult.error) {
         console.error("Aylık rapor arşivi yüklenemedi:",reportResult.error);
@@ -6291,16 +6498,23 @@ export default function App() {
         pop("Ay sonu rapor arşivi doğrulanamadı.",9000);
         return;
       }
+      if (reportSequence !== monthlyReportLoadSequenceRef.current) return;
       setMonthlyReports((refreshed.data || []).map(reportFromRow));
     };
     initialize().catch(error=>{
       console.error("Aylık rapor başlatma hatası:",error);
       pop("Ay sonu raporu hazırlanamadı.",9000);
+    }).finally(()=>{
+      branchScopedWriteCountRef.current = Math.max(0,branchScopedWriteCountRef.current - 1);
     });
-  },[giris,loadedSources.students,loadedSources.teachers,loadedSources.expenses,singleLessonsLoaded,students,teachers,expenses,singleLessons]);
+  },[giris,currentBranch?.id,activeOrganization?.id,loadedSources.students,loadedSources.teachers,loadedSources.expenses,singleLessonsLoaded,students,teachers,expenses,singleLessons]);
 
   const handleMonthlyReportDownload = async report => {
     if (!report?.id || downloadingReportId) return;
+    if (!currentBranch?.id || (report.branchId && report.branchId !== currentBranch.id)) {
+      pop("Rapor seçili şubeyle uyuşmuyor; işlem yapılmadı.",7000);
+      return;
+    }
     setDownloadingReportId(report.id);
     try {
       await downloadMonthlyReportPdf(report);
@@ -6332,6 +6546,7 @@ export default function App() {
     const slots = getStudentSlots(student);
     return {
       id: student.id,
+      branch_id: student.branch_id || currentBranch?.id || null,
       name: student.name,
       phone: student.phone || "",
       veli_adi: student.veli_adi || "",
@@ -6366,63 +6581,74 @@ export default function App() {
 
   const saveStudent = async (student) => {
     if (!requireProtectedSources(["students"],"Öğrenci kaydı")) throw new Error("STUDENTS_NOT_LOADED");
-    const currentVersion = typeof student.record_version === "number" ? student.record_version : 0;
-    const writeId = uid();
-    const nextVersion = currentVersion + 1;
-    const payload = studentPayload(student, nextVersion, writeId);
-    const isExisting = !!student.created_at || typeof student.record_version === "number";
-    let data = null;
-    let error = null;
-
-    if (isExisting) {
-      const result = await supabase
-        .from("students")
-        .update(payload)
-        .eq("id", student.id)
-        .eq("record_version", currentVersion)
-        .select("*")
-        .single();
-      data = result.data;
-      error = result.error;
-    } else {
-      const result = await supabase
-        .from("students")
-        .insert(payload)
-        .select("*")
-        .single();
-      data = result.data;
-      error = result.error;
+    const branchId = currentBranch?.id;
+    if (!branchId || (student.branch_id && student.branch_id !== branchId)) {
+      pop("Aktif şube doğrulanamadı; öğrenci kaydı gönderilmedi.",8000);
+      throw new Error("STUDENT_BRANCH_CONTEXT_MISMATCH");
     }
+    return runBranchScopedWrite(async () => {
+      const currentVersion = typeof student.record_version === "number" ? student.record_version : 0;
+      const writeId = uid();
+      const nextVersion = currentVersion + 1;
+      const payload = { ...studentPayload(student,nextVersion,writeId), branch_id:branchId };
+      const isExisting = !!student.created_at || typeof student.record_version === "number";
+      let data = null;
+      let error = null;
 
-    if (error || !data?.id || data.last_write_id !== writeId || data.record_version !== nextVersion) {
-      console.error("Kayıt hatası:", error);
-      pop("Kayıt güvenli şekilde doğrulanamadı. Ekran veritabanından yenilendi.", 8000);
-      await loadStudents();
-      throw new Error("Veritabanı kaydı doğrulanamadı");
-    }
+      if (isExisting) {
+        const result = await supabase
+          .from("students")
+          .update(payload)
+          .eq("id", student.id)
+          .eq("branch_id",branchId)
+          .eq("record_version", currentVersion)
+          .select("*")
+          .single();
+        data = result.data;
+        error = result.error;
+      } else {
+        const result = await supabase
+          .from("students")
+          .insert(payload)
+          .select("*")
+          .single();
+        data = result.data;
+        error = result.error;
+      }
 
-    setStudents(prev => prev.map(s => s.id === data.id ? data : s));
-    return data;
+      if (error || !data?.id || data.branch_id !== branchId || data.last_write_id !== writeId || data.record_version !== nextVersion) {
+        console.error("Kayıt hatası:", error);
+        pop("Kayıt güvenli şekilde doğrulanamadı. Ekran veritabanından yenilendi.", 8000);
+        await loadStudents(undefined,branchId);
+        throw new Error("Veritabanı kaydı doğrulanamadı");
+      }
+
+      setStudents(prev => prev.map(s => s.id === data.id ? data : s));
+      return data;
+    });
   };
 
   const saveStudentWithRetry = async (student, operation=null, options={}) => {
-    let lastError = null;
-    const attempts = options.attempts || MAX_SAVE_RETRIES;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      try {
-        return await saveStudent(student);
-      } catch (error) {
-        lastError = error;
-        if (attempt < attempts) {
-          await new Promise(resolve => setTimeout(resolve, 450 * attempt));
-          const { data } = await supabase.from("students").select("*").eq("id", student.id).single();
-          if (data) student = { ...student, record_version: typeof data.record_version === "number" ? data.record_version : 0 };
+    const branchId = currentBranch?.id;
+    return runBranchScopedWrite(async () => {
+      let lastError = null;
+      const attempts = options.attempts || MAX_SAVE_RETRIES;
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+          return await saveStudent(student);
+        } catch (error) {
+          lastError = error;
+          if (attempt < attempts && branchId) {
+            await new Promise(resolve => setTimeout(resolve, 450 * attempt));
+            const { data } = await supabase.from("students").select("*").eq("id",student.id).eq("branch_id",branchId).single();
+            if (data) student = { ...student, branch_id:branchId, record_version:typeof data.record_version === "number" ? data.record_version : 0 };
+          }
         }
       }
-    }
-    rememberFailedOperation(operation, lastError);
-    pop("İşlem şu an kaydedilemedi. Tekrar denemek için üstte uyarı olarak tutuldu.", 9000);
-    throw lastError || new Error("Kayıt başarısız");
+      rememberFailedOperation(operation ? { ...operation, branchId:operation.branchId || branchId || "" } : null,lastError);
+      pop("İşlem şu an kaydedilemedi. Tekrar denemek için üstte uyarı olarak tutuldu.", 9000);
+      throw lastError || new Error("Kayıt başarısız");
+    });
   };
 
   const updLesson = (schedule, lid, status, note="") => {
@@ -6816,7 +7042,7 @@ export default function App() {
     if (!teacher) { pop("Öğretmen seçilmeden öğrenci eklenemez", 5000); return; }
     const teacherFrom = f.lesson_start_date || dateKey(from);
     const newStudent = {
-      id: uid(), name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"",
+      id: uid(), branch_id:currentBranch?.id || null, name: f.name, phone: f.phone||"", veli_adi: f.veli_adi||"", dogum_tarihi: f.dogum_tarihi||"",
       lesson_start_date: f.lesson_start_date || null, teacher_id:teacher.id, teacher_name:teacher.name, teacher_history:[{ teacherId:teacher.id, teacherName:teacher.name, from:teacherFrom }], ucret: parseInt(f.ucret)||0, last_raise_date: f.last_raise_date || null, packageLessonCount, package_lesson_count: packageLessonCount, preferredPackageLessonCount: packageLessonCount, preferred_package_lesson_count: packageLessonCount, lessonDuration: parseInt(f.lessonDuration)||45, lesson_duration: parseInt(f.lessonDuration)||45, instrument: f.instrument, day: slots[0].day, time: slots[0].time, lessonSlots: slots, lesson_slots: slots,
       no_show: 0, frozen: false, left_at:null, status_history:[], odemeler: [], telafi_records: [],
       schedule: buildScheduleSlots(slots, packageLessonCount, from, f.lessonDuration), ek_dersler: [],
@@ -6841,18 +7067,22 @@ export default function App() {
 
   const handleCommunicationStatus = (student, key, value, extra={}) => {
     const persist = async () => {
-      const result = await supabase.from("students").select("*").eq("id",student.id).single();
-      const current = result.data || students.find(item=>item.id===student.id) || student;
-      const event = { id:uid(), type:"communication_"+key, value, at:new Date().toISOString(), ...extra };
-      const updatedStudent = { ...current, status_history:[...(current.status_history || []),event] };
-      setStudents(prev=>prev.map(item=>item.id===updatedStudent.id?updatedStudent:item));
-      try {
-        await saveStudent(updatedStudent);
-        pop("İletişim durumu kaydedildi");
-        return true;
-      } catch (error) {
-        return false;
-      }
+      const branchId = currentBranch?.id;
+      if (!branchId || (student.branch_id && student.branch_id !== branchId)) return false;
+      return runBranchScopedWrite(async () => {
+        const result = await supabase.from("students").select("*").eq("id",student.id).eq("branch_id",branchId).single();
+        const current = result.data || students.find(item=>item.id===student.id && item.branch_id===branchId) || student;
+        const event = { id:uid(), type:"communication_"+key, value, at:new Date().toISOString(), ...extra };
+        const updatedStudent = { ...current, branch_id:branchId, status_history:[...(current.status_history || []),event] };
+        setStudents(prev=>prev.map(item=>item.id===updatedStudent.id?updatedStudent:item));
+        try {
+          await saveStudent(updatedStudent);
+          pop("İletişim durumu kaydedildi");
+          return true;
+        } catch (error) {
+          return false;
+        }
+      });
     };
     communicationQueueRef.current = communicationQueueRef.current.then(persist,persist);
     return communicationQueueRef.current;
@@ -6927,10 +7157,13 @@ export default function App() {
         return { state:"unknown", error:operationCheck.error };
       }
       if (operationCheck.data?.operation_id===issue.operationId) {
+        const expectedBranchId = issue.branchId || currentBranch?.id;
         const studentResult = await timedSingleLessonRequest(() => supabase
           .from("students").select("*")
-          .eq("id",operationCheck.data.student_id || issue.studentId).single());
-        if (studentResult.error || !studentResult.data?.id) {
+          .eq("id",operationCheck.data.student_id || issue.studentId)
+          .eq("branch_id",expectedBranchId)
+          .single());
+        if (studentResult.error || !studentResult.data?.id || (expectedBranchId && studentResult.data.branch_id !== expectedBranchId)) {
           rememberPackagePaymentIssue({ ...issue, state:"applied_pending_refresh" });
           if (options.announce !== false) pop("Paket ödemesi Supabase'e kaydedildi; ekran yenilenemedi. Uyarı korunuyor.",8000);
           return { state:"applied_pending_refresh", error:studentResult.error };
@@ -6972,6 +7205,7 @@ export default function App() {
     const operationId = uid();
     const operation = {
       operationId,
+      branchId:currentBranch?.id || sourceStudent.branch_id || "",
       studentId:sid,
       studentName:sourceStudent.name || "Öğrenci",
       packageRef:packageInfo.packageId ? "id:"+packageInfo.packageId : "period:"+packageInfo.startKey+":"+packageInfo.endKey,
@@ -7047,9 +7281,15 @@ export default function App() {
 
   const retryFailedOperation = async (op) => {
     if (!op?.studentId || retryingOps[op.id]) return;
+    const branchId = currentBranch?.id;
+    if (!branchId || (op.branchId && op.branchId !== branchId)) {
+      pop("Bekleyen işlem yalnız ait olduğu şubede yeniden denenebilir.",8000);
+      return;
+    }
     setRetryingOps(prev => ({ ...prev, [op.id]: true }));
+    branchScopedWriteCountRef.current += 1;
     try {
-      const { data, error } = await supabase.from("students").select("*").eq("id", op.studentId).single();
+      const { data, error } = await supabase.from("students").select("*").eq("id",op.studentId).eq("branch_id",branchId).single();
       if (error || !data) throw error || new Error("Öğrenci bulunamadı");
       let built = null;
       if (op.type === "lessonAction") {
@@ -7065,6 +7305,7 @@ export default function App() {
       persistFailedOps(failedOps.map(item => item.id === op.id ? { ...item, attempts:(item.attempts||0)+1, error:error?.message || "Tekrar deneme başarısız" } : item));
       pop("Bekleyen işlem hâlâ kaydedilemedi.", 7000);
     } finally {
+      branchScopedWriteCountRef.current = Math.max(0,branchScopedWriteCountRef.current - 1);
       setRetryingOps(prev => ({ ...prev, [op.id]: false }));
     }
   };
@@ -7349,12 +7590,14 @@ export default function App() {
         return { state:"unknown", error:operationCheck.error };
       }
       if (operationCheck.data?.operation_id===issue.operationId) {
+        const expectedBranchId = issue.branchId || currentBranch?.id;
         const studentResult = await timedSingleLessonRequest(() => supabase
           .from("students")
           .select("*")
           .eq("id",operationCheck.data.student_id || issue.studentId)
+          .eq("branch_id",expectedBranchId)
           .single());
-        if (studentResult.error || !studentResult.data?.id) {
+        if (studentResult.error || !studentResult.data?.id || (expectedBranchId && studentResult.data.branch_id !== expectedBranchId)) {
           rememberExtraLessonPaymentIssue({ ...issue, state:"applied_pending_refresh" });
           if (options.announce !== false) pop("Ek Ders ödemesi Supabase'e kaydedildi; ekran yenilenemedi. Uyarı korunuyor.",8000);
           return { state:"applied_pending_refresh", error:studentResult.error };
@@ -7403,6 +7646,7 @@ export default function App() {
     const paymentLabel = "Ek ders - "+fmtShort(extra.date);
     const operation = {
       operationId,
+      branchId:currentBranch?.id || student.branch_id || "",
       studentId:sid,
       studentName:student.name || "Öğrenci",
       extraRef,
@@ -7587,13 +7831,15 @@ export default function App() {
 
   const handleTeacherAdd = async (name) => {
     if (!requireProtectedSources(["teachers"],"Öğretmen ekleme")) return false;
+    if (!activeOrganization?.id) { pop("Kurum bilgisi doğrulanamadı; öğretmen kaydedilmedi.",7000); return false; }
     const cleanName = name.trim();
     if (!cleanName) return false;
     if (teachers.some(t => t.name.toLocaleLowerCase("tr-TR") === cleanName.toLocaleLowerCase("tr-TR"))) {
       pop("Bu öğretmen zaten kayıtlı", 5000);
       return false;
     }
-    const { data, error } = await supabase.from("teachers").insert({ name:cleanName, active:true }).select("*").single();
+    const organizationId = activeOrganization.id;
+    const { data, error } = await runBranchScopedWrite(() => supabase.from("teachers").insert({ name:cleanName, active:true, organization_id:organizationId }).select("*").single());
     if (error || !data?.id) {
       console.error("Öğretmen ekleme hatası:", error);
       pop("Öğretmen kaydedilemedi", 6000);
@@ -7606,12 +7852,14 @@ export default function App() {
 
   const handleTeacherToggle = async (teacher) => {
     if (!requireProtectedSources(["teachers"],"Öğretmen durumu değişikliği")) return false;
+    if (!activeOrganization?.id || teacher.organization_id !== activeOrganization.id) { pop("Seçili kurumla öğretmen kaydı uyuşmuyor; işlem yapılmadı.",7000); return false; }
     if (teacher.active && teachers.filter(t=>t.active).length <= 1) {
       pop("En az bir aktif öğretmen kalmalıdır", 5000);
       return;
     }
     const nextActive = !teacher.active;
-    const { data, error } = await supabase.from("teachers").update({ active:nextActive }).eq("id",teacher.id).select("*").single();
+    const organizationId = activeOrganization.id;
+    const { data, error } = await runBranchScopedWrite(() => supabase.from("teachers").update({ active:nextActive }).eq("id",teacher.id).eq("organization_id",organizationId).select("*").single());
     if (error || !data?.id || data.active !== nextActive) {
       console.error("Öğretmen durumu güncelleme hatası:", error);
       pop("Öğretmen durumu kaydedilemedi", 6000);
@@ -7624,7 +7872,9 @@ export default function App() {
 
   const handleExpenseAdd = async expense => {
     if (!requireProtectedSources(["expenses"],"Gider kaydı")) return false;
+    if (!currentBranch?.id) { pop("Şube bilgisi doğrulanamadı; gider kaydedilmedi.",7000); return false; }
     const payload = {
+      branch_id:currentBranch.id,
       title:expense.title,
       category:expense.category,
       amount:expense.amount,
@@ -7634,7 +7884,7 @@ export default function App() {
       deleted_at:null,
       updated_at:new Date().toISOString(),
     };
-    const { data, error } = await supabase.from("expenses").insert(payload).select("*").single();
+    const { data, error } = await runBranchScopedWrite(() => supabase.from("expenses").insert(payload).select("*").single());
     if (error || !data?.id) {
       console.error("Gider kaydetme hatası:", error);
       pop("Gider veritabanına kaydedilemedi", 6000);
@@ -7647,11 +7897,13 @@ export default function App() {
 
   const handleExpenseRemove = async (expense, targetMonth) => {
     if (!requireProtectedSources(["expenses"],"Gider değişikliği")) return false;
+    if (!currentBranch?.id || expense.branch_id !== currentBranch.id) { pop("Seçili şubeyle gider kaydı uyuşmuyor; işlem yapılmadı.",7000); return false; }
     const updatedAt = new Date().toISOString();
     const changes = expense.is_recurring
       ? { recurring_until:localDateKey(new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 0)), updated_at:updatedAt }
       : { deleted_at:updatedAt, updated_at:updatedAt };
-    const { data, error } = await supabase.from("expenses").update(changes).eq("id",expense.id).select("*").single();
+    const branchId = currentBranch.id;
+    const { data, error } = await runBranchScopedWrite(() => supabase.from("expenses").update(changes).eq("id",expense.id).eq("branch_id",branchId).select("*").single());
     if (error || !data?.id) {
       console.error("Gider güncelleme hatası:", error);
       pop(expense.is_recurring ? "Sabit gider durdurulamadı" : "Gider kaldırılamadı", 6000);
@@ -7683,6 +7935,9 @@ export default function App() {
   const stats = { total:operationalStudents.length, active:operationalStudents.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:operationalStudents.filter(s=>s.frozen && !isStudentLeft(s)).length, left:operationalStudents.filter(isStudentLeft).length, telafi:operationalStudents.filter(s=>s.telafi_records.some(isCurrentTelafi)).length, odeme:todayPayments.length, zam:raiseDueList.length };
   const telafiWarnList = operationalStudents.filter(s => telafiQuotaInfo(s).count===5 && !s.frozen);
   const pendingMonthlyReports = monthlyReports.filter(report=>!report.downloadedAt);
+  const branchOptions = accessBranchOptions(accessContext);
+  const selectableBranchOptions = branchOptions.filter(option=>option.selectable);
+  const hasMultipleSelectableBranches = selectableBranchOptions.length > 1;
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:<StudentsNavIcon />, badge:stats.active },
@@ -7708,7 +7963,7 @@ export default function App() {
     .map(protectedSourceLabel);
   const singleLessonLoadBlocked = !singleLessonsLoaded || !singleLessonSecurityReady;
   if (singleLessonLoadBlocked && !protectedDataIssueLabels.includes("Tek Ders kayıtları")) protectedDataIssueLabels.push("Tek Ders kayıtları");
-  const operationalDataReady = browserOnline && !connectionRevalidationRequired && loadedSources.students && loadedSources.teachers && loadedSources.expenses && !singleLessonLoadBlocked;
+  const operationalDataReady = !!activeOrganization?.id && !!currentBranch?.id && browserOnline && !connectionRevalidationRequired && loadedSources.students && loadedSources.teachers && loadedSources.expenses && !singleLessonLoadBlocked;
 
   if (!giris) {
     return (
@@ -7872,6 +8127,59 @@ export default function App() {
     );
   }
 
+  if (accessContextLoading || (!accessContext && !accessContextError)) {
+    return (
+      <>
+      <style>{MIZAN_UI_CSS}</style>
+      <div className="crm-loading">
+        <div>
+          <div className="crm-loading-mark">S</div>
+          <p style={{ fontWeight:750, color:"#77717d" }}>Kurum ve şube yetkilerin doğrulanıyor...</p>
+        </div>
+      </div>
+      </>
+    );
+  }
+
+  if (accessContextError) {
+    return (
+      <>
+      <style>{MIZAN_UI_CSS}</style>
+      <div className="crm-loading">
+        <div style={{ width:"min(460px,calc(100vw - 32px))", background:"#fff", border:"1.5px solid #fca5a5", borderRadius:18, padding:26, boxShadow:"0 18px 50px rgba(127,29,29,.10)" }}>
+          <div className="crm-loading-mark">S</div>
+          <h2 style={{ margin:"16px 0 8px", color:"#991b1b", fontSize:22 }}>Şube yetkisi doğrulanamadı</h2>
+          <p style={{ margin:"0 0 16px", color:"#7f1d1d", fontSize:13, fontWeight:650, lineHeight:1.55 }}>{accessContextError} Hiçbir kurum verisi gösterilmiyor ve işlem yapılamıyor.</p>
+          <button onClick={loadAccessContext} disabled={!browserOnline || accessContextLoading} style={{ width:"100%", border:"none", borderRadius:10, padding:"11px 14px", background:"#dc2626", color:"#fff", fontSize:13, fontWeight:850, cursor:(!browserOnline || accessContextLoading)?"wait":"pointer", opacity:(!browserOnline || accessContextLoading)?.65:1 }}>Yeniden Dene</button>
+          <button onClick={()=>handleSecureLogout(false)} disabled={authBusy} style={{ width:"100%", marginTop:9, border:"1px solid #fecaca", borderRadius:10, padding:"10px 14px", background:"#fff", color:"#991b1b", fontSize:12, fontWeight:800 }}>Güvenli çıkış yap</button>
+        </div>
+      </div>
+      </>
+    );
+  }
+
+  if (!activeOrganization?.id || !currentBranch?.id) {
+    return (
+      <>
+      <style>{MIZAN_UI_CSS}</style>
+      <div className="crm-loading">
+        <div style={{ width:"min(540px,calc(100vw - 32px))", background:"#fff", border:"1px solid #e7e2ef", borderRadius:22, padding:26, boxShadow:"0 20px 60px rgba(54,38,78,.12)" }}>
+          <div className="crm-loading-mark">S</div>
+          <h2 style={{ margin:"16px 0 7px", color:"#211a2a", fontSize:23 }}>Şube Seç</h2>
+          <p style={{ margin:"0 0 18px", color:"#746d7a", fontSize:13, lineHeight:1.55 }}>Yalnızca yetkili olduğun aktif şubeler açılabilir. Seçim, Supabase yetkilerinin yerine geçmez.</p>
+          <div style={{ display:"grid", gap:10 }}>
+            {branchOptions.map(option=><button key={option.organizationId+"|"+option.branchId} type="button" disabled={!option.selectable} onClick={()=>selectBranchContext(option)} style={{ border:option.selectable?"1.5px solid #d9ccff":"1px solid #e5e7eb", borderRadius:13, padding:"13px 14px", background:option.selectable?"#f7f3ff":"#f5f5f5", color:option.selectable?"#4f2fc5":"#999", textAlign:"left", cursor:option.selectable?"pointer":"not-allowed", fontFamily:"inherit" }}>
+              <strong style={{ display:"block", fontSize:14 }}>{option.branchName}</strong>
+              <span style={{ display:"block", marginTop:3, fontSize:11 }}>{option.organizationName}{option.selectable?"":" · Pasif"}</span>
+            </button>)}
+          </div>
+          <button onClick={()=>handleSecureLogout(false)} disabled={authBusy} style={{ width:"100%", marginTop:16, border:"1px solid #ddd6e8", borderRadius:10, padding:"10px 14px", background:"#fff", color:"#665d70", fontSize:12, fontWeight:800 }}>Güvenli çıkış yap</button>
+        </div>
+      </div>
+      </>
+    );
+  }
+
   if (loading) {
     return (
       <>
@@ -7932,6 +8240,7 @@ export default function App() {
         <header className="crm-topbar">
           <div><p className="crm-eyebrow">{viewMeta.eyebrow}</p><h1 className="crm-title">{viewMeta.title}</h1><p className="crm-subtitle">{viewMeta.subtitle}</p></div>
           <div className="crm-header-actions">
+            {hasMultipleSelectableBranches ? <button type="button" className="crm-branch-switch" title="Aktif şubeyi değiştir" onClick={()=>setShowBranchMenu(true)}>⌄ {currentBranch.name}</button> : null}
             <button className="crm-primary" onClick={()=>mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):setShowAdd(true)}>{mainTab==="tekders"?"＋ Tek Ders Ekle":"＋ Öğrenci ekle"}</button>
           </div>
         </header>
@@ -8166,6 +8475,21 @@ export default function App() {
           <p style={{fontSize:13,color:"#666",lineHeight:1.6,margin:"0 0 16px"}}>Normal çıkışta bu tarayıcı 30 gün boyunca güvenilen cihaz olarak kalır. Bir sonraki girişte parolanız sorulur, doğrulama kodu sorulmaz.</p>
           <Btn bg="#5b42d6" onClick={()=>handleSecureLogout(false)}>Yalnızca Güvenli Çıkış</Btn>
           <Btn bg="#dc5d51" outline onClick={()=>handleSecureLogout(true)}>Çıkış Yap ve Bu Cihazı Unut</Btn>
+        </Sheet>
+      ) : null}
+
+      {showBranchMenu ? (
+        <Sheet title="Şube değiştir" subtitle={activeOrganization?.name || "Yetkili şubeler"} onClose={()=>setShowBranchMenu(false)}>
+          <p style={{fontSize:12,color:"#6b6470",lineHeight:1.55,margin:"0 0 13px"}}>Yalnız hesabınıza atanmış aktif şubeler gösterilir. Yeni şube tamamen yüklenmeden eski şubenin verileri ekranda tutulmaz.</p>
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            {selectableBranchOptions.map(option=>{
+              const selected = option.branchId===currentBranch?.id;
+              return <button key={option.organizationId+"|"+option.branchId} type="button" disabled={selected} onClick={()=>selectBranchContext(option)} style={{border:selected?"1.5px solid #7c3aed":"1px solid #ddd6fe",borderRadius:12,padding:"12px 13px",background:selected?"#f3e8ff":"#fff",color:selected?"#5b21b6":"#332b3a",textAlign:"left",cursor:selected?"default":"pointer",fontFamily:"inherit"}}>
+                <strong style={{display:"block",fontSize:13}}>{selected?"✓ ":""}{option.branchName}</strong>
+                <span style={{display:"block",marginTop:3,fontSize:10,color:"#83788b"}}>{option.organizationName}</span>
+              </button>;
+            })}
+          </div>
         </Sheet>
       ) : null}
 
