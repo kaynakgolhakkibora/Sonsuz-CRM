@@ -21,6 +21,7 @@ const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
 const SINGLE_LESSON_ISSUE_KEY = "sonsuz_crm_single_lesson_issue_v1";
 const EXTRA_LESSON_PAYMENT_ISSUE_KEY = "sonsuz_crm_extra_lesson_payment_issue_v1";
 const PACKAGE_PAYMENT_ISSUE_KEY = "sonsuz_crm_package_payment_issue_v1";
+const BRANCH_LIFECYCLE_ISSUE_KEY = "sonsuz_crm_branch_lifecycle_issue_v1";
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -691,6 +692,46 @@ function writePackagePaymentIssue(issue) {
   } catch {
     return false;
   }
+}
+
+function readBranchLifecycleIssue() {
+  try {
+    const raw = localStorage.getItem(BRANCH_LIFECYCLE_ISSUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" && parsed.operationId ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBranchLifecycleIssue(issue) {
+  if (typeof window === "undefined") return false;
+  try {
+    if (issue) localStorage.setItem(BRANCH_LIFECYCLE_ISSUE_KEY, JSON.stringify(issue));
+    else localStorage.removeItem(BRANCH_LIFECYCLE_ISSUE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function branchLifecycleIssueMessage(issue) {
+  if (!issue) return "";
+  if (issue.state === "not_applied") return "Şube işlemi Supabase'de bulunamadı. Değişiklik oluşmadı; gerekiyorsa işlemi yeniden başlatabilirsiniz.";
+  if (issue.state === "applied_pending_refresh") return "Şube işlemi Supabase'e kaydedildi; güncel şube listesi henüz doğrulanamadı. İşlemi yeniden göndermeyin.";
+  return "Şube işleminin sonucu henüz kesinleştirilemedi. Sistem işlemi tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
+}
+
+function branchLocalCodeFromName(value) {
+  const tr = { "ç":"c", "ğ":"g", "ı":"i", "ö":"o", "ş":"s", "ü":"u" };
+  return String(value || "")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/[çğıöşü]/g, char => tr[char] || char)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0,60);
 }
 
 function packagePaymentIssueMessage(issue) {
@@ -1842,6 +1883,7 @@ const MIZAN_UI_CSS = `
   .crm-sidebar-bottom{margin-top:auto}.crm-tip{margin:0 3px 18px;padding:15px;background:#f6f2e7;border-radius:14px;color:#7b7466;font-size:11px;line-height:1.5}.crm-tip strong{display:block;margin-bottom:4px;color:#5d5547;font-size:12px}
   .crm-side-action{width:100%;border:1px solid var(--crm-border);background:#fff;border-radius:11px;padding:10px 12px;margin-top:7px;text-align:left;font-size:11px;font-weight:750;cursor:pointer}.crm-side-action:hover{border-color:#c7bfd6;color:var(--crm-purple)}
   .crm-desktop-logout{position:fixed;right:82px;bottom:24px;z-index:50;border:1px solid #ded9d3;background:#fff;color:#5b42d6;border-radius:12px;padding:11px 15px;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(38,30,48,.14)}.crm-desktop-logout:hover{border-color:#9e90d8;background:#f8f6ff}.crm-desktop-logout:disabled{cursor:wait;opacity:.65}
+  .crm-owner-branches{display:none;border:1px solid #ddd6fe;border-radius:12px;padding:10px 12px;background:#fff;color:#5b42d6;font-weight:850;cursor:pointer;white-space:nowrap}
   .crm-content{min-height:100vh;margin-left:245px;padding:38px clamp(28px,5vw,76px) 76px;max-width:1530px;background:var(--crm-paper)}
   .crm-topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px}
   .crm-eyebrow{margin:0 0 8px;color:#9d96a4;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
@@ -1859,7 +1901,7 @@ const MIZAN_UI_CSS = `
   .crm-student-info-item{min-width:0;padding:8px 13px;border-left:1px solid #ece8e4;font-size:12px;line-height:1.4}
   .crm-student-info-item:nth-child(3n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+4){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}
   .crm-student-info-label{display:block;margin-bottom:3px;color:#7b7680;font-size:10px;font-weight:850;letter-spacing:.05em;text-transform:uppercase}.crm-student-info-value{display:block;color:#1c1921;font-weight:750;overflow-wrap:anywhere}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-branch-switch{max-width:105px;padding:9px 10px;font-size:10px}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(9,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-owner-branches{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;font-size:0}.crm-owner-branches:after{content:"⌂";font-size:19px}.crm-branch-switch{max-width:105px;padding:9px 10px;font-size:10px}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(9,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -5358,12 +5400,21 @@ export default function App() {
   const accessContextLoadSequenceRef = useRef(0);
   const monthlyReportLoadSequenceRef = useRef(0);
   const branchScopedWriteCountRef = useRef(0);
+  const branchLifecycleWritingRef = useRef(false);
+  const branchLifecycleAutoCheckRef = useRef("");
   const [accessContext, setAccessContext] = useState(null);
   const [accessContextLoading, setAccessContextLoading] = useState(false);
   const [accessContextError, setAccessContextError] = useState("");
   const [activeOrganization, setActiveOrganization] = useState(null);
   const [currentBranch, setCurrentBranch] = useState(null);
   const [showBranchMenu, setShowBranchMenu] = useState(false);
+  const [showBranchCreate, setShowBranchCreate] = useState(false);
+  const [branchCreateName, setBranchCreateName] = useState("");
+  const [branchCreateCode, setBranchCreateCode] = useState("");
+  const [branchCreateCodeEdited, setBranchCreateCodeEdited] = useState(false);
+  const [branchLifecycleBusyId, setBranchLifecycleBusyId] = useState("");
+  const [branchLifecycleIssue, setBranchLifecycleIssue] = useState(() => readBranchLifecycleIssue());
+  const [branchLifecycleIssueChecking, setBranchLifecycleIssueChecking] = useState(false);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
   const [loadedSources, setLoadedSources] = useState({ students:false, teachers:false, expenses:false });
@@ -5424,6 +5475,7 @@ export default function App() {
       setÖdemeKaydetModal(null);
       setSingleLessonSheet(null);
       setShowAdd(false);
+      setShowBranchCreate(false);
       pendingSingleLessonCreateRef.current = null;
     };
     window.addEventListener("online",online);
@@ -5437,7 +5489,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const warnWhilePaymentIsWriting = event => {
-      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current) return;
+      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !branchLifecycleWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -6060,6 +6112,7 @@ export default function App() {
       || singleLessonSavingRef.current
       || Object.keys(singleLessonBusyIdsRef.current).length > 0
       || branchScopedWriteCountRef.current > 0
+      || branchLifecycleWritingRef.current
       || !!downloadingReportId;
     if (changingBranch && (currentBranchHasUnresolvedWrite || activeWrite)) {
       pop("Devam eden veya sonucu kontrol edilmesi gereken işlem varken şube değiştirilemez. Önce mevcut uyarıyı sonuçlandırın.",9000);
@@ -6097,6 +6150,7 @@ export default function App() {
     setShowAdd(false);
     setShowSecurityMenu(false);
     setShowBranchMenu(false);
+    setShowBranchCreate(false);
     pendingSingleLessonCreateRef.current = null;
     clearSingleLessonIssue(issue=>issue.kind !== "operation");
     setActiveOrganization(option.organization);
@@ -6166,7 +6220,240 @@ export default function App() {
     }
   };
 
+  const persistBranchLifecycleIssue = issue => {
+    const stored = issue ? {
+      ...issue,
+      state:issue.state || "unknown",
+      createdAt:issue.createdAt || new Date().toISOString(),
+    } : null;
+    if (!writeBranchLifecycleIssue(stored)) return false;
+    setBranchLifecycleIssue(stored);
+    return true;
+  };
+
+  const clearBranchLifecycleIssue = operationId => {
+    if (operationId && branchLifecycleIssue?.operationId && branchLifecycleIssue.operationId !== operationId) return;
+    writeBranchLifecycleIssue(null);
+    setBranchLifecycleIssue(null);
+  };
+
+  const branchOperationMatches = (issue,row) => {
+    if (!issue || !row) return false;
+    if (row.operation_id !== issue.operationId || row.organization_id !== issue.organizationId) return false;
+    if (row.operation_kind !== issue.operationKind || row.requested_active !== issue.requestedActive) return false;
+    if (String(row.requested_local_code || "") !== String(issue.requestedLocalCode || "")) return false;
+    if (String(row.requested_name || "") !== String(issue.requestedName || "")) return false;
+    if (issue.branchId && row.branch_id !== issue.branchId) return false;
+    return true;
+  };
+
+  const checkBranchLifecycleOperation = async (issue=branchLifecycleIssue, options={}) => {
+    if (!issue?.operationId || branchLifecycleIssueChecking) return { ok:false };
+    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return { ok:false, foreignUser:true };
+    setBranchLifecycleIssueChecking(true);
+    try {
+      const result = await timedSingleLessonRequest(() => supabase
+        .from("branch_lifecycle_operations")
+        .select("operation_id,organization_id,branch_id,operation_kind,requested_local_code,requested_name,requested_active,resulting_state,actor_user_id")
+        .eq("operation_id",issue.operationId)
+        .maybeSingle());
+      if (result.error) {
+        persistBranchLifecycleIssue({ ...issue, state:"unknown" });
+        if (options.notify !== false) pop("Şube işleminin sonucu henüz doğrulanamadı. Uyarı ekranda kalacak.",8000);
+        return { ok:false, error:result.error };
+      }
+      if (!result.data) {
+        persistBranchLifecycleIssue({ ...issue, state:"not_applied" });
+        if (options.notify !== false) pop("Şube işlemi Supabase'de bulunamadı; değişiklik oluşmadı.",7000);
+        return { ok:true, applied:false };
+      }
+      if (!branchOperationMatches(issue,result.data) || result.data.actor_user_id !== authSession?.user?.id) {
+        persistBranchLifecycleIssue({ ...issue, state:"conflict" });
+        if (options.notify !== false) pop("Şube işlem kaydı beklenen bilgilerle eşleşmedi. Yeni işlem göndermeyin.",9000);
+        return { ok:false, conflict:true };
+      }
+      const refreshed = await loadAccessContext({ preserveSelection:true });
+      if (!refreshed.ok) {
+        persistBranchLifecycleIssue({ ...issue, state:"applied_pending_refresh", branchId:result.data.branch_id });
+        if (options.notify !== false) pop("Şube işlemi kaydedildi; güncel liste henüz yüklenemedi. İşlemi tekrarlamayın.",9000);
+        return { ok:false, applied:true, refreshFailed:true };
+      }
+      clearBranchLifecycleIssue(issue.operationId);
+      if (options.notify !== false) pop(issue.operationKind === "branch_create" ? "Şube oluşturuldu." : "Şube durumu güncellendi.",6000);
+      return { ok:true, applied:true, row:result.data };
+    } finally {
+      setBranchLifecycleIssueChecking(false);
+    }
+  };
+
+  const branchLifecycleErrorText = error => {
+    const message = String(error?.message || error || "");
+    if (message.includes("BRANCH_LOCAL_CODE_ALREADY_EXISTS")) return "Bu kısa kodla daha önce bir şube oluşturulmuş.";
+    if (message.includes("BRANCH_ACTIVE_MEMBERSHIPS_MUST_BE_CLOSED_FIRST")) return "Bu şubede aktif personel ataması var. Şube pasife alınmadan önce personel yetkileri kapatılmalı.";
+    if (message.includes("NOT_AUTHORIZED")) return "Bu işlemi yalnız kurum sahibi yapabilir.";
+    if (message.includes("INVALID_INPUT")) return "Şube adı veya kısa kodu geçerli değil.";
+    return "Şube işlemi tamamlanamadı. Sonuç Supabase'den kontrol edilecek.";
+  };
+
+  const openBranchCreate = () => {
+    const blockingIssue = branchLifecycleIssue && (!branchLifecycleIssue.actorUserId || branchLifecycleIssue.actorUserId === authSession?.user?.id);
+    if (blockingIssue) {
+      pop("Önce bekleyen şube işlemi uyarısını sonuçlandırın.",7000);
+      return;
+    }
+    setBranchCreateName("");
+    setBranchCreateCode("");
+    setBranchCreateCodeEdited(false);
+    setShowBranchCreate(true);
+  };
+
+  const handleBranchCreate = async () => {
+    const name = branchCreateName.trim();
+    const localCode = branchCreateCode.trim();
+    if (!activeOrganization?.id || activeOrganization.canCreateBranches !== true) {
+      pop("Şube oluşturma yetkisi doğrulanamadı.",7000);
+      return false;
+    }
+    const blockingIssue = branchLifecycleIssue && (!branchLifecycleIssue.actorUserId || branchLifecycleIssue.actorUserId === authSession?.user?.id);
+    if (!browserOnline || branchLifecycleWritingRef.current || blockingIssue) {
+      pop(blockingIssue ? "Önce bekleyen şube işlemi uyarısını sonuçlandırın." : "İnternet bağlantısı olmadan şube oluşturulamaz.",8000);
+      return false;
+    }
+    if (!name || name.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(localCode) || localCode.length < 2 || localCode.length > 60) {
+      pop("Şube adını ve yalnız küçük harf, rakam, tire içeren kısa kodu kontrol edin.",7000);
+      return false;
+    }
+    const issue = {
+      operationId:uid(),
+      actorUserId:authSession?.user?.id || "",
+      organizationId:activeOrganization.id,
+      branchId:"",
+      operationKind:"branch_create",
+      requestedLocalCode:localCode,
+      requestedName:name,
+      requestedActive:true,
+      label:name+" şubesini oluştur",
+      state:"writing",
+    };
+    if (!persistBranchLifecycleIssue(issue)) {
+      pop("Şube işlem güvenliği tarayıcıda hazırlanamadı; işlem gönderilmedi.",8000);
+      return false;
+    }
+    branchLifecycleWritingRef.current = true;
+    setBranchLifecycleBusyId("create");
+    try {
+      const result = await timedSingleLessonRequest(() => supabase.rpc("create_organization_branch",{
+        p_organization_id:issue.organizationId,
+        p_local_code:issue.requestedLocalCode,
+        p_name:issue.requestedName,
+        p_operation_id:issue.operationId,
+      }));
+      branchLifecycleWritingRef.current = false;
+      if (result.error || !result.data?.branch?.id) {
+        persistBranchLifecycleIssue({ ...issue, state:"unknown" });
+        const checked = await checkBranchLifecycleOperation({ ...issue, state:"unknown" },{ notify:false });
+        if (!checked.applied) pop(branchLifecycleErrorText(result.error),9000);
+        return checked.applied === true;
+      }
+      const branch = result.data.branch;
+      if (branch.organization_id !== issue.organizationId || branch.local_code !== localCode || branch.name !== name || branch.active !== true) {
+        persistBranchLifecycleIssue({ ...issue, branchId:branch.id, state:"conflict" });
+        pop("Oluşturulan şube beklenen bilgilerle eşleşmedi. Yeni işlem göndermeyin.",9000);
+        return false;
+      }
+      const refreshed = await loadAccessContext({ preserveSelection:true });
+      if (!refreshed.ok) {
+        persistBranchLifecycleIssue({ ...issue, branchId:branch.id, state:"applied_pending_refresh" });
+        pop("Şube oluşturuldu; güncel liste henüz yüklenemedi. İşlemi tekrarlamayın.",9000);
+        return false;
+      }
+      clearBranchLifecycleIssue(issue.operationId);
+      setShowBranchCreate(false);
+      pop("Şube oluşturuldu.",6000);
+      return true;
+    } finally {
+      branchLifecycleWritingRef.current = false;
+      setBranchLifecycleBusyId("");
+    }
+  };
+
+  const handleBranchActiveChange = async branch => {
+    if (!branch?.id || !activeOrganization?.id || activeOrganization.canCreateBranches !== true) return false;
+    const blockingIssue = branchLifecycleIssue && (!branchLifecycleIssue.actorUserId || branchLifecycleIssue.actorUserId === authSession?.user?.id);
+    if (!browserOnline || branchLifecycleWritingRef.current || blockingIssue) {
+      pop(blockingIssue ? "Önce bekleyen şube işlemi uyarısını sonuçlandırın." : "İnternet bağlantısı olmadan şube durumu değiştirilemez.",8000);
+      return false;
+    }
+    const requestedActive = branch.active === false;
+    const activeBranchCount = (Array.isArray(activeOrganization.branches) ? activeOrganization.branches : []).filter(item=>item.active !== false).length;
+    if (!requestedActive && activeBranchCount <= 1) {
+      pop("Kurumun son aktif şubesi pasife alınamaz. Önce başka bir şube oluşturup etkin bırakın.",8000);
+      return false;
+    }
+    const verb = requestedActive ? "yeniden aktif etmek" : "pasife almak";
+    if (!window.confirm(branch.name+" şubesini "+verb+" istediğinize emin misiniz? Şube fiziksel olarak silinmeyecek.")) return false;
+    const issue = {
+      operationId:uid(),
+      actorUserId:authSession?.user?.id || "",
+      organizationId:activeOrganization.id,
+      branchId:branch.id,
+      operationKind:"branch_active_set",
+      requestedLocalCode:String(branch.code || ""),
+      requestedName:String(branch.name || ""),
+      requestedActive,
+      label:branch.name+" şubesini "+(requestedActive?"aktif et":"pasife al"),
+      state:"writing",
+    };
+    if (!persistBranchLifecycleIssue(issue)) {
+      pop("Şube işlem güvenliği tarayıcıda hazırlanamadı; işlem gönderilmedi.",8000);
+      return false;
+    }
+    branchLifecycleWritingRef.current = true;
+    setBranchLifecycleBusyId(branch.id);
+    try {
+      const result = await timedSingleLessonRequest(() => supabase.rpc("set_organization_branch_active",{
+        p_organization_id:issue.organizationId,
+        p_branch_id:issue.branchId,
+        p_active:issue.requestedActive,
+        p_operation_id:issue.operationId,
+      }));
+      branchLifecycleWritingRef.current = false;
+      if (result.error || !result.data?.branch?.id) {
+        persistBranchLifecycleIssue({ ...issue, state:"unknown" });
+        const checked = await checkBranchLifecycleOperation({ ...issue, state:"unknown" },{ notify:false });
+        if (!checked.applied) pop(branchLifecycleErrorText(result.error),9000);
+        return checked.applied === true;
+      }
+      const updated = result.data.branch;
+      if (updated.id !== branch.id || updated.organization_id !== issue.organizationId || updated.active !== requestedActive) {
+        persistBranchLifecycleIssue({ ...issue, state:"conflict" });
+        pop("Şube durumu beklenen sonuçla eşleşmedi. Yeni işlem göndermeyin.",9000);
+        return false;
+      }
+      const refreshed = await loadAccessContext({ preserveSelection:true });
+      if (!refreshed.ok) {
+        persistBranchLifecycleIssue({ ...issue, state:"applied_pending_refresh" });
+        pop("Şube durumu kaydedildi; güncel liste henüz yüklenemedi. İşlemi tekrarlamayın.",9000);
+        return false;
+      }
+      clearBranchLifecycleIssue(issue.operationId);
+      pop(requestedActive ? "Şube yeniden aktif edildi." : "Şube pasife alındı.",6000);
+      return true;
+    } finally {
+      branchLifecycleWritingRef.current = false;
+      setBranchLifecycleBusyId("");
+    }
+  };
+
   useEffect(() => { document.title = "Sonsuz Sanat CRM"; }, []);
+  useEffect(() => {
+    if (!giris || !browserOnline || !accessContext || !branchLifecycleIssue?.operationId) return;
+    if (branchLifecycleIssue.actorUserId && branchLifecycleIssue.actorUserId !== authSession?.user?.id) return;
+    if (branchLifecycleIssue.state === "not_applied" || branchLifecycleIssue.state === "conflict") return;
+    if (branchLifecycleAutoCheckRef.current === branchLifecycleIssue.operationId) return;
+    branchLifecycleAutoCheckRef.current = branchLifecycleIssue.operationId;
+    void checkBranchLifecycleOperation(branchLifecycleIssue,{ notify:false });
+  },[giris,browserOnline,accessContext,branchLifecycleIssue?.operationId,authSession?.user?.id]);
   useEffect(() => {
     if (!giris) {
       accessContextLoadSequenceRef.current += 1;
@@ -6176,10 +6463,15 @@ export default function App() {
       setActiveOrganization(null);
       setCurrentBranch(null);
       setShowBranchMenu(false);
+      setShowBranchCreate(false);
       return;
     }
     void loadAccessContext();
   }, [giris,authSession?.user?.id]);
+
+  useEffect(() => {
+    if (mainTab === "subeler" && activeOrganization && activeOrganization.canCreateBranches !== true) setMainTab("bugün");
+  },[mainTab,activeOrganization?.id,activeOrganization?.canCreateBranches]);
 
   useEffect(() => {
     const generation = protectedDataLoadGenerationRef.current + 1;
@@ -7938,6 +8230,9 @@ export default function App() {
   const branchOptions = accessBranchOptions(accessContext);
   const selectableBranchOptions = branchOptions.filter(option=>option.selectable);
   const hasMultipleSelectableBranches = selectableBranchOptions.length > 1;
+  const canManageBranches = activeOrganization?.canCreateBranches === true;
+  const organizationBranches = Array.isArray(activeOrganization?.branches) ? activeOrganization.branches : [];
+  const visibleBranchLifecycleIssue = branchLifecycleIssue && (!branchLifecycleIssue.actorUserId || branchLifecycleIssue.actorUserId === authSession?.user?.id) ? branchLifecycleIssue : null;
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:<StudentsNavIcon />, badge:stats.active },
@@ -7947,6 +8242,7 @@ export default function App() {
     { key:"takvim", label:"Takvim", icon:"□" },
     { key:"gelir", label:"Finans", icon:"↗" },
     { key:"ozet", label:"Özet", icon:"◎" },
+    ...(canManageBranches ? [{ key:"subeler", label:"Şubeler", icon:"⌂" }] : []),
   ];
   const viewMeta = {
     bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
@@ -7957,6 +8253,7 @@ export default function App() {
     takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
     gelir:{ eyebrow:"Finansal Görünüm", title:"Finans", subtitle:"Tahsilat, gider ve net kârını aylık olarak takip et." },
     ozet:{ eyebrow:"AYLIK YÖNETİM", title:"Kurum özeti", subtitle:"Ders, gelir, kayıt, öğrenci durumu ve öğretmen dağılımını ay ay izle." },
+    subeler:{ eyebrow:"KURUM YÖNETİMİ", title:"Şubeler", subtitle:"Kurum şubelerini güvenli biçimde oluştur ve aktiflik durumlarını yönet." },
   }[mainTab];
   const protectedDataIssueLabels = Object.keys(protectedDataLoadIssues)
     .filter(source=>protectedDataLoadIssues[source])
@@ -8240,11 +8537,24 @@ export default function App() {
         <header className="crm-topbar">
           <div><p className="crm-eyebrow">{viewMeta.eyebrow}</p><h1 className="crm-title">{viewMeta.title}</h1><p className="crm-subtitle">{viewMeta.subtitle}</p></div>
           <div className="crm-header-actions">
+            {canManageBranches && mainTab!=="subeler" ? <button type="button" className="crm-owner-branches" title="Şubeleri yönet" onClick={()=>setMainTab("subeler")}>Şubeler</button> : null}
             {hasMultipleSelectableBranches ? <button type="button" className="crm-branch-switch" title="Aktif şubeyi değiştir" onClick={()=>setShowBranchMenu(true)}>⌄ {currentBranch.name}</button> : null}
-            <button className="crm-primary" onClick={()=>mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):setShowAdd(true)}>{mainTab==="tekders"?"＋ Tek Ders Ekle":"＋ Öğrenci ekle"}</button>
+            <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="tekders"?"＋ Tek Ders Ekle":"＋ Öğrenci ekle"}</button>
           </div>
         </header>
         <section className="crm-page">
+        {visibleBranchLifecycleIssue ? (
+          <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
+            <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Şube işlemi kontrolü gerekli</p>
+            <p style={{ margin:"0 0 4px", fontSize:12, color:"#9a3412", fontWeight:650, lineHeight:1.5 }}>{branchLifecycleIssueMessage(visibleBranchLifecycleIssue)}</p>
+            {visibleBranchLifecycleIssue.label ? <p style={{ margin:"0 0 10px", fontSize:11, color:"#9a3412", fontWeight:800 }}>İşlem: {visibleBranchLifecycleIssue.label}</p> : null}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              <button type="button" onClick={()=>checkBranchLifecycleOperation(visibleBranchLifecycleIssue)} disabled={!browserOnline || branchLifecycleIssueChecking} style={{ border:"none", borderRadius:9, padding:"8px 11px", background:"#ea580c", color:"#fff", fontSize:12, fontWeight:850, cursor:(!browserOnline || branchLifecycleIssueChecking)?"wait":"pointer", opacity:(!browserOnline || branchLifecycleIssueChecking)?0.65:1 }}>{branchLifecycleIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button>
+              {visibleBranchLifecycleIssue.state === "not_applied" ? <button type="button" onClick={()=>clearBranchLifecycleIssue(visibleBranchLifecycleIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
+            </div>
+            <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Kontrol yalnızca Supabase'den okur; şube işlemini kendiliğinden tekrarlamaz.</p>
+          </div>
+        ) : null}
         {!browserOnline || singleLessonIssue ? (
           <div role="alert" style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 6px", fontSize:13, fontWeight:850, color:"#991b1b" }}>{!browserOnline ? "İnternet bağlantısı yok" : "Tek Ders kayıt güvenliği uyarısı"}</p>
@@ -8296,6 +8606,37 @@ export default function App() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        ) : null}
+        {mainTab === "subeler" && canManageBranches ? (
+          <div>
+            <div style={{ ...SECTION, background:"#faf8ff", borderColor:"#ddd6fe" }}>
+              <p style={{ margin:0, fontSize:13, fontWeight:850, color:"#4c1d95" }}>{activeOrganization.name}</p>
+              <p style={{ margin:"6px 0 0", fontSize:12, color:"#6d5b82", lineHeight:1.55 }}>Yeni şube boş oluşturulur; Bodrum öğrencileri, ödemeleri, takvimi veya Finans kayıtları kopyalanmaz. Şubeler fiziksel olarak silinmez.</p>
+            </div>
+            <div style={{ display:"grid", gap:10 }}>
+              {organizationBranches.map(branch=>{
+                const active = branch.active !== false;
+                const selected = branch.id === currentBranch?.id;
+                const busy = branchLifecycleBusyId === branch.id;
+                const lastActive = active && organizationBranches.filter(item=>item.active !== false).length <= 1;
+                return <div key={branch.id} style={{ ...CARD, padding:"15px 16px", borderLeft:`5px solid ${active?"#10b981":"#94a3b8"}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:14, flexWrap:"wrap" }}>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
+                        <strong style={{ fontSize:15 }}>{branch.name || "Şube"}</strong>
+                        <TonePill tone={active?"good":"neutral"}>{active?"Aktif":"Pasif"}</TonePill>
+                        {selected ? <TonePill tone="special">Açık şube</TonePill> : null}
+                      </div>
+                      <p style={{ margin:"7px 0 0", color:"#7b7480", fontSize:11 }}>Kısa kod: <strong>{branch.code || "-"}</strong></p>
+                      {lastActive ? <p style={{ margin:"6px 0 0", color:"#6d5b82", fontSize:10, fontWeight:700 }}>Kurumun son aktif şubesi pasife alınamaz.</p> : null}
+                    </div>
+                    <button type="button" disabled={lastActive || busy || !!visibleBranchLifecycleIssue || !browserOnline} onClick={()=>handleBranchActiveChange(branch)} style={{ border:active?"1px solid #fca5a5":"1px solid #86efac", background:"#fff", color:active?"#b91c1c":"#047857", borderRadius:10, padding:"8px 11px", fontSize:11, fontWeight:850, cursor:(lastActive || busy || visibleBranchLifecycleIssue || !browserOnline)?"not-allowed":"pointer", opacity:(lastActive || busy || visibleBranchLifecycleIssue || !browserOnline)?0.6:1 }}>{busy?"Kaydediliyor...":active?"Pasife Al":"Aktif Et"}</button>
+                  </div>
+                </div>;
+              })}
+              {organizationBranches.length===0 ? <div style={{ ...CARD, padding:24, textAlign:"center", color:"#8b8490", fontSize:13 }}>Bu kurumda şube bulunamadı.</div> : null}
             </div>
           </div>
         ) : null}
@@ -8460,7 +8801,7 @@ export default function App() {
       <button className="crm-desktop-logout" disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>↪ Güvenli çıkış</button>
 
       <nav className="crm-mobile-nav">
-        {mainNav.map(t=>(
+        {mainNav.filter(t=>t.key!=="subeler").map(t=>(
           <button key={t.key} className={mainTab===t.key?"active":""} onClick={()=>setMainTab(t.key)}>
             <span>{t.icon}</span>{t.label}
           </button>
@@ -8475,6 +8816,25 @@ export default function App() {
           <p style={{fontSize:13,color:"#666",lineHeight:1.6,margin:"0 0 16px"}}>Normal çıkışta bu tarayıcı 30 gün boyunca güvenilen cihaz olarak kalır. Bir sonraki girişte parolanız sorulur, doğrulama kodu sorulmaz.</p>
           <Btn bg="#5b42d6" onClick={()=>handleSecureLogout(false)}>Yalnızca Güvenli Çıkış</Btn>
           <Btn bg="#dc5d51" outline onClick={()=>handleSecureLogout(true)}>Çıkış Yap ve Bu Cihazı Unut</Btn>
+        </Sheet>
+      ) : null}
+
+      {showBranchCreate ? (
+        <Sheet title="Yeni Şube" subtitle={activeOrganization?.name || "Kurum"} onClose={()=>{ if(!branchLifecycleBusyId) setShowBranchCreate(false); }}>
+          <label style={{ display:"block", margin:"0 0 6px", color:"#756f7a", fontSize:11, fontWeight:800 }}>Şube adı</label>
+          <input style={INP} value={branchCreateName} disabled={branchLifecycleBusyId==="create"} onChange={event=>{
+            const value = event.target.value;
+            setBranchCreateName(value);
+            if (!branchCreateCodeEdited) setBranchCreateCode(branchLocalCodeFromName(value));
+          }} placeholder="Örn. Çeşme Sonsuz Sanat" maxLength={200} />
+          <label style={{ display:"block", margin:"13px 0 6px", color:"#756f7a", fontSize:11, fontWeight:800 }}>Kalıcı kısa kod</label>
+          <input style={INP} value={branchCreateCode} disabled={branchLifecycleBusyId==="create"} onChange={event=>{
+            setBranchCreateCodeEdited(true);
+            setBranchCreateCode(branchLocalCodeFromName(event.target.value));
+          }} placeholder="cesme" maxLength={60} />
+          <p style={{ margin:"7px 0 15px", color:"#8a8390", fontSize:10, lineHeight:1.5 }}>Kısa kod küçük harf, rakam ve tire içerebilir; oluşturulduktan sonra değiştirilemez. Şube aktif ve tamamen boş başlayacaktır.</p>
+          <Btn bg="#5b42d6" disabled={branchLifecycleBusyId==="create" || !!visibleBranchLifecycleIssue || !browserOnline} onClick={handleBranchCreate}>{branchLifecycleBusyId==="create"?"Oluşturuluyor...":"Şubeyi Oluştur"}</Btn>
+          <Btn bg="#6b7280" outline disabled={branchLifecycleBusyId==="create"} onClick={()=>setShowBranchCreate(false)}>İptal</Btn>
         </Sheet>
       ) : null}
 
