@@ -172,7 +172,18 @@ export default async function handler(req, res) {
       p_operation_id:operationId,
       p_target_user_id:targetUserId,
     });
-    if (!finalized.ok || finalized.data?.profileActive !== false) {
+    const finalizeState = String(finalized.data?.operationState || "");
+    const finalizedInvitation = finalized.data?.invitation || null;
+    const exactCompletedInvitation = finalizedInvitation?.status === "sent"
+      && finalizedInvitation?.operation_id === operationId
+      && finalizedInvitation?.organization_id === organizationId
+      && finalizedInvitation?.target_user_id === targetUserId;
+    const finalizedNow = finalizeState === "sent"
+      && finalized.data?.profileActive === false
+      && exactCompletedInvitation;
+    const reconciledExisting = finalizeState === "replayed"
+      && exactCompletedInvitation;
+    if (!finalized.ok || (!finalizedNow && !reconciledExisting)) {
       send(res, 503, { ok:false, code:"invite_sent_finalize_pending", operationId });
       return;
     }
