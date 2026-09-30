@@ -22,6 +22,8 @@ const SINGLE_LESSON_ISSUE_KEY = "sonsuz_crm_single_lesson_issue_v1";
 const EXTRA_LESSON_PAYMENT_ISSUE_KEY = "sonsuz_crm_extra_lesson_payment_issue_v1";
 const PACKAGE_PAYMENT_ISSUE_KEY = "sonsuz_crm_package_payment_issue_v1";
 const BRANCH_LIFECYCLE_ISSUE_KEY = "sonsuz_crm_branch_lifecycle_issue_v1";
+const STAFF_INVITATION_ISSUE_KEY = "sonsuz_crm_staff_invitation_issue_v1";
+const STAFF_ACTIVATION_ISSUE_KEY = "sonsuz_crm_staff_activation_issue_v1";
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -720,6 +722,52 @@ function branchLifecycleIssueMessage(issue) {
   if (issue.state === "not_applied") return "Şube işlemi Supabase'de bulunamadı. Değişiklik oluşmadı; gerekiyorsa işlemi yeniden başlatabilirsiniz.";
   if (issue.state === "applied_pending_refresh") return "Şube işlemi Supabase'e kaydedildi; güncel şube listesi henüz doğrulanamadı. İşlemi yeniden göndermeyin.";
   return "Şube işleminin sonucu henüz kesinleştirilemedi. Sistem işlemi tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
+}
+
+function readStaffIssue(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" && parsed.operationId ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStaffIssue(storageKey, issue) {
+  if (typeof window === "undefined") return false;
+  try {
+    if (issue) localStorage.setItem(storageKey, JSON.stringify(issue));
+    else localStorage.removeItem(storageKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function staffInvitationIssueMessage(issue) {
+  if (!issue) return "";
+  if (issue.state === "not_applied") return "Personel daveti Supabase'de bulunamadı. Davet oluşmadı; uyarıyı kapatıp işlemi yeniden başlatabilirsiniz.";
+  if (issue.state === "prepared") return "Davet niyeti kaydedildi fakat e-posta daveti ve pasif profil henüz kesin olarak tamamlanmadı. İşlemi yalnız açık onayınızla aynı kimlikle tamamlayabilirsiniz.";
+  if (issue.state === "applied_pending_refresh") return "Personel daveti tamamlandı; güncel personel listesi henüz doğrulanamadı. İkinci davet göndermeyin.";
+  if (issue.state === "conflict") return "Personel davet kanıtı beklenen kurum veya kullanıcıyla eşleşmedi. Yeni işlem göndermeyin.";
+  return "Personel davetinin sonucu henüz kesinleştirilemedi. Sistem daveti tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
+}
+
+function staffActivationIssueMessage(issue) {
+  if (!issue) return "";
+  if (issue.state === "not_applied") return "Personel şube ataması Supabase'de bulunamadı. Yetki verilmedi; uyarıyı kapatıp şubeleri yeniden seçebilirsiniz.";
+  if (issue.state === "applied_pending_refresh") return "Personel erişimi Supabase'e kaydedildi; güncel personel listesi henüz doğrulanamadı. Atamayı yeniden göndermeyin.";
+  if (issue.state === "conflict") return "Personel erişim kanıtı beklenen davet veya şubelerle eşleşmedi. Yeni işlem göndermeyin.";
+  return "Personel şube atamasının sonucu henüz kesinleştirilemedi. Sistem atamayı tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
+}
+
+function canonicalStaffBranchIds(values) {
+  return [...new Set((Array.isArray(values) ? values : []).filter(Boolean).map(String))].sort();
+}
+
+function staffRoleLabel(role) {
+  return role === "admin" ? "Yönetici" : "Öğretmen";
 }
 
 function branchLocalCodeFromName(value) {
@@ -1901,7 +1949,7 @@ const MIZAN_UI_CSS = `
   .crm-student-info-item{min-width:0;padding:8px 13px;border-left:1px solid #ece8e4;font-size:12px;line-height:1.4}
   .crm-student-info-item:nth-child(3n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+4){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}
   .crm-student-info-label{display:block;margin-bottom:3px;color:#7b7680;font-size:10px;font-weight:850;letter-spacing:.05em;text-transform:uppercase}.crm-student-info-value{display:block;color:#1c1921;font-weight:750;overflow-wrap:anywhere}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-owner-branches{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;font-size:0}.crm-owner-branches:after{content:"⌂";font-size:19px}.crm-branch-switch{max-width:105px;padding:9px 10px;font-size:10px}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(9,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-owner-branches{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;font-size:0}.crm-owner-branches:after{content:"⌂";font-size:19px}.crm-branch-switch{max-width:105px;padding:9px 10px;font-size:10px}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(10,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -5402,6 +5450,11 @@ export default function App() {
   const branchScopedWriteCountRef = useRef(0);
   const branchLifecycleWritingRef = useRef(false);
   const branchLifecycleAutoCheckRef = useRef("");
+  const staffInvitationWritingRef = useRef(false);
+  const staffInvitationAutoCheckRef = useRef("");
+  const staffActivationWritingRef = useRef(false);
+  const staffActivationAutoCheckRef = useRef("");
+  const staffManagementLoadSequenceRef = useRef(0);
   const [accessContext, setAccessContext] = useState(null);
   const [accessContextLoading, setAccessContextLoading] = useState(false);
   const [accessContextError, setAccessContextError] = useState("");
@@ -5415,6 +5468,21 @@ export default function App() {
   const [branchLifecycleBusyId, setBranchLifecycleBusyId] = useState("");
   const [branchLifecycleIssue, setBranchLifecycleIssue] = useState(() => readBranchLifecycleIssue());
   const [branchLifecycleIssueChecking, setBranchLifecycleIssueChecking] = useState(false);
+  const [staffInvitations, setStaffInvitations] = useState([]);
+  const [staffActivations, setStaffActivations] = useState([]);
+  const [staffManagementLoading, setStaffManagementLoading] = useState(false);
+  const [staffManagementError, setStaffManagementError] = useState("");
+  const [showStaffInvite, setShowStaffInvite] = useState(false);
+  const [staffInviteName, setStaffInviteName] = useState("");
+  const [staffInviteEmail, setStaffInviteEmail] = useState("");
+  const [staffInviteRole, setStaffInviteRole] = useState("teacher");
+  const [staffInvitationBusy, setStaffInvitationBusy] = useState(false);
+  const [staffActivationBusyId, setStaffActivationBusyId] = useState("");
+  const [staffBranchSelections, setStaffBranchSelections] = useState({});
+  const [staffInvitationIssue, setStaffInvitationIssue] = useState(() => readStaffIssue(STAFF_INVITATION_ISSUE_KEY));
+  const [staffInvitationIssueChecking, setStaffInvitationIssueChecking] = useState(false);
+  const [staffActivationIssue, setStaffActivationIssue] = useState(() => readStaffIssue(STAFF_ACTIVATION_ISSUE_KEY));
+  const [staffActivationIssueChecking, setStaffActivationIssueChecking] = useState(false);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
   const [loadedSources, setLoadedSources] = useState({ students:false, teachers:false, expenses:false });
@@ -5467,6 +5535,7 @@ export default function App() {
       connectionAutoRetryRef.current = false;
       protectedDataLoadGenerationRef.current += 1;
       singleLessonLoadSequenceRef.current += 1;
+      staffManagementLoadSequenceRef.current += 1;
       setLoading(false);
       setDetailSt(null);
       setActionModal(null);
@@ -5476,6 +5545,7 @@ export default function App() {
       setSingleLessonSheet(null);
       setShowAdd(false);
       setShowBranchCreate(false);
+      setShowStaffInvite(false);
       pendingSingleLessonCreateRef.current = null;
     };
     window.addEventListener("online",online);
@@ -5489,7 +5559,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const warnWhilePaymentIsWriting = event => {
-      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !branchLifecycleWritingRef.current) return;
+      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -5778,12 +5848,20 @@ export default function App() {
     protectedDataLoadGenerationRef.current += 1;
     singleLessonLoadSequenceRef.current += 1;
     monthlyReportLoadSequenceRef.current += 1;
+    staffManagementLoadSequenceRef.current += 1;
     setAccessContext(null);
     setAccessContextLoading(false);
     setAccessContextError("");
     setActiveOrganization(null);
     setCurrentBranch(null);
     setShowBranchMenu(false);
+    setShowBranchCreate(false);
+    setShowStaffInvite(false);
+    setStaffInvitations([]);
+    setStaffActivations([]);
+    setStaffManagementLoading(false);
+    setStaffManagementError("");
+    setStaffBranchSelections({});
     setGiris(false);
     setAuthBusy(false);
   };
@@ -6113,6 +6191,8 @@ export default function App() {
       || Object.keys(singleLessonBusyIdsRef.current).length > 0
       || branchScopedWriteCountRef.current > 0
       || branchLifecycleWritingRef.current
+      || staffInvitationWritingRef.current
+      || staffActivationWritingRef.current
       || !!downloadingReportId;
     if (changingBranch && (currentBranchHasUnresolvedWrite || activeWrite)) {
       pop("Devam eden veya sonucu kontrol edilmesi gereken işlem varken şube değiştirilemez. Önce mevcut uyarıyı sonuçlandırın.",9000);
@@ -6151,6 +6231,7 @@ export default function App() {
     setShowSecurityMenu(false);
     setShowBranchMenu(false);
     setShowBranchCreate(false);
+    setShowStaffInvite(false);
     pendingSingleLessonCreateRef.current = null;
     clearSingleLessonIssue(issue=>issue.kind !== "operation");
     setActiveOrganization(option.organization);
@@ -6445,6 +6526,409 @@ export default function App() {
     }
   };
 
+  const persistStaffInvitationIssue = issue => {
+    const stored = issue ? {
+      ...issue,
+      state:issue.state || "unknown",
+      createdAt:issue.createdAt || new Date().toISOString(),
+    } : null;
+    if (!writeStaffIssue(STAFF_INVITATION_ISSUE_KEY,stored)) return false;
+    setStaffInvitationIssue(stored);
+    return true;
+  };
+
+  const clearStaffInvitationIssue = operationId => {
+    if (operationId && staffInvitationIssue?.operationId && staffInvitationIssue.operationId !== operationId) return;
+    writeStaffIssue(STAFF_INVITATION_ISSUE_KEY,null);
+    setStaffInvitationIssue(null);
+  };
+
+  const persistStaffActivationIssue = issue => {
+    const stored = issue ? {
+      ...issue,
+      branchIds:canonicalStaffBranchIds(issue.branchIds),
+      state:issue.state || "unknown",
+      createdAt:issue.createdAt || new Date().toISOString(),
+    } : null;
+    if (!writeStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,stored)) return false;
+    setStaffActivationIssue(stored);
+    return true;
+  };
+
+  const clearStaffActivationIssue = operationId => {
+    if (operationId && staffActivationIssue?.operationId && staffActivationIssue.operationId !== operationId) return;
+    writeStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,null);
+    setStaffActivationIssue(null);
+  };
+
+  const loadStaffManagement = async (organizationId=activeOrganization?.id) => {
+    const ownerAuthorized = organizationId
+      && activeOrganization?.id === organizationId
+      && activeOrganization?.role === "owner"
+      && accessContext?.profileRole === "admin";
+    if (!ownerAuthorized) {
+      setStaffInvitations([]);
+      setStaffActivations([]);
+      setStaffManagementError("Personel yönetimi yalnız aktif kurum sahibine açıktır.");
+      return { ok:false, unauthorized:true };
+    }
+    const sequence = staffManagementLoadSequenceRef.current + 1;
+    staffManagementLoadSequenceRef.current = sequence;
+    setStaffManagementLoading(true);
+    setStaffManagementError("");
+    try {
+      const [invitationResult,activationResult] = await Promise.all([
+        timedSingleLessonRequest(() => supabase
+          .from("staff_invitations")
+          .select("id,operation_id,organization_id,normalized_email,display_name,requested_app_role,status,target_user_id,actor_user_id,prepared_at,sent_at")
+          .eq("organization_id",organizationId)
+          .order("prepared_at",{ ascending:false })),
+        timedSingleLessonRequest(() => supabase
+          .from("staff_access_activation_operations")
+          .select("operation_id,invitation_id,organization_id,target_user_id,requested_app_role,requested_branch_ids,actor_user_id,created_at")
+          .eq("organization_id",organizationId)
+          .order("created_at",{ ascending:false })),
+      ]);
+      if (sequence !== staffManagementLoadSequenceRef.current) return { ok:false, superseded:true };
+      if (invitationResult.error || activationResult.error) {
+        setStaffInvitations([]);
+        setStaffActivations([]);
+        setStaffManagementError("Personel listesi Supabase'den bütünüyle doğrulanamadı. Eksik listeyle işlem yapılmayacak.");
+        console.error("Personel yönetimi yüklenemedi:",invitationResult.error || activationResult.error);
+        return { ok:false, error:invitationResult.error || activationResult.error };
+      }
+      setStaffInvitations(invitationResult.data || []);
+      setStaffActivations(activationResult.data || []);
+      return { ok:true, invitations:invitationResult.data || [], activations:activationResult.data || [] };
+    } finally {
+      if (sequence === staffManagementLoadSequenceRef.current) setStaffManagementLoading(false);
+    }
+  };
+
+  const checkStaffInvitationOperation = async (issue=staffInvitationIssue, options={}) => {
+    if (!issue?.operationId || staffInvitationIssueChecking) return { ok:false };
+    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return { ok:false, foreignUser:true };
+    setStaffInvitationIssueChecking(true);
+    try {
+      const result = await timedSingleLessonRequest(() => supabase
+        .from("staff_invitations")
+        .select("id,operation_id,organization_id,normalized_email,display_name,requested_app_role,status,target_user_id,actor_user_id,prepared_at,sent_at")
+        .eq("operation_id",issue.operationId)
+        .maybeSingle());
+      if (result.error) {
+        persistStaffInvitationIssue({ ...issue, state:"unknown" });
+        if (options.notify !== false) pop("Personel davetinin sonucu henüz doğrulanamadı. Uyarı ekranda kalacak.",8000);
+        return { ok:false, error:result.error };
+      }
+      if (!result.data) {
+        const notFoundSince = issue.notFoundSince || new Date().toISOString();
+        const waitedLongEnough = issue.notFoundSince && Date.now() - new Date(issue.notFoundSince).getTime() >= 10000;
+        if (!waitedLongEnough) {
+          persistStaffInvitationIssue({ ...issue, state:"unknown", notFoundSince });
+          if (options.notify !== false) pop("Davet kanıtı henüz görünmüyor. Güvenlik için biraz sonra yeniden kontrol edin; yeni davet göndermeyin.",8000);
+          return { ok:false, applied:false, uncertain:true };
+        }
+        persistStaffInvitationIssue({ ...issue, state:"not_applied" });
+        if (options.notify !== false) pop("Personel daveti Supabase'de bulunamadı; davet oluşmadı.",7000);
+        return { ok:true, applied:false };
+      }
+      const row = result.data;
+      if (row.operation_id !== issue.operationId || row.organization_id !== issue.organizationId || row.actor_user_id !== authSession?.user?.id) {
+        persistStaffInvitationIssue({ ...issue, state:"conflict" });
+        if (options.notify !== false) pop("Personel davet kanıtı beklenen bilgilerle eşleşmedi. Yeni davet göndermeyin.",9000);
+        return { ok:false, conflict:true };
+      }
+      if (row.status !== "sent" || !row.target_user_id) {
+        persistStaffInvitationIssue({ ...issue, invitationId:row.id, state:"prepared" });
+        await loadStaffManagement(issue.organizationId);
+        if (options.notify !== false) pop("Davet hazırlığı bulundu; e-posta ve pasif profil henüz tamamlanmadı.",8000);
+        return { ok:true, applied:false, prepared:true, row };
+      }
+      const refreshed = await loadStaffManagement(issue.organizationId);
+      if (!refreshed.ok) {
+        persistStaffInvitationIssue({ ...issue, invitationId:row.id, targetUserId:row.target_user_id, state:"applied_pending_refresh" });
+        if (options.notify !== false) pop("Personel daveti tamamlandı; güncel liste henüz yüklenemedi. Daveti tekrarlamayın.",9000);
+        return { ok:false, applied:true, refreshFailed:true };
+      }
+      clearStaffInvitationIssue(issue.operationId);
+      if (options.notify !== false) pop("Personel daveti Supabase'de doğrulandı.",6000);
+      return { ok:true, applied:true, row };
+    } finally {
+      setStaffInvitationIssueChecking(false);
+    }
+  };
+
+  const staffInvitationErrorText = code => ({
+    email_already_registered:"Bu e-posta daha önce kayıtlı. Mevcut hesabı sessizce personele çevirmiyoruz.",
+    invitation_already_pending:"Bu e-posta için tamamlanmamış bir personel daveti zaten var.",
+    not_authorized:"Personel davetini yalnız kurum sahibi gönderebilir.",
+    invalid_input:"Ad, e-posta veya rol bilgisi geçerli değil.",
+    server_secret_not_configured:"Sunucu davet anahtarı hazır değil; hiçbir hesap oluşturulmadı.",
+    invite_rate_limited:"Supabase kısa süre içinde çok fazla davet denemesi algıladı. Bekleyip aynı işlemi yeniden tamamlayın.",
+    invite_send_failed:"Davet e-postası gönderilemedi. İşlemin durumu Supabase'den kontrol edildi.",
+    invite_sent_finalize_pending:"Davet e-postası gönderilmiş olabilir fakat pasif profil tamamlanamadı. Aynı işlem kimliğiyle tamamlanmalıdır.",
+    invitation_identity_conflict:"Davet kimliği beklenen kullanıcıyla eşleşmedi. Yeni işlem göndermeyin.",
+  }[code] || "Personel daveti tamamlanamadı. Sonuç Supabase'den kontrol edildi.");
+
+  const sendStaffInvitation = async payload => {
+    const organizationId = String(payload.organizationId || activeOrganization?.id || "");
+    const displayName = String(payload.displayName || "").trim();
+    const email = String(payload.email || "").trim().toLowerCase();
+    const appRole = String(payload.appRole || "");
+    const operationId = String(payload.operationId || uid());
+    const ownerAuthorized = activeOrganization?.id === organizationId && activeOrganization?.role === "owner" && accessContext?.profileRole === "admin";
+    const blockingIssue = staffInvitationIssue && (!staffInvitationIssue.actorUserId || staffInvitationIssue.actorUserId === authSession?.user?.id) && staffInvitationIssue.operationId !== operationId;
+    if (!ownerAuthorized) {
+      pop("Personel davet yetkisi doğrulanamadı.",7000);
+      return false;
+    }
+    if (!browserOnline || staffInvitationWritingRef.current || blockingIssue) {
+      pop(blockingIssue ? "Önce bekleyen personel daveti uyarısını sonuçlandırın." : "İnternet bağlantısı olmadan personel daveti gönderilemez.",8000);
+      return false;
+    }
+    if (!displayName || displayName.length > 120 || email.length < 3 || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !["admin","teacher"].includes(appRole)) {
+      pop("Ad, e-posta ve rol bilgilerini kontrol edin.",7000);
+      return false;
+    }
+    const issue = {
+      operationId,
+      actorUserId:authSession?.user?.id || "",
+      organizationId,
+      label:displayName+" · "+staffRoleLabel(appRole)+" daveti",
+      state:"writing",
+    };
+    if (!persistStaffInvitationIssue(issue)) {
+      pop("Davet işlem güvenliği tarayıcıda hazırlanamadı; davet gönderilmedi.",8000);
+      return false;
+    }
+    staffInvitationWritingRef.current = true;
+    setStaffInvitationBusy(true);
+    try {
+      const request = await timedSingleLessonRequest(signal => fetch("/api/staff-invite",{
+        method:"POST",
+        signal,
+        headers:{
+          Authorization:"Bearer "+String(authSession?.access_token || ""),
+          "Content-Type":"application/json",
+        },
+        body:JSON.stringify({ organizationId, operationId, email, displayName, appRole }),
+      }).then(async response => {
+        let data = null;
+        try { data = await response.json(); } catch { data = null; }
+        return { response, data };
+      }));
+      staffInvitationWritingRef.current = false;
+      if (request.error || !request.response?.ok || request.data?.ok !== true) {
+        persistStaffInvitationIssue({ ...issue, state:"unknown" });
+        const checked = await checkStaffInvitationOperation({ ...issue, state:"unknown" },{ notify:false });
+        if (!checked.applied) pop(staffInvitationErrorText(request.data?.code),9000);
+        return checked.applied === true;
+      }
+      if (request.data.operationId !== operationId || !request.data.invitationId || !request.data.targetUserId || request.data.profileActive !== false) {
+        persistStaffInvitationIssue({ ...issue, state:"conflict" });
+        pop("Davet yanıtı beklenen güvenlik bilgileriyle eşleşmedi. Yeni davet göndermeyin.",9000);
+        return false;
+      }
+      const refreshed = await loadStaffManagement(organizationId);
+      if (!refreshed.ok) {
+        persistStaffInvitationIssue({ ...issue, invitationId:request.data.invitationId, targetUserId:request.data.targetUserId, state:"applied_pending_refresh" });
+        pop("Davet tamamlandı; personel listesi henüz yenilenemedi. Daveti tekrarlamayın.",9000);
+        return false;
+      }
+      clearStaffInvitationIssue(operationId);
+      setShowStaffInvite(false);
+      setStaffInviteName("");
+      setStaffInviteEmail("");
+      setStaffInviteRole("teacher");
+      pop("Personel daveti gönderildi. Şube erişimi siz atayana kadar kapalıdır.",7000);
+      return true;
+    } finally {
+      staffInvitationWritingRef.current = false;
+      setStaffInvitationBusy(false);
+    }
+  };
+
+  const handleStaffInvite = () => sendStaffInvitation({
+    displayName:staffInviteName,
+    email:staffInviteEmail,
+    appRole:staffInviteRole,
+  });
+
+  const retryPreparedStaffInvitation = async invitation => {
+    if (!invitation?.operation_id || invitation.status !== "prepared") return false;
+    if (!window.confirm(invitation.display_name+" için yarım kalan daveti aynı işlem kimliğiyle tamamlamak istiyor musunuz?")) return false;
+    return sendStaffInvitation({
+      organizationId:invitation.organization_id,
+      operationId:invitation.operation_id,
+      displayName:invitation.display_name,
+      email:invitation.normalized_email,
+      appRole:invitation.requested_app_role,
+    });
+  };
+
+  const staffActivationMatches = (issue,row) => {
+    if (!issue || !row) return false;
+    return row.operation_id === issue.operationId
+      && row.invitation_id === issue.invitationId
+      && row.organization_id === issue.organizationId
+      && row.target_user_id === issue.targetUserId
+      && row.requested_app_role === issue.appRole
+      && row.actor_user_id === authSession?.user?.id
+      && JSON.stringify(canonicalStaffBranchIds(row.requested_branch_ids)) === JSON.stringify(canonicalStaffBranchIds(issue.branchIds));
+  };
+
+  const checkStaffActivationOperation = async (issue=staffActivationIssue, options={}) => {
+    if (!issue?.operationId || staffActivationIssueChecking) return { ok:false };
+    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return { ok:false, foreignUser:true };
+    setStaffActivationIssueChecking(true);
+    try {
+      const result = await timedSingleLessonRequest(() => supabase
+        .from("staff_access_activation_operations")
+        .select("operation_id,invitation_id,organization_id,target_user_id,requested_app_role,requested_branch_ids,actor_user_id,created_at")
+        .eq("operation_id",issue.operationId)
+        .maybeSingle());
+      if (result.error) {
+        persistStaffActivationIssue({ ...issue, state:"unknown" });
+        if (options.notify !== false) pop("Personel şube atamasının sonucu henüz doğrulanamadı. Uyarı ekranda kalacak.",8000);
+        return { ok:false, error:result.error };
+      }
+      if (!result.data) {
+        const notFoundSince = issue.notFoundSince || new Date().toISOString();
+        const waitedLongEnough = issue.notFoundSince && Date.now() - new Date(issue.notFoundSince).getTime() >= 10000;
+        if (!waitedLongEnough) {
+          persistStaffActivationIssue({ ...issue, state:"unknown", notFoundSince });
+          if (options.notify !== false) pop("Erişim kanıtı henüz görünmüyor. Güvenlik için biraz sonra yeniden kontrol edin; yeni atama göndermeyin.",8000);
+          return { ok:false, applied:false, uncertain:true };
+        }
+        persistStaffActivationIssue({ ...issue, state:"not_applied" });
+        if (options.notify !== false) pop("Personel şube ataması Supabase'de bulunamadı; yetki verilmedi.",7000);
+        return { ok:true, applied:false };
+      }
+      if (!staffActivationMatches(issue,result.data)) {
+        persistStaffActivationIssue({ ...issue, state:"conflict" });
+        if (options.notify !== false) pop("Personel erişim kanıtı beklenen bilgilerle eşleşmedi. Yeni atama göndermeyin.",9000);
+        return { ok:false, conflict:true };
+      }
+      const refreshed = await loadStaffManagement(issue.organizationId);
+      if (!refreshed.ok) {
+        persistStaffActivationIssue({ ...issue, state:"applied_pending_refresh" });
+        if (options.notify !== false) pop("Personel erişimi kaydedildi; güncel liste henüz yüklenemedi. Atamayı tekrarlamayın.",9000);
+        return { ok:false, applied:true, refreshFailed:true };
+      }
+      clearStaffActivationIssue(issue.operationId);
+      if (options.notify !== false) pop("Personel şube erişimi Supabase'de doğrulandı.",6000);
+      return { ok:true, applied:true, row:result.data };
+    } finally {
+      setStaffActivationIssueChecking(false);
+    }
+  };
+
+  const staffActivationErrorText = error => {
+    const message = String(error?.message || error || "");
+    if (message.includes("BRANCH_NOT_FOUND_OR_WRONG_TENANT")) return "Seçilen şubelerden biri pasif, bulunamadı veya başka kuruma ait. Hiçbir yetki verilmedi.";
+    if (message.includes("INVITATION_ALREADY_USED")) return "Bu davetin ilk erişimi daha önce etkinleştirilmiş.";
+    if (message.includes("TARGET_ALREADY_ASSIGNED")) return "Bu kullanıcıya daha önce kurum veya şube yetkisi atanmış. Sessizce değiştirmiyoruz.";
+    if (message.includes("PROFILE_INCOMPATIBLE")) return "Davet edilen pasif profil beklenen rolle eşleşmiyor. Hiçbir yetki verilmedi.";
+    if (message.includes("NOT_AUTHORIZED")) return "Personel erişimini yalnız kurum sahibi etkinleştirebilir.";
+    return "Personel şube erişimi tamamlanamadı. Sonuç Supabase'den kontrol edildi.";
+  };
+
+  const handleStaffActivation = async invitation => {
+    if (!invitation?.id || invitation.status !== "sent" || !invitation.target_user_id) return false;
+    const organizationId = invitation.organization_id;
+    const branchIds = canonicalStaffBranchIds(staffBranchSelections[invitation.id]);
+    const activeBranchIds = new Set((Array.isArray(activeOrganization?.branches) ? activeOrganization.branches : []).filter(branch=>branch.active !== false).map(branch=>branch.id));
+    const ownerAuthorized = activeOrganization?.id === organizationId && activeOrganization?.role === "owner" && accessContext?.profileRole === "admin";
+    const blockingIssue = staffActivationIssue && (!staffActivationIssue.actorUserId || staffActivationIssue.actorUserId === authSession?.user?.id);
+    if (!ownerAuthorized) {
+      pop("Personel şube atama yetkisi doğrulanamadı.",7000);
+      return false;
+    }
+    if (!browserOnline || staffActivationWritingRef.current || blockingIssue) {
+      pop(blockingIssue ? "Önce bekleyen personel erişim uyarısını sonuçlandırın." : "İnternet bağlantısı olmadan personel erişimi etkinleştirilemez.",8000);
+      return false;
+    }
+    if (!branchIds.length || branchIds.length > 100 || branchIds.some(branchId=>!activeBranchIds.has(branchId))) {
+      pop("En az bir aktif şube seçin.",7000);
+      return false;
+    }
+    const branchNames = (activeOrganization.branches || []).filter(branch=>branchIds.includes(branch.id)).map(branch=>branch.name).join(", ");
+    if (!window.confirm(invitation.display_name+" için "+branchNames+" şube erişimini etkinleştirmek istiyor musunuz?")) return false;
+    const issue = {
+      operationId:uid(),
+      actorUserId:authSession?.user?.id || "",
+      invitationId:invitation.id,
+      organizationId,
+      targetUserId:invitation.target_user_id,
+      appRole:invitation.requested_app_role,
+      branchIds,
+      label:invitation.display_name+" · "+branchNames,
+      state:"writing",
+    };
+    if (!persistStaffActivationIssue(issue)) {
+      pop("Personel erişim güvenliği tarayıcıda hazırlanamadı; atama gönderilmedi.",8000);
+      return false;
+    }
+    staffActivationWritingRef.current = true;
+    setStaffActivationBusyId(invitation.id);
+    try {
+      const result = await timedSingleLessonRequest(() => supabase.rpc("activate_invited_staff_access",{
+        p_organization_id:organizationId,
+        p_target_user_id:invitation.target_user_id,
+        p_branch_ids:branchIds,
+        p_operation_id:issue.operationId,
+      }));
+      staffActivationWritingRef.current = false;
+      if (result.error || !["applied","replayed"].includes(result.data?.operationState)) {
+        persistStaffActivationIssue({ ...issue, state:"unknown" });
+        const checked = await checkStaffActivationOperation({ ...issue, state:"unknown" },{ notify:false });
+        if (!checked.applied) pop(staffActivationErrorText(result.error),9000);
+        return checked.applied === true;
+      }
+      const access = result.data?.access || {};
+      const expectedRole = invitation.requested_app_role === "admin" ? "branch_manager" : "teacher";
+      const resultBranches = canonicalStaffBranchIds((access.branchMemberships || []).filter(item=>item.active && item.role===expectedRole).map(item=>item.branch_id));
+      const exactResult = access.profile?.user_id === invitation.target_user_id
+        && access.profile?.active === true
+        && access.profile?.role === invitation.requested_app_role
+        && access.organizationMembership?.organization_id === organizationId
+        && access.organizationMembership?.user_id === invitation.target_user_id
+        && access.organizationMembership?.role === "member"
+        && access.organizationMembership?.active === true
+        && JSON.stringify(resultBranches) === JSON.stringify(branchIds);
+      if (!exactResult) {
+        persistStaffActivationIssue({ ...issue, state:"conflict" });
+        pop("Personel erişim yanıtı beklenen rol ve şubelerle eşleşmedi. Yeni atama göndermeyin.",9000);
+        return false;
+      }
+      const refreshed = await loadStaffManagement(organizationId);
+      if (!refreshed.ok) {
+        persistStaffActivationIssue({ ...issue, state:"applied_pending_refresh" });
+        pop("Personel erişimi etkinleştirildi; liste henüz yenilenemedi. Atamayı tekrarlamayın.",9000);
+        return false;
+      }
+      clearStaffActivationIssue(issue.operationId);
+      setStaffBranchSelections(previous=>({ ...previous, [invitation.id]:[] }));
+      pop("Personel erişimi seçilen şubelerde etkinleştirildi.",7000);
+      return true;
+    } finally {
+      staffActivationWritingRef.current = false;
+      setStaffActivationBusyId("");
+    }
+  };
+
+  const openStaffInvite = () => {
+    const blockingIssue = staffInvitationIssue && (!staffInvitationIssue.actorUserId || staffInvitationIssue.actorUserId === authSession?.user?.id);
+    if (blockingIssue) {
+      pop("Önce bekleyen personel daveti uyarısını sonuçlandırın.",7000);
+      return;
+    }
+    setStaffInviteName("");
+    setStaffInviteEmail("");
+    setStaffInviteRole("teacher");
+    setShowStaffInvite(true);
+  };
+
   useEffect(() => { document.title = "Sonsuz Sanat CRM"; }, []);
   useEffect(() => {
     if (!giris || !browserOnline || !accessContext || !branchLifecycleIssue?.operationId) return;
@@ -6455,6 +6939,22 @@ export default function App() {
     void checkBranchLifecycleOperation(branchLifecycleIssue,{ notify:false });
   },[giris,browserOnline,accessContext,branchLifecycleIssue?.operationId,authSession?.user?.id]);
   useEffect(() => {
+    if (!giris || !browserOnline || !accessContext || !staffInvitationIssue?.operationId) return;
+    if (staffInvitationIssue.actorUserId && staffInvitationIssue.actorUserId !== authSession?.user?.id) return;
+    if (["not_applied","prepared","conflict"].includes(staffInvitationIssue.state)) return;
+    if (staffInvitationAutoCheckRef.current === staffInvitationIssue.operationId) return;
+    staffInvitationAutoCheckRef.current = staffInvitationIssue.operationId;
+    void checkStaffInvitationOperation(staffInvitationIssue,{ notify:false });
+  },[giris,browserOnline,accessContext,staffInvitationIssue?.operationId,authSession?.user?.id]);
+  useEffect(() => {
+    if (!giris || !browserOnline || !accessContext || !staffActivationIssue?.operationId) return;
+    if (staffActivationIssue.actorUserId && staffActivationIssue.actorUserId !== authSession?.user?.id) return;
+    if (["not_applied","conflict"].includes(staffActivationIssue.state)) return;
+    if (staffActivationAutoCheckRef.current === staffActivationIssue.operationId) return;
+    staffActivationAutoCheckRef.current = staffActivationIssue.operationId;
+    void checkStaffActivationOperation(staffActivationIssue,{ notify:false });
+  },[giris,browserOnline,accessContext,staffActivationIssue?.operationId,authSession?.user?.id]);
+  useEffect(() => {
     if (!giris) {
       accessContextLoadSequenceRef.current += 1;
       setAccessContext(null);
@@ -6464,6 +6964,10 @@ export default function App() {
       setCurrentBranch(null);
       setShowBranchMenu(false);
       setShowBranchCreate(false);
+      setShowStaffInvite(false);
+      setStaffInvitations([]);
+      setStaffActivations([]);
+      setStaffManagementError("");
       return;
     }
     void loadAccessContext();
@@ -6472,6 +6976,17 @@ export default function App() {
   useEffect(() => {
     if (mainTab === "subeler" && activeOrganization && activeOrganization.canCreateBranches !== true) setMainTab("bugün");
   },[mainTab,activeOrganization?.id,activeOrganization?.canCreateBranches]);
+
+  useEffect(() => {
+    const canManageStaff = activeOrganization?.role === "owner" && accessContext?.profileRole === "admin";
+    if (mainTab === "personel" && activeOrganization && !canManageStaff) {
+      setMainTab("bugün");
+      return;
+    }
+    if (mainTab === "personel" && canManageStaff && activeOrganization?.id && browserOnline) {
+      void loadStaffManagement(activeOrganization.id);
+    }
+  },[mainTab,activeOrganization?.id,activeOrganization?.role,accessContext?.profileRole,browserOnline]);
 
   useEffect(() => {
     const generation = protectedDataLoadGenerationRef.current + 1;
@@ -8231,8 +8746,13 @@ export default function App() {
   const selectableBranchOptions = branchOptions.filter(option=>option.selectable);
   const hasMultipleSelectableBranches = selectableBranchOptions.length > 1;
   const canManageBranches = activeOrganization?.canCreateBranches === true;
+  const canManageStaff = activeOrganization?.role === "owner" && accessContext?.profileRole === "admin";
   const organizationBranches = Array.isArray(activeOrganization?.branches) ? activeOrganization.branches : [];
+  const activeStaffBranches = organizationBranches.filter(branch=>branch.active !== false);
+  const staffActivationByInvitation = new Map(staffActivations.map(operation=>[operation.invitation_id,operation]));
   const visibleBranchLifecycleIssue = branchLifecycleIssue && (!branchLifecycleIssue.actorUserId || branchLifecycleIssue.actorUserId === authSession?.user?.id) ? branchLifecycleIssue : null;
+  const visibleStaffInvitationIssue = staffInvitationIssue && (!staffInvitationIssue.actorUserId || staffInvitationIssue.actorUserId === authSession?.user?.id) ? staffInvitationIssue : null;
+  const visibleStaffActivationIssue = staffActivationIssue && (!staffActivationIssue.actorUserId || staffActivationIssue.actorUserId === authSession?.user?.id) ? staffActivationIssue : null;
   const mainNav = [
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:<StudentsNavIcon />, badge:stats.active },
@@ -8243,6 +8763,7 @@ export default function App() {
     { key:"gelir", label:"Finans", icon:"↗" },
     { key:"ozet", label:"Özet", icon:"◎" },
     ...(canManageBranches ? [{ key:"subeler", label:"Şubeler", icon:"⌂" }] : []),
+    ...(canManageStaff ? [{ key:"personel", label:"Personel", icon:"◉" }] : []),
   ];
   const viewMeta = {
     bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
@@ -8254,6 +8775,7 @@ export default function App() {
     gelir:{ eyebrow:"Finansal Görünüm", title:"Finans", subtitle:"Tahsilat, gider ve net kârını aylık olarak takip et." },
     ozet:{ eyebrow:"AYLIK YÖNETİM", title:"Kurum özeti", subtitle:"Ders, gelir, kayıt, öğrenci durumu ve öğretmen dağılımını ay ay izle." },
     subeler:{ eyebrow:"KURUM YÖNETİMİ", title:"Şubeler", subtitle:"Kurum şubelerini güvenli biçimde oluştur ve aktiflik durumlarını yönet." },
+    personel:{ eyebrow:"ERİŞİM YÖNETİMİ", title:"Personel", subtitle:"Yeni yönetici ve öğretmenleri davet et; ilk şube erişimlerini açıkça belirle." },
   }[mainTab];
   const protectedDataIssueLabels = Object.keys(protectedDataLoadIssues)
     .filter(source=>protectedDataLoadIssues[source])
@@ -8539,7 +9061,7 @@ export default function App() {
           <div className="crm-header-actions">
             {canManageBranches && mainTab!=="subeler" ? <button type="button" className="crm-owner-branches" title="Şubeleri yönet" onClick={()=>setMainTab("subeler")}>Şubeler</button> : null}
             {hasMultipleSelectableBranches ? <button type="button" className="crm-branch-switch" title="Aktif şubeyi değiştir" onClick={()=>setShowBranchMenu(true)}>⌄ {currentBranch.name}</button> : null}
-            <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="tekders"?"＋ Tek Ders Ekle":"＋ Öğrenci ekle"}</button>
+            <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="personel"?openStaffInvite():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="personel"?"＋ Personel Davet Et":mainTab==="tekders"?"＋ Tek Ders Ekle":"＋ Öğrenci ekle"}</button>
           </div>
         </header>
         <section className="crm-page">
@@ -8553,6 +9075,31 @@ export default function App() {
               {visibleBranchLifecycleIssue.state === "not_applied" ? <button type="button" onClick={()=>clearBranchLifecycleIssue(visibleBranchLifecycleIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
             </div>
             <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Kontrol yalnızca Supabase'den okur; şube işlemini kendiliğinden tekrarlamaz.</p>
+          </div>
+        ) : null}
+        {visibleStaffInvitationIssue ? (
+          <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
+            <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Personel daveti kontrolü gerekli</p>
+            <p style={{ margin:"0 0 4px", fontSize:12, color:"#9a3412", fontWeight:650, lineHeight:1.5 }}>{staffInvitationIssueMessage(visibleStaffInvitationIssue)}</p>
+            {visibleStaffInvitationIssue.label ? <p style={{ margin:"0 0 10px", fontSize:11, color:"#9a3412", fontWeight:800 }}>İşlem: {visibleStaffInvitationIssue.label}</p> : null}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              <button type="button" onClick={()=>checkStaffInvitationOperation(visibleStaffInvitationIssue)} disabled={!browserOnline || staffInvitationIssueChecking} style={{ border:"none", borderRadius:9, padding:"8px 11px", background:"#ea580c", color:"#fff", fontSize:12, fontWeight:850, cursor:(!browserOnline || staffInvitationIssueChecking)?"wait":"pointer", opacity:(!browserOnline || staffInvitationIssueChecking)?0.65:1 }}>{staffInvitationIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button>
+              {visibleStaffInvitationIssue.state === "prepared" && staffInvitations.some(invitation=>invitation.operation_id===visibleStaffInvitationIssue.operationId) ? <button type="button" onClick={()=>retryPreparedStaffInvitation(staffInvitations.find(invitation=>invitation.operation_id===visibleStaffInvitationIssue.operationId))} disabled={!browserOnline || staffInvitationBusy} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:(!browserOnline || staffInvitationBusy)?"wait":"pointer" }}>{staffInvitationBusy?"Tamamlanıyor...":"Daveti Açıkça Tamamla"}</button> : null}
+              {visibleStaffInvitationIssue.state === "not_applied" ? <button type="button" onClick={()=>clearStaffInvitationIssue(visibleStaffInvitationIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
+            </div>
+            <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Yeniden kontrol yalnızca Supabase'den okur; davet işlemini kendiliğinden tekrarlamaz.</p>
+          </div>
+        ) : null}
+        {visibleStaffActivationIssue ? (
+          <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
+            <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Personel erişimi kontrolü gerekli</p>
+            <p style={{ margin:"0 0 4px", fontSize:12, color:"#9a3412", fontWeight:650, lineHeight:1.5 }}>{staffActivationIssueMessage(visibleStaffActivationIssue)}</p>
+            {visibleStaffActivationIssue.label ? <p style={{ margin:"0 0 10px", fontSize:11, color:"#9a3412", fontWeight:800 }}>İşlem: {visibleStaffActivationIssue.label}</p> : null}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              <button type="button" onClick={()=>checkStaffActivationOperation(visibleStaffActivationIssue)} disabled={!browserOnline || staffActivationIssueChecking} style={{ border:"none", borderRadius:9, padding:"8px 11px", background:"#ea580c", color:"#fff", fontSize:12, fontWeight:850, cursor:(!browserOnline || staffActivationIssueChecking)?"wait":"pointer", opacity:(!browserOnline || staffActivationIssueChecking)?0.65:1 }}>{staffActivationIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button>
+              {visibleStaffActivationIssue.state === "not_applied" ? <button type="button" onClick={()=>clearStaffActivationIssue(visibleStaffActivationIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
+            </div>
+            <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Yeniden kontrol yalnızca Supabase'den okur; yetki atamasını kendiliğinden tekrarlamaz.</p>
           </div>
         ) : null}
         {!browserOnline || singleLessonIssue ? (
@@ -8607,6 +9154,71 @@ export default function App() {
                 </div>
               ))}
             </div>
+          </div>
+        ) : null}
+        {mainTab === "personel" && canManageStaff ? (
+          <div>
+            <div style={{ ...SECTION, background:"#faf8ff", borderColor:"#ddd6fe" }}>
+              <p style={{ margin:0, fontSize:13, fontWeight:850, color:"#4c1d95" }}>{activeOrganization.name}</p>
+              <p style={{ margin:"6px 0 0", fontSize:12, color:"#6d5b82", lineHeight:1.55 }}>Yeni yönetici veya öğretmen önce e-posta davetiyle pasif oluşturulur. Kurum verilerine ancak sizin seçtiğiniz aktif şubeler tek işlemde atandıktan sonra erişebilir.</p>
+              <p style={{ margin:"7px 0 0", fontSize:10, color:"#7c6b8e", fontWeight:700 }}>Bu sürüm yalnız yeni davet ve ilk şube atamasını yapar; mevcut personelin rolünü değiştirme veya hesabını pasife alma işlemi içermez.</p>
+              <p style={{ margin:"5px 0 0", fontSize:10, color:"#7c6b8e" }}>Mevcut kurum sahibi hesabınız güvenli ilk kurulumla tanımlandığı için yeni davetler listesinde yer almaz.</p>
+            </div>
+            {staffManagementError ? (
+              <div role="alert" style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
+                <p style={{ margin:"0 0 8px", fontSize:12, color:"#991b1b", fontWeight:750, lineHeight:1.5 }}>{staffManagementError}</p>
+                <button type="button" onClick={()=>loadStaffManagement(activeOrganization.id)} disabled={!browserOnline || staffManagementLoading} style={{ border:"none", borderRadius:9, padding:"8px 11px", background:"#dc2626", color:"#fff", fontSize:12, fontWeight:850, cursor:(!browserOnline || staffManagementLoading)?"wait":"pointer" }}>{staffManagementLoading?"Yükleniyor...":"Yeniden Yükle"}</button>
+              </div>
+            ) : null}
+            {staffManagementLoading ? <div style={{ ...CARD, padding:30, textAlign:"center", color:"#8b8490", fontSize:13, fontWeight:750 }}>Personel davetleri ve erişimleri doğrulanıyor...</div> : null}
+            {!staffManagementLoading && !staffManagementError ? (
+              <div style={{ display:"grid", gap:10 }}>
+                {staffInvitations.map(invitation=>{
+                  const activation = staffActivationByInvitation.get(invitation.id);
+                  const selectedBranchIds = canonicalStaffBranchIds(staffBranchSelections[invitation.id]);
+                  const activatedBranchNames = activation
+                    ? canonicalStaffBranchIds(activation.requested_branch_ids).map(branchId=>organizationBranches.find(branch=>branch.id===branchId)?.name || "Bilinmeyen şube")
+                    : [];
+                  const activationBusy = staffActivationBusyId === invitation.id;
+                  return <div key={invitation.id} style={{ ...CARD, padding:"15px 16px", borderLeft:`5px solid ${activation?"#10b981":invitation.status==="sent"?"#7c3aed":"#f59e0b"}` }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12, flexWrap:"wrap" }}>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
+                          <strong style={{ fontSize:15 }}>{invitation.display_name}</strong>
+                          <TonePill tone={invitation.requested_app_role==="admin"?"special":"info"}>{staffRoleLabel(invitation.requested_app_role)}</TonePill>
+                          <TonePill tone={activation?"good":invitation.status==="sent"?"warn":"danger"}>{activation?"Erişim aktif":invitation.status==="sent"?"Şube bekliyor":"Davet tamamlanmadı"}</TonePill>
+                        </div>
+                        <p style={{ margin:"7px 0 0", color:"#57505f", fontSize:12, fontWeight:700, overflowWrap:"anywhere" }}>{invitation.normalized_email}</p>
+                        <p style={{ margin:"4px 0 0", color:"#8b8490", fontSize:10 }}>{invitation.sent_at ? "Davet: "+fmtDate(invitation.sent_at) : "Davet hazırlığı: "+fmtDate(invitation.prepared_at)}</p>
+                        {activation ? <p style={{ margin:"7px 0 0", color:"#047857", fontSize:11, fontWeight:800 }}>Şubeler: {activatedBranchNames.join(", ") || "-"}</p> : null}
+                      </div>
+                      {invitation.status === "prepared" ? <button type="button" disabled={staffInvitationBusy || !!visibleStaffInvitationIssue && visibleStaffInvitationIssue.operationId!==invitation.operation_id || !browserOnline} onClick={()=>retryPreparedStaffInvitation(invitation)} style={{ border:"1px solid #fdba74", background:"#fff7ed", color:"#9a3412", borderRadius:10, padding:"8px 11px", fontSize:11, fontWeight:850, cursor:staffInvitationBusy?"wait":"pointer" }}>{staffInvitationBusy?"Tamamlanıyor...":"Daveti Tamamla"}</button> : null}
+                    </div>
+                    {!activation && invitation.status === "sent" ? (
+                      <div style={{ marginTop:14, paddingTop:13, borderTop:"1px solid #eee9f4" }}>
+                        <p style={{ margin:"0 0 9px", fontSize:11, color:"#5d5663", fontWeight:850 }}>İlk erişim verilecek aktif şubeleri seçin</p>
+                        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:7 }}>
+                          {activeStaffBranches.map(branch=>{
+                            const checked = selectedBranchIds.includes(branch.id);
+                            return <label key={branch.id} style={{ display:"flex", alignItems:"center", gap:8, border:checked?"1.5px solid #7c3aed":"1px solid #ddd6e8", borderRadius:10, padding:"9px 10px", background:checked?"#f5f3ff":"#fff", color:checked?"#5b21b6":"#554e59", fontSize:11, fontWeight:800, cursor:activationBusy?"wait":"pointer" }}>
+                              <input type="checkbox" checked={checked} disabled={activationBusy || !!visibleStaffActivationIssue || !browserOnline} onChange={event=>setStaffBranchSelections(previous=>{
+                                const current = canonicalStaffBranchIds(previous[invitation.id]);
+                                const next = event.target.checked ? canonicalStaffBranchIds([...current,branch.id]) : current.filter(branchId=>branchId!==branch.id);
+                                return { ...previous, [invitation.id]:next };
+                              })} />
+                              <span>{branch.name}</span>
+                            </label>;
+                          })}
+                        </div>
+                        {activeStaffBranches.length===0 ? <p style={{ margin:"7px 0 0", color:"#b91c1c", fontSize:11, fontWeight:750 }}>Atanabilecek aktif şube yok.</p> : null}
+                        <button type="button" disabled={!selectedBranchIds.length || activationBusy || !!visibleStaffActivationIssue || !browserOnline} onClick={()=>handleStaffActivation(invitation)} style={{ width:"100%", marginTop:11, border:"none", borderRadius:10, padding:"10px 12px", background:"#5b42d6", color:"#fff", fontSize:12, fontWeight:850, cursor:(!selectedBranchIds.length || activationBusy || visibleStaffActivationIssue || !browserOnline)?"not-allowed":"pointer", opacity:(!selectedBranchIds.length || activationBusy || visibleStaffActivationIssue || !browserOnline)?0.58:1 }}>{activationBusy?"Erişim Etkinleştiriliyor...":"Seçili Şubelerde Erişimi Etkinleştir"}</button>
+                      </div>
+                    ) : null}
+                  </div>;
+                })}
+                {staffInvitations.length===0 ? <div style={{ ...CARD, padding:28, textAlign:"center", color:"#8b8490", fontSize:13 }}><p style={{ margin:"0 0 5px", fontSize:27 }}>◉</p><p style={{ margin:0, fontWeight:750 }}>Henüz personel daveti yok.</p></div> : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
         {mainTab === "subeler" && canManageBranches ? (
@@ -8816,6 +9428,24 @@ export default function App() {
           <p style={{fontSize:13,color:"#666",lineHeight:1.6,margin:"0 0 16px"}}>Normal çıkışta bu tarayıcı 30 gün boyunca güvenilen cihaz olarak kalır. Bir sonraki girişte parolanız sorulur, doğrulama kodu sorulmaz.</p>
           <Btn bg="#5b42d6" onClick={()=>handleSecureLogout(false)}>Yalnızca Güvenli Çıkış</Btn>
           <Btn bg="#dc5d51" outline onClick={()=>handleSecureLogout(true)}>Çıkış Yap ve Bu Cihazı Unut</Btn>
+        </Sheet>
+      ) : null}
+
+      {showStaffInvite ? (
+        <Sheet title="Personel Davet Et" subtitle={activeOrganization?.name || "Kurum"} onClose={()=>{ if(!staffInvitationBusy) setShowStaffInvite(false); }}>
+          <p style={{ margin:"0 0 14px", padding:"10px 11px", borderRadius:10, background:"#faf5ff", color:"#5b21b6", fontSize:11, fontWeight:700, lineHeight:1.55 }}>Davet edilen hesap önce pasif oluşturulur. Davet tamamlandıktan sonra Personel ekranında en az bir aktif şubeyi siz seçmedikçe hiçbir CRM iş verisine erişemez.</p>
+          <label style={{ display:"block", margin:"0 0 6px", color:"#756f7a", fontSize:11, fontWeight:800 }}>Ad soyad</label>
+          <input style={INP} value={staffInviteName} disabled={staffInvitationBusy} onChange={event=>setStaffInviteName(event.target.value)} placeholder="Örn. Ayşe Yılmaz" maxLength={120} autoComplete="name" />
+          <label style={{ display:"block", margin:"13px 0 6px", color:"#756f7a", fontSize:11, fontWeight:800 }}>E-posta</label>
+          <input style={INP} type="email" value={staffInviteEmail} disabled={staffInvitationBusy} onChange={event=>setStaffInviteEmail(event.target.value)} placeholder="ayse@example.com" maxLength={320} autoComplete="email" />
+          <label style={{ display:"block", margin:"13px 0 6px", color:"#756f7a", fontSize:11, fontWeight:800 }}>Rol</label>
+          <select style={INP} value={staffInviteRole} disabled={staffInvitationBusy} onChange={event=>setStaffInviteRole(event.target.value)}>
+            <option value="teacher">Öğretmen</option>
+            <option value="admin">Şube yöneticisi</option>
+          </select>
+          <p style={{ margin:"7px 0 15px", color:"#8a8390", fontSize:10, lineHeight:1.5 }}>Şube yöneticisi yalnız sonradan atayacağınız şubeleri yönetir. Kurum sahibi yetkisi verilmez.</p>
+          <Btn bg="#5b42d6" disabled={staffInvitationBusy || !!visibleStaffInvitationIssue || !browserOnline} onClick={handleStaffInvite}>{staffInvitationBusy?"Davet Gönderiliyor...":"Güvenli Daveti Gönder"}</Btn>
+          <Btn bg="#6b7280" outline disabled={staffInvitationBusy} onClick={()=>setShowStaffInvite(false)}>İptal</Btn>
         </Sheet>
       ) : null}
 
