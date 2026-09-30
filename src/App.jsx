@@ -24,6 +24,8 @@ const PACKAGE_PAYMENT_ISSUE_KEY = "sonsuz_crm_package_payment_issue_v1";
 const BRANCH_LIFECYCLE_ISSUE_KEY = "sonsuz_crm_branch_lifecycle_issue_v1";
 const STAFF_INVITATION_ISSUE_KEY = "sonsuz_crm_staff_invitation_issue_v1";
 const STAFF_ACTIVATION_ISSUE_KEY = "sonsuz_crm_staff_activation_issue_v1";
+const STAFF_ISSUE_STORE_VERSION = 2;
+const STAFF_ISSUE_LEGACY_ACTOR_KEY = "__legacy__";
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -724,21 +726,51 @@ function branchLifecycleIssueMessage(issue) {
   return "Şube işleminin sonucu henüz kesinleştirilemedi. Sistem işlemi tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
 }
 
-function readStaffIssue(storageKey) {
+function readStaffIssueStore(storageKey) {
   try {
     const raw = localStorage.getItem(storageKey);
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === "object" && parsed.operationId ? parsed : null;
+    if (parsed?.version === STAFF_ISSUE_STORE_VERSION && parsed.issues && typeof parsed.issues === "object") {
+      return Object.fromEntries(Object.entries(parsed.issues).filter(([,issue])=>issue && typeof issue === "object" && issue.operationId));
+    }
+    if (parsed && typeof parsed === "object" && parsed.operationId) {
+      return { [String(parsed.actorUserId || STAFF_ISSUE_LEGACY_ACTOR_KEY)]:parsed };
+    }
+    return {};
   } catch {
-    return null;
+    return {};
   }
 }
 
-function writeStaffIssue(storageKey, issue) {
+function readStaffIssue(storageKey, actorUserId="") {
+  const issues = readStaffIssueStore(storageKey);
+  const actorKey = String(actorUserId || "");
+  if (actorKey && issues[actorKey]) return issues[actorKey];
+  const legacy = issues[STAFF_ISSUE_LEGACY_ACTOR_KEY];
+  if (actorKey && legacy && (!legacy.actorUserId || legacy.actorUserId === actorKey)) return legacy;
+  return actorKey ? null : legacy || null;
+}
+
+function writeStaffIssue(storageKey, actorUserId, issue, expectedOperationId="") {
   if (typeof window === "undefined") return false;
   try {
-    if (issue) localStorage.setItem(storageKey, JSON.stringify(issue));
-    else localStorage.removeItem(storageKey);
+    const issues = readStaffIssueStore(storageKey);
+    const actorKey = String(actorUserId || issue?.actorUserId || STAFF_ISSUE_LEGACY_ACTOR_KEY);
+    const current = issues[actorKey];
+    if (!issue && expectedOperationId && current?.operationId !== expectedOperationId) return false;
+    if (issue) {
+      issues[actorKey] = issue;
+      if (actorKey !== STAFF_ISSUE_LEGACY_ACTOR_KEY && issues[STAFF_ISSUE_LEGACY_ACTOR_KEY]?.operationId === issue.operationId) {
+        delete issues[STAFF_ISSUE_LEGACY_ACTOR_KEY];
+      }
+    } else {
+      delete issues[actorKey];
+    }
+    if (Object.keys(issues).length) {
+      localStorage.setItem(storageKey, JSON.stringify({ version:STAFF_ISSUE_STORE_VERSION, issues }));
+    } else {
+      localStorage.removeItem(storageKey);
+    }
     return true;
   } catch {
     return false;
@@ -1949,7 +1981,7 @@ const MIZAN_UI_CSS = `
   .crm-student-info-item{min-width:0;padding:8px 13px;border-left:1px solid #ece8e4;font-size:12px;line-height:1.4}
   .crm-student-info-item:nth-child(3n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+4){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}
   .crm-student-info-label{display:block;margin-bottom:3px;color:#7b7680;font-size:10px;font-weight:850;letter-spacing:.05em;text-transform:uppercase}.crm-student-info-value{display:block;color:#1c1921;font-weight:750;overflow-wrap:anywhere}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-owner-branches{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;font-size:0}.crm-owner-branches:after{content:"⌂";font-size:19px}.crm-branch-switch{max-width:105px;padding:9px 10px;font-size:10px}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(10,1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-owner-branches{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;font-size:0}.crm-owner-branches:after{content:"⌂";font-size:19px}.crm-branch-switch{max-width:105px;padding:9px 10px;font-size:10px}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(var(--crm-mobile-nav-columns,9),1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -5479,9 +5511,9 @@ export default function App() {
   const [staffInvitationBusy, setStaffInvitationBusy] = useState(false);
   const [staffActivationBusyId, setStaffActivationBusyId] = useState("");
   const [staffBranchSelections, setStaffBranchSelections] = useState({});
-  const [staffInvitationIssue, setStaffInvitationIssue] = useState(() => readStaffIssue(STAFF_INVITATION_ISSUE_KEY));
+  const [staffInvitationIssue, setStaffInvitationIssue] = useState(null);
   const [staffInvitationIssueChecking, setStaffInvitationIssueChecking] = useState(false);
-  const [staffActivationIssue, setStaffActivationIssue] = useState(() => readStaffIssue(STAFF_ACTIVATION_ISSUE_KEY));
+  const [staffActivationIssue, setStaffActivationIssue] = useState(null);
   const [staffActivationIssueChecking, setStaffActivationIssueChecking] = useState(false);
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
@@ -6527,38 +6559,44 @@ export default function App() {
   };
 
   const persistStaffInvitationIssue = issue => {
+    const actorUserId = String(issue?.actorUserId || authSession?.user?.id || "");
+    if (!actorUserId) return false;
     const stored = issue ? {
       ...issue,
+      actorUserId,
       state:issue.state || "unknown",
       createdAt:issue.createdAt || new Date().toISOString(),
     } : null;
-    if (!writeStaffIssue(STAFF_INVITATION_ISSUE_KEY,stored)) return false;
+    if (!writeStaffIssue(STAFF_INVITATION_ISSUE_KEY,actorUserId,stored)) return false;
     setStaffInvitationIssue(stored);
     return true;
   };
 
   const clearStaffInvitationIssue = operationId => {
-    if (operationId && staffInvitationIssue?.operationId && staffInvitationIssue.operationId !== operationId) return;
-    writeStaffIssue(STAFF_INVITATION_ISSUE_KEY,null);
-    setStaffInvitationIssue(null);
+    const actorUserId = String(authSession?.user?.id || staffInvitationIssue?.actorUserId || "");
+    if (!actorUserId || !writeStaffIssue(STAFF_INVITATION_ISSUE_KEY,actorUserId,null,operationId || staffInvitationIssue?.operationId || "")) return;
+    setStaffInvitationIssue(previous=>!operationId || previous?.operationId === operationId ? null : previous);
   };
 
   const persistStaffActivationIssue = issue => {
+    const actorUserId = String(issue?.actorUserId || authSession?.user?.id || "");
+    if (!actorUserId) return false;
     const stored = issue ? {
       ...issue,
+      actorUserId,
       branchIds:canonicalStaffBranchIds(issue.branchIds),
       state:issue.state || "unknown",
       createdAt:issue.createdAt || new Date().toISOString(),
     } : null;
-    if (!writeStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,stored)) return false;
+    if (!writeStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,actorUserId,stored)) return false;
     setStaffActivationIssue(stored);
     return true;
   };
 
   const clearStaffActivationIssue = operationId => {
-    if (operationId && staffActivationIssue?.operationId && staffActivationIssue.operationId !== operationId) return;
-    writeStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,null);
-    setStaffActivationIssue(null);
+    const actorUserId = String(authSession?.user?.id || staffActivationIssue?.actorUserId || "");
+    if (!actorUserId || !writeStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,actorUserId,null,operationId || staffActivationIssue?.operationId || "")) return;
+    setStaffActivationIssue(previous=>!operationId || previous?.operationId === operationId ? null : previous);
   };
 
   const loadStaffManagement = async (organizationId=activeOrganization?.id) => {
@@ -6633,7 +6671,13 @@ export default function App() {
         return { ok:true, applied:false };
       }
       const row = result.data;
-      if (row.operation_id !== issue.operationId || row.organization_id !== issue.organizationId || row.actor_user_id !== authSession?.user?.id) {
+      const exactIntent = !!issue.displayName
+        && !!issue.normalizedEmail
+        && ["admin","teacher"].includes(issue.appRole)
+        && row.display_name === issue.displayName
+        && row.normalized_email === issue.normalizedEmail
+        && row.requested_app_role === issue.appRole;
+      if (row.operation_id !== issue.operationId || row.organization_id !== issue.organizationId || row.actor_user_id !== authSession?.user?.id || !exactIntent) {
         persistStaffInvitationIssue({ ...issue, state:"conflict" });
         if (options.notify !== false) pop("Personel davet kanıtı beklenen bilgilerle eşleşmedi. Yeni davet göndermeyin.",9000);
         return { ok:false, conflict:true };
@@ -6694,6 +6738,9 @@ export default function App() {
       operationId,
       actorUserId:authSession?.user?.id || "",
       organizationId,
+      displayName,
+      normalizedEmail:email,
+      appRole,
       label:displayName+" · "+staffRoleLabel(appRole)+" daveti",
       state:"writing",
     };
@@ -6931,6 +6978,13 @@ export default function App() {
 
   useEffect(() => { document.title = "Sonsuz Sanat CRM"; }, []);
   useEffect(() => {
+    const actorUserId = String(authSession?.user?.id || "");
+    staffInvitationAutoCheckRef.current = "";
+    staffActivationAutoCheckRef.current = "";
+    setStaffInvitationIssue(actorUserId ? readStaffIssue(STAFF_INVITATION_ISSUE_KEY,actorUserId) : null);
+    setStaffActivationIssue(actorUserId ? readStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,actorUserId) : null);
+  },[authSession?.user?.id]);
+  useEffect(() => {
     if (!giris || !browserOnline || !accessContext || !branchLifecycleIssue?.operationId) return;
     if (branchLifecycleIssue.actorUserId && branchLifecycleIssue.actorUserId !== authSession?.user?.id) return;
     if (branchLifecycleIssue.state === "not_applied" || branchLifecycleIssue.state === "conflict") return;
@@ -6942,6 +6996,7 @@ export default function App() {
     if (!giris || !browserOnline || !accessContext || !staffInvitationIssue?.operationId) return;
     if (staffInvitationIssue.actorUserId && staffInvitationIssue.actorUserId !== authSession?.user?.id) return;
     if (["not_applied","prepared","conflict"].includes(staffInvitationIssue.state)) return;
+    if (staffInvitationIssue.state === "writing" && staffInvitationWritingRef.current) return;
     if (staffInvitationAutoCheckRef.current === staffInvitationIssue.operationId) return;
     staffInvitationAutoCheckRef.current = staffInvitationIssue.operationId;
     void checkStaffInvitationOperation(staffInvitationIssue,{ notify:false });
@@ -6950,6 +7005,7 @@ export default function App() {
     if (!giris || !browserOnline || !accessContext || !staffActivationIssue?.operationId) return;
     if (staffActivationIssue.actorUserId && staffActivationIssue.actorUserId !== authSession?.user?.id) return;
     if (["not_applied","conflict"].includes(staffActivationIssue.state)) return;
+    if (staffActivationIssue.state === "writing" && staffActivationWritingRef.current) return;
     if (staffActivationAutoCheckRef.current === staffActivationIssue.operationId) return;
     staffActivationAutoCheckRef.current = staffActivationIssue.operationId;
     void checkStaffActivationOperation(staffActivationIssue,{ notify:false });
@@ -8765,6 +8821,7 @@ export default function App() {
     ...(canManageBranches ? [{ key:"subeler", label:"Şubeler", icon:"⌂" }] : []),
     ...(canManageStaff ? [{ key:"personel", label:"Personel", icon:"◉" }] : []),
   ];
+  const mobileNav = mainNav.filter(item=>item.key !== "subeler");
   const viewMeta = {
     bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
     liste:{ eyebrow:"ÖĞRENCİ YÖNETİMİ", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
@@ -9412,8 +9469,8 @@ export default function App() {
 
       <button className="crm-desktop-logout" disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>↪ Güvenli çıkış</button>
 
-      <nav className="crm-mobile-nav">
-        {mainNav.filter(t=>t.key!=="subeler").map(t=>(
+      <nav className="crm-mobile-nav" style={{ "--crm-mobile-nav-columns":mobileNav.length + 1 }}>
+        {mobileNav.map(t=>(
           <button key={t.key} className={mainTab===t.key?"active":""} onClick={()=>setMainTab(t.key)}>
             <span>{t.icon}</span>{t.label}
           </button>
