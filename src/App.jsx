@@ -26,8 +26,11 @@ const STAFF_INVITATION_ISSUE_KEY = "sonsuz_crm_staff_invitation_issue_v1";
 const STAFF_ACTIVATION_ISSUE_KEY = "sonsuz_crm_staff_activation_issue_v1";
 const STAFF_ASSIGNMENT_ISSUE_KEY = "sonsuz_crm_staff_assignment_issue_v1";
 const STAFF_DEACTIVATION_ISSUE_KEY = "sonsuz_crm_staff_deactivation_issue_v1";
+const NORMAL_LESSON_EVALUATION_ISSUE_KEY = "sonsuz_crm_normal_lesson_evaluation_issue_v1";
 const STAFF_ISSUE_STORE_VERSION = 2;
 const STAFF_ISSUE_LEGACY_ACTOR_KEY = "__legacy__";
+const NORMAL_LESSON_EVALUATION_ISSUE_STORE_VERSION = 1;
+const NORMAL_LESSON_EVALUATION_ABSENCE_SETTLE_MS = 20000;
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -777,6 +780,74 @@ function writeStaffIssue(storageKey, actorUserId, issue, expectedOperationId="")
   } catch {
     return false;
   }
+}
+
+function readNormalLessonEvaluationIssueStore() {
+  try {
+    const raw = localStorage.getItem(NORMAL_LESSON_EVALUATION_ISSUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed?.version !== NORMAL_LESSON_EVALUATION_ISSUE_STORE_VERSION || !parsed.issues || typeof parsed.issues !== "object") return {};
+    return Object.fromEntries(Object.entries(parsed.issues).filter(([,issue])=>issue && typeof issue === "object" && issue.operationId));
+  } catch {
+    return {};
+  }
+}
+
+function readNormalLessonEvaluationIssue(actorUserId="") {
+  const actorKey = String(actorUserId || "");
+  if (!actorKey) return null;
+  return readNormalLessonEvaluationIssueStore()[actorKey] || null;
+}
+
+function writeNormalLessonEvaluationIssue(actorUserId, issue, expectedOperationId="") {
+  if (typeof window === "undefined" || !actorUserId) return false;
+  try {
+    const issues = readNormalLessonEvaluationIssueStore();
+    const actorKey = String(actorUserId);
+    const current = issues[actorKey];
+    if (expectedOperationId && current?.operationId !== expectedOperationId) return false;
+    if (issue) issues[actorKey] = issue;
+    else delete issues[actorKey];
+    if (Object.keys(issues).length) {
+      localStorage.setItem(NORMAL_LESSON_EVALUATION_ISSUE_KEY,JSON.stringify({ version:NORMAL_LESSON_EVALUATION_ISSUE_STORE_VERSION, issues }));
+    } else {
+      localStorage.removeItem(NORMAL_LESSON_EVALUATION_ISSUE_KEY);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.keys(value).sort().reduce((result,key)=>{
+      if (value[key] !== undefined) result[key] = canonicalJson(value[key]);
+      return result;
+    },{});
+  }
+  return value;
+}
+
+function normalLessonEvaluationIntentSignature(value) {
+  const text = JSON.stringify(canonicalJson(value));
+  let first = 2166136261;
+  let second = 2246822507;
+  for (let index=0; index<text.length; index+=1) {
+    const code = text.charCodeAt(index);
+    first = Math.imul(first ^ code,16777619);
+    second = Math.imul(second ^ code,3266489909);
+  }
+  return (first>>>0).toString(16).padStart(8,"0")+(second>>>0).toString(16).padStart(8,"0")+":"+text.length;
+}
+
+function normalLessonEvaluationIssueMessage(issue) {
+  if (!issue) return "";
+  if (issue.state === "not_applied") return "Ders değerlendirmesi Supabase'de bulunamadı. Kayıt oluşmadı; uyarıyı kapattıktan sonra işlemi yeniden yapabilirsiniz.";
+  if (issue.state === "applied_pending_refresh") return "Ders değerlendirmesi Supabase'e kaydedildi; güncel öğrenci kaydı henüz yüklenemedi. İşlemi yeniden göndermeyin.";
+  if (issue.state === "conflict") return "Ders değerlendirme kanıtı beklenen öğrenci veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.";
+  return "Ders değerlendirmesinin sonucu henüz kesinleştirilemedi. Sistem değerlendirmeyi tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
 }
 
 function staffInvitationIssueMessage(issue) {
@@ -1799,6 +1870,82 @@ function invalidatePeriodEvaluationForLesson(student, lessonId) {
   return { ...student, package_summary_logs:logs.filter(log => log.packageKey !== key) };
 }
 
+function invalidatedPackageKeyForLesson(student, lessonId) {
+  if (!student || !lessonId) return "";
+  const info = [...customPackageInfos(student), ...regularPackageInfos(student)].find(item => (item.lessonIds || []).includes(lessonId));
+  const key = packageSummaryKey(info);
+  if (!key) return "";
+  return (student.package_summary_logs || []).some(log => log.packageKey === key && log.evaluation) ? key : "";
+}
+
+function normalLessonEvaluationIntent(student, lessonId, detail={}, correctionReason="") {
+  const lesson = (student?.schedule || []).find(item=>item.id === lessonId);
+  const scoreValue = lesson?.lessonScore ?? lesson?.lesson_score;
+  const expectedOperationKind = lesson && ((lesson.status || "upcoming") !== "upcoming" || (scoreValue !== null && scoreValue !== undefined && String(scoreValue).trim() !== "")) ? "corrected" : "recorded";
+  const previousHomeworkSource = String(detail.previousHomeworkSource || "").trim();
+  const previousHomeworkSourceId = String(detail.previousHomeworkSourceId || "").trim();
+  const evaluation = {
+    note:String(detail.note || "").trim(),
+    activeMinutes:Math.max(0,parseInt(detail.activeMinutes) || 0),
+    taskFocusMinutes:Math.max(0,parseInt(detail.taskFocusMinutes) || 0),
+    redirectionCount:Math.max(0,parseInt(detail.redirectionCount) || 0),
+    lessonFocus:String(detail.lessonFocus || "").trim(),
+    homework:String(detail.homework || "").trim(),
+    ...(previousHomeworkSource && previousHomeworkSourceId ? {
+      previousHomeworkSource,
+      previousHomeworkSourceId,
+      homeworkStatus:String(detail.homeworkStatus || "").trim(),
+    } : {}),
+  };
+  const expectedRecordVersion = Math.max(0,parseInt(student?.record_version) || 0);
+  const reason = String(correctionReason || "").trim();
+  const invalidatedPackageKey = invalidatedPackageKeyForLesson(student,lessonId);
+  const requestPayload = {
+    studentId:String(student?.id || ""),
+    lessonId:String(lessonId || "").trim(),
+    expectedRecordVersion,
+    evaluation,
+    ...(reason ? { correctionReason:reason } : {}),
+    ...(invalidatedPackageKey ? { invalidatedPackageKey } : {}),
+  };
+  return { lesson, expectedOperationKind, expectedRecordVersion, evaluation, correctionReason:reason, invalidatedPackageKey, requestPayload };
+}
+
+function normalLessonEvaluationKnownRejection(error) {
+  const message = String(error?.message || error || "");
+  return [
+    "NORMAL_LESSON_EVALUATION_NOT_AUTHORIZED",
+    "NORMAL_LESSON_EVALUATION_INVALID_INPUT",
+    "NORMAL_LESSON_EVALUATION_INPUT_TOO_LONG",
+    "NORMAL_LESSON_EVALUATION_INVALID_METRICS",
+    "NORMAL_LESSON_EVALUATION_INVALID_HOMEWORK_INPUT",
+    "NORMAL_LESSON_EVALUATION_STUDENT_NOT_FOUND",
+    "NORMAL_LESSON_EVALUATION_STALE_STUDENT",
+    "NORMAL_LESSON_EVALUATION_INVALID_STUDENT_DATA",
+    "NORMAL_LESSON_EVALUATION_LESSON_NOT_FOUND",
+    "NORMAL_LESSON_EVALUATION_AMBIGUOUS_LESSON",
+    "NORMAL_LESSON_EVALUATION_CORRECTION_REASON_REQUIRED",
+    "NORMAL_LESSON_EVALUATION_METRICS_EXCEED_DURATION",
+    "NORMAL_LESSON_EVALUATION_HOMEWORK_SOURCE_IS_TARGET",
+    "NORMAL_LESSON_EVALUATION_HOMEWORK_SOURCE_NOT_FOUND",
+    "NORMAL_LESSON_EVALUATION_AMBIGUOUS_HOMEWORK_SOURCE",
+    "NORMAL_LESSON_EVALUATION_HOMEWORK_SOURCE_REMOVED",
+    "NORMAL_LESSON_EVALUATION_INVALID_PACKAGE_KEY",
+    "NORMAL_LESSON_EVALUATION_PACKAGE_KEY_MISMATCH",
+  ].some(code=>message.includes(code));
+}
+
+function normalLessonEvaluationErrorText(error) {
+  const message = String(error?.message || error || "");
+  if (message.includes("STALE_STUDENT")) return "Öğrenci kaydı başka bir işlemle değişti. Eski ekran bilgisi gönderilmedi; liste Supabase'den yenilendi.";
+  if (message.includes("CORRECTION_REASON_REQUIRED")) return "Daha önce değerlendirilmiş ders için düzeltme nedeni zorunludur. Kayıt yapılmadı.";
+  if (message.includes("NOT_AUTHORIZED")) return "Bu öğrencinin şubesinde değerlendirme kaydetme yetkisi doğrulanamadı. Kayıt yapılmadı.";
+  if (message.includes("HOMEWORK_SOURCE") || message.includes("PACKAGE_KEY")) return "Dersin ödev veya dönem bağlantısı bu sırada değişti. Eski bilgi kaydedilmedi; liste yenilendi.";
+  if (message.includes("LESSON_NOT_FOUND") || message.includes("STUDENT_NOT_FOUND") || message.includes("AMBIGUOUS")) return "Öğrenci veya ders kaydı güvenli biçimde eşleştirilemedi. Kayıt yapılmadı; liste yenilendi.";
+  if (message.includes("INVALID") || message.includes("EXCEED") || message.includes("TOO_LONG")) return "Ders değerlendirme bilgileri doğrulanamadı. Kayıt yapılmadı.";
+  return "Ders değerlendirmesi kaydedilemedi. Sonuç Supabase'den kontrol edilecek; işlemi tekrar göndermeyin.";
+}
+
 function lessonEngagementStats(student, info) {
   const ids = new Set(info?.lessonIds || []);
   const lessons = (student.schedule || []).filter(l => ids.has(l.id) && l.status === "completed");
@@ -2069,10 +2216,10 @@ function Btn({ children, onClick, bg="#111", color="#fff", outline=false, mb=8, 
   );
 }
 
-function NoteArea({ value, onChange, placeholder="Açıklama ekle..." }) {
+function NoteArea({ value, onChange, placeholder="Açıklama ekle...", label="Açıklama (opsiyonel)" }) {
   return (
     <div style={{ marginBottom:12 }}>
-      <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:6 }}>Açıklama (opsiyonel)</label>
+      <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:6 }}>{label}</label>
       <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={3}
         style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa", color:"#111" }} />
     </div>
@@ -2234,7 +2381,7 @@ async function shareSvgAsPng(svgId, filename, student) {
 const INP = { width:"100%", border:"1px solid #ded9d3", borderRadius:11, padding:"12px 13px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#211e28" };
 const LBL = { display:"block", fontSize:11, fontWeight:750, color:"#756f7a", letterSpacing:.3, marginBottom:6, marginTop:15 };
 
-function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluationMessage }) {
+function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluationMessage, saving=false }) {
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
   const previousHomework = homeworkForLessonCheck(student, lesson);
   const lessonCheckRef = homeworkCheckRef("lesson", lesson?.id);
@@ -2248,6 +2395,7 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
   const [lessonFocus, setLessonFocus] = useState(lesson?.lessonFocus || lesson?.lesson_focus || "");
   const [homework, setHomework] = useState(lesson?.homework || "");
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === lessonCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
+  const [correctionReason, setCorrectionReason] = useState("");
   const [formError, setFormError] = useState("");
   const [pendingExceptionAction, setPendingExceptionAction] = useState("");
   const quotaRecordsForLesson = telafiRecordsWithoutLesson(student.telafi_records, lesson);
@@ -2255,6 +2403,8 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
   const willWarn = telafiQuota.count === 4;
   const willFill = telafiQuota.count === 5;
   const needsException = telafiQuota.count !== null && telafiQuota.count >= 6;
+  const storedScoreValue = lesson?.lessonScore ?? lesson?.lesson_score;
+  const correctionRequired = !!lesson && ((lesson.status || "upcoming") !== "upcoming" || (storedScoreValue !== null && storedScoreValue !== undefined && String(storedScoreValue).trim() !== ""));
   const reset = (s) => { setNote(s === "attended" ? (lesson?.note || "") : ""); setPendingExceptionAction(""); setStep(s); };
   const act = (a) => {
     if ((a === "telafi" || a === "lm-telafi") && telafiQuota.count === null) { setPendingExceptionAction(a); setStep("telafi-start-required"); return; }
@@ -2380,14 +2530,23 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
         <NoteArea value={note} onChange={value=>{ setNote(value); setFormError(""); }} placeholder="Kısa not" />
         <label style={LBL}>Gelecek Ders İçin Ödev (İsteğe Bağlı)</label>
         <NoteArea value={homework} onChange={value=>{ setHomework(value); setFormError(""); }} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
+        {correctionRequired ? <>
+          <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:11, padding:"10px 11px", marginTop:14 }}>
+            <p style={{ margin:0, fontSize:12, color:"#9a3412", fontWeight:800, lineHeight:1.5 }}>Bu ders daha önce işlendiği için yapılacak değişiklik geçmişte gerekçesiyle korunacak.</p>
+          </div>
+          <label style={LBL}>Düzeltme Nedeni</label>
+          <NoteArea value={correctionReason} onChange={value=>{ setCorrectionReason(value); setFormError(""); }} label="Düzeltme gerekçesi" placeholder="Örn. Aktif ders süresi yanlış girilmişti." />
+        </> : null}
         {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
-        <Btn bg="#10b981" onClick={() => {
+        <Btn bg="#10b981" disabled={saving} onClick={() => {
+          if (saving) return;
           const duration = getLessonDuration(student, lesson);
           if (homeworkToEvaluate && !homeworkStatus) { setFormError("Ödev durumunu seçin."); return; }
           if (activeMinutes === "" || parseInt(activeMinutes) < 0 || parseInt(activeMinutes) > duration) { setFormError("Geçerli aktif ders süresi girin."); return; }
           if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > duration) { setFormError("Geçerli görev odağı süresi girin."); return; }
           if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
           if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
+          if (correctionRequired && !correctionReason.trim()) { setFormError("Daha önce kaydedilmiş ders verilerini değiştirmek için düzeltme nedenini yazın."); return; }
           const scoreBreakdown = calculateLessonScore({
             homeworkStatus,
             homeworkApplicable:!!homeworkToEvaluate,
@@ -2408,9 +2567,9 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
             previousHomeworkSourceId:homeworkToEvaluate?.homeworkSourceId || null,
             homeworkStatus:homeworkToEvaluate ? homeworkStatus : "",
             evaluatedHomework:homeworkToEvaluate?.homework || "",
-          }, lessonId || lesson?.id);
-        }}>Katılımı Kaydet</Btn>
-        <Btn bg="#111" outline onClick={() => reset("main")}>Geri</Btn>
+          }, lessonId || lesson?.id, { correctionReason:correctionRequired ? correctionReason.trim() : "" });
+        }}>{saving ? "Kaydediliyor..." : "Katılımı Kaydet"}</Btn>
+        <Btn bg="#111" outline disabled={saving} onClick={() => { if (!saving) reset("main"); }}>Geri</Btn>
       </>}
       {step === "yapildi" && <>
         <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Neden yapıldı sayılıyor?</p>
@@ -5500,6 +5659,9 @@ export default function App() {
   const [extraLessonPaymentIssueChecking, setExtraLessonPaymentIssueChecking] = useState(false);
   const [packagePaymentIssue, setPackagePaymentIssue] = useState(() => readPackagePaymentIssue());
   const [packagePaymentIssueChecking, setPackagePaymentIssueChecking] = useState(false);
+  const [normalLessonEvaluationIssue, setNormalLessonEvaluationIssue] = useState(null);
+  const [normalLessonEvaluationIssueChecking, setNormalLessonEvaluationIssueChecking] = useState(false);
+  const [normalLessonEvaluationBusyId, setNormalLessonEvaluationBusyId] = useState("");
   const [paymentSavingId, setPaymentSavingId] = useState("");
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
   const [connectionRevalidationRequired, setConnectionRevalidationRequired] = useState(false);
@@ -5516,6 +5678,10 @@ export default function App() {
   const packagePaymentWritingRef = useRef(false);
   const packagePaymentCheckingRef = useRef(false);
   const packagePaymentAutoCheckRef = useRef("");
+  const normalLessonEvaluationIssueRef = useRef(null);
+  const normalLessonEvaluationWritingRef = useRef(false);
+  const normalLessonEvaluationCheckingRef = useRef(false);
+  const normalLessonEvaluationAutoCheckRef = useRef("");
   const connectionAutoRetryRef = useRef(false);
   const protectedDataLoadGenerationRef = useRef(0);
   const accessContextLoadSequenceRef = useRef(0);
@@ -5650,7 +5816,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const warnWhilePaymentIsWriting = event => {
-      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
+      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -6216,6 +6382,43 @@ export default function App() {
     setPackagePaymentIssue(null);
   };
 
+  const persistNormalLessonEvaluationIssue = issue => {
+    const actorUserId = String(issue?.actorUserId || authSession?.user?.id || "");
+    if (!actorUserId) return false;
+    const current = normalLessonEvaluationIssueRef.current;
+    if (issue?.operationId && current?.operationId && current.operationId !== issue.operationId) return false;
+    const stored = issue ? {
+      operationId:String(issue.operationId || ""),
+      actorUserId,
+      branchId:String(issue.branchId || currentBranch?.id || ""),
+      studentId:String(issue.studentId || ""),
+      studentName:String(issue.studentName || "Öğrenci"),
+      lessonId:String(issue.lessonId || ""),
+      expectedRecordVersion:Number(issue.expectedRecordVersion) || 0,
+      expectedOperationKind:issue.expectedOperationKind === "corrected" ? "corrected" : "recorded",
+      requestSignature:String(issue.requestSignature || ""),
+      label:String(issue.label || "Ders değerlendirmesi"),
+      state:String(issue.state || "unknown"),
+      createdAt:issue.createdAt || new Date().toISOString(),
+      ...(issue.notFoundSince ? { notFoundSince:issue.notFoundSince } : {}),
+    } : null;
+    if (!writeNormalLessonEvaluationIssue(actorUserId,stored,current?.operationId || "")) return false;
+    normalLessonEvaluationIssueRef.current = stored;
+    setNormalLessonEvaluationIssue(stored);
+    return true;
+  };
+
+  const clearNormalLessonEvaluationIssue = operationId => {
+    const current = normalLessonEvaluationIssueRef.current;
+    if (operationId && current?.operationId !== operationId) return false;
+    const actorUserId = String(authSession?.user?.id || current?.actorUserId || "");
+    if (!actorUserId || !writeNormalLessonEvaluationIssue(actorUserId,null,operationId || current?.operationId || "")) return false;
+    normalLessonEvaluationIssueRef.current = null;
+    setNormalLessonEvaluationIssue(null);
+    normalLessonEvaluationAutoCheckRef.current = "";
+    return true;
+  };
+
   const setSingleLessonRecordBusy = (lessonId, busy) => {
     if (!lessonId) return;
     const next = { ...singleLessonBusyIdsRef.current };
@@ -6270,6 +6473,7 @@ export default function App() {
   const pendingBranchIds = () => [...new Set([
     packagePaymentIssueRef.current?.branchId,
     extraLessonPaymentIssueRef.current?.branchId,
+    normalLessonEvaluationIssueRef.current?.branchId,
     singleLessonIssueRef.current?.kind === "operation" ? singleLessonIssueRef.current?.branchId : "",
     ...failedOps.map(operation=>operation.branchId || ""),
   ].filter(Boolean))];
@@ -6289,6 +6493,7 @@ export default function App() {
     const currentBranchHasUnresolvedWrite = !!currentBranch?.id && requiredBranches.includes(currentBranch.id);
     const activeWrite = packagePaymentWritingRef.current
       || extraLessonPaymentWritingRef.current
+      || normalLessonEvaluationWritingRef.current
       || singleLessonSavingRef.current
       || Object.keys(singleLessonBusyIdsRef.current).length > 0
       || branchScopedWriteCountRef.current > 0
@@ -7581,6 +7786,10 @@ export default function App() {
     staffActivationAutoCheckRef.current = "";
     staffAssignmentAutoCheckRef.current = "";
     staffDeactivationAutoCheckRef.current = "";
+    normalLessonEvaluationAutoCheckRef.current = "";
+    const savedNormalLessonEvaluationIssue = actorUserId ? readNormalLessonEvaluationIssue(actorUserId) : null;
+    normalLessonEvaluationIssueRef.current = savedNormalLessonEvaluationIssue;
+    setNormalLessonEvaluationIssue(savedNormalLessonEvaluationIssue);
     setStaffInvitationIssue(actorUserId ? readStaffIssue(STAFF_INVITATION_ISSUE_KEY,actorUserId) : null);
     setStaffActivationIssue(actorUserId ? readStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,actorUserId) : null);
     setStaffAssignmentIssue(actorUserId ? readStaffIssue(STAFF_ASSIGNMENT_ISSUE_KEY,actorUserId) : null);
@@ -8349,7 +8558,209 @@ export default function App() {
     return { updated, msg };
   };
 
+  const checkNormalLessonEvaluationOperation = async (issue=normalLessonEvaluationIssueRef.current, options={}) => {
+    if (!issue?.operationId || normalLessonEvaluationCheckingRef.current) return { ok:false };
+    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return { ok:false, foreignUser:true };
+    if (!browserOnline) {
+      if (options.notify !== false) pop("İnternet bağlantısı olmadan ders değerlendirme sonucu kontrol edilemez. Uyarı ekranda kalacak.",8000);
+      return { ok:false, offline:true };
+    }
+    normalLessonEvaluationCheckingRef.current = true;
+    setNormalLessonEvaluationIssueChecking(true);
+    try {
+      const result = await timedSingleLessonRequest(() => supabase
+        .from("normal_lesson_evaluation_operations")
+        .select("operation_id,student_id,branch_id,lesson_id,operation_kind,expected_record_version,resulting_record_version,request_payload,actor_user_id,created_at")
+        .eq("operation_id",issue.operationId)
+        .maybeSingle());
+      if (result.error) {
+        persistNormalLessonEvaluationIssue({ ...issue, state:"unknown" });
+        if (options.notify !== false) pop("Ders değerlendirme sonucu henüz doğrulanamadı. Uyarı ekranda kalacak; işlemi tekrar göndermeyin.",9000);
+        return { ok:false, error:result.error };
+      }
+      if (!result.data) {
+        const createdAtMs = new Date(issue.createdAt || 0).getTime();
+        const waitedLongEnough = Number.isFinite(createdAtMs) && Date.now() - createdAtMs >= NORMAL_LESSON_EVALUATION_ABSENCE_SETTLE_MS;
+        if (options.knownRejected !== true && !waitedLongEnough) {
+          persistNormalLessonEvaluationIssue({ ...issue, state:"unknown", notFoundSince:issue.notFoundSince || new Date().toISOString() });
+          if (options.notify !== false) pop("Ders değerlendirme kanıtı henüz görünmüyor. Biraz sonra yeniden kontrol edin; işlemi tekrar göndermeyin.",9000);
+          return { ok:false, applied:false, uncertain:true };
+        }
+        if (currentBranch?.id === issue.branchId) await loadStudents(undefined,issue.branchId);
+        persistNormalLessonEvaluationIssue({ ...issue, state:"not_applied" });
+        if (options.notify !== false) pop("Ders değerlendirmesi Supabase'de bulunamadı; kayıt oluşmadı.",7000);
+        return { ok:true, applied:false };
+      }
+      const row = result.data;
+      const exactEvidence = row.operation_id === issue.operationId
+        && row.student_id === issue.studentId
+        && row.branch_id === issue.branchId
+        && row.lesson_id === issue.lessonId
+        && row.operation_kind === issue.expectedOperationKind
+        && Number(row.expected_record_version) === Number(issue.expectedRecordVersion)
+        && Number(row.resulting_record_version) > Number(row.expected_record_version)
+        && row.actor_user_id === issue.actorUserId
+        && normalLessonEvaluationIntentSignature(row.request_payload) === issue.requestSignature;
+      if (!exactEvidence) {
+        persistNormalLessonEvaluationIssue({ ...issue, state:"conflict" });
+        if (options.notify !== false) pop("Ders değerlendirme kanıtı beklenen öğrenci veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.",9000);
+        return { ok:false, applied:true, conflict:true };
+      }
+      const studentResult = await timedSingleLessonRequest(() => supabase
+        .from("students")
+        .select("*")
+        .eq("id",issue.studentId)
+        .eq("branch_id",issue.branchId)
+        .single());
+      if (studentResult.error || !studentResult.data?.id) {
+        persistNormalLessonEvaluationIssue({ ...issue, state:"applied_pending_refresh" });
+        if (options.notify !== false) pop("Ders değerlendirmesi Supabase'e kaydedildi; güncel öğrenci kaydı henüz yüklenemedi. İşlemi tekrarlamayın.",9000);
+        return { ok:false, applied:true, refreshFailed:true };
+      }
+      const savedStudent = studentResult.data;
+      const authoritative = savedStudent.branch_id === issue.branchId
+        && Number(savedStudent.record_version) >= Number(row.resulting_record_version);
+      if (!authoritative) {
+        persistNormalLessonEvaluationIssue({ ...issue, state:"conflict" });
+        if (options.notify !== false) pop("Ders değerlendirmesi bulundu fakat öğrenci kaydının güncel sürümü doğrulanamadı. İşlemi yeniden göndermeyin.",9000);
+        return { ok:false, applied:true, conflict:true };
+      }
+      if (currentBranch?.id !== issue.branchId) {
+        persistNormalLessonEvaluationIssue({ ...issue, state:"applied_pending_refresh" });
+        if (options.notify !== false) pop("Ders değerlendirmesi kaydedildi. Güncel kaydı görmek için işlemin ait olduğu şubeyi açın.",9000);
+        return { ok:false, applied:true, wrongBranch:true };
+      }
+      setStudents(previous=>previous.map(student=>student.id === savedStudent.id ? savedStudent : student));
+      setDetailSt(previous=>previous?.id === savedStudent.id ? savedStudent : previous);
+      setActionModal(null);
+      const cleared = clearNormalLessonEvaluationIssue(issue.operationId);
+      if (!cleared) {
+        normalLessonEvaluationIssueRef.current = { ...issue, state:"applied_pending_refresh" };
+        setNormalLessonEvaluationIssue({ ...issue, state:"applied_pending_refresh" });
+      }
+      if (options.notify !== false) pop("Ders değerlendirmesi Supabase'de doğrulandı ve ekran yenilendi.",7000);
+      return { ok:true, applied:true, row, student:savedStudent };
+    } finally {
+      normalLessonEvaluationCheckingRef.current = false;
+      setNormalLessonEvaluationIssueChecking(false);
+    }
+  };
+
+  const handleNormalLessonEvaluation = async (sid, detail, lid, actionOptions={}) => {
+    const sourceStudent = students.find(student=>student.id === sid);
+    const branchId = currentBranch?.id;
+    if (!requireProtectedSources(["students"],"Ders değerlendirmesi")) return false;
+    if (!browserOnline) {
+      pop("İnternet bağlantısı olmadan ders değerlendirmesi kaydedilemez.",7000);
+      return false;
+    }
+    if (!sourceStudent?.id || !lid || !branchId || sourceStudent.branch_id !== branchId) {
+      pop("Öğrenci, ders veya aktif şube güvenli biçimde doğrulanamadı; kayıt gönderilmedi.",8000);
+      return false;
+    }
+    if (normalLessonEvaluationWritingRef.current || normalLessonEvaluationIssueRef.current) {
+      pop("Önce devam eden ders değerlendirmesi sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return false;
+    }
+    const intent = normalLessonEvaluationIntent(sourceStudent,lid,detail,actionOptions.correctionReason);
+    if (!intent.lesson || !intent.evaluation.lessonFocus) {
+      pop("Ders değerlendirme bilgileri eksik; kayıt gönderilmedi.",7000);
+      return false;
+    }
+    if (intent.expectedOperationKind === "corrected" && !intent.correctionReason) {
+      pop("Daha önce kaydedilmiş ders verilerini değiştirmek için düzeltme nedeni zorunludur.",7000);
+      return false;
+    }
+    const operationId = uid();
+    const issue = {
+      operationId,
+      actorUserId:authSession?.user?.id || "",
+      branchId,
+      studentId:sid,
+      studentName:sourceStudent.name || "Öğrenci",
+      lessonId:lid,
+      expectedRecordVersion:intent.expectedRecordVersion,
+      expectedOperationKind:intent.expectedOperationKind,
+      requestSignature:normalLessonEvaluationIntentSignature(intent.requestPayload),
+      label:(sourceStudent.name || "Öğrenci")+" · "+fmtDate(intent.lesson.date)+" "+lessonTime(sourceStudent,intent.lesson),
+      state:"writing",
+      createdAt:new Date().toISOString(),
+    };
+    if (!persistNormalLessonEvaluationIssue(issue)) {
+      pop("Ders değerlendirme işlem güvenliği tarayıcıda hazırlanamadı; kayıt gönderilmedi.",9000);
+      return false;
+    }
+    normalLessonEvaluationWritingRef.current = true;
+    setNormalLessonEvaluationBusyId(lid);
+    try {
+      const result = await runBranchScopedWrite(() => timedSingleLessonRequest(() => supabase.rpc("record_normal_lesson_evaluation",{
+        p_student_id:sid,
+        p_lesson_id:lid,
+        p_expected_record_version:intent.expectedRecordVersion,
+        p_evaluation:intent.evaluation,
+        p_correction_reason:intent.correctionReason || null,
+        p_invalidated_package_key:intent.invalidatedPackageKey || null,
+        p_operation_id:operationId,
+      }).single()));
+      if (!result.error && result.data?.operation_state === "applied") {
+        const savedStudent = result.data.student_record;
+        const evaluatedLesson = (savedStudent?.schedule || []).find(lesson=>lesson.id === lid);
+        const exactResult = result.data.operation_kind === intent.expectedOperationKind
+          && savedStudent?.id === sid
+          && savedStudent?.branch_id === branchId
+          && Number(savedStudent?.record_version) === intent.expectedRecordVersion + 1
+          && savedStudent?.last_write_id === operationId
+          && evaluatedLesson?.status === "completed"
+          && storedLessonScore(evaluatedLesson) !== null;
+        if (exactResult) {
+          setStudents(previous=>previous.map(student=>student.id === savedStudent.id ? savedStudent : student));
+          setDetailSt(previous=>previous?.id === savedStudent.id ? savedStudent : previous);
+          setActionModal(null);
+          const cleared = clearNormalLessonEvaluationIssue(operationId);
+          if (!cleared) {
+            normalLessonEvaluationIssueRef.current = { ...issue, state:"applied_pending_refresh" };
+            setNormalLessonEvaluationIssue({ ...issue, state:"applied_pending_refresh" });
+          }
+          pop(intent.expectedOperationKind === "corrected" ? "Ders değerlendirmesi gerekçesiyle düzeltildi" : "Katılım ve verim bilgisi kaydedildi");
+          setLessonEvaluationPrompt({ student:savedStudent, record:evaluatedLesson, type:"normal" });
+          return true;
+        }
+      }
+      persistNormalLessonEvaluationIssue({ ...issue, state:"unknown" });
+      if (normalLessonEvaluationKnownRejection(result.error)) {
+        await checkNormalLessonEvaluationOperation({ ...issue, state:"unknown" },{ notify:false, knownRejected:true });
+        setActionModal(null);
+        pop(normalLessonEvaluationErrorText(result.error),9000);
+        return false;
+      }
+      const checked = await checkNormalLessonEvaluationOperation({ ...issue, state:"unknown" },{ notify:false });
+      if (checked.applied && checked.student) {
+        const evaluatedLesson = (checked.student.schedule || []).find(lesson=>lesson.id === lid);
+        pop("Ders değerlendirmesi Supabase'de doğrulandı ve ekran yenilendi.",7000);
+        if (evaluatedLesson && storedLessonScore(evaluatedLesson) !== null) setLessonEvaluationPrompt({ student:checked.student, record:evaluatedLesson, type:"normal" });
+      } else if (!checked.applied) pop(normalLessonEvaluationErrorText(result.error),9000);
+      return checked.applied === true;
+    } catch (error) {
+      persistNormalLessonEvaluationIssue({ ...issue, state:"unknown" });
+      const checked = await checkNormalLessonEvaluationOperation({ ...issue, state:"unknown" },{ notify:false });
+      if (checked.applied && checked.student) {
+        const evaluatedLesson = (checked.student.schedule || []).find(lesson=>lesson.id === lid);
+        pop("Ders değerlendirmesi Supabase'de doğrulandı ve ekran yenilendi.",7000);
+        if (evaluatedLesson && storedLessonScore(evaluatedLesson) !== null) setLessonEvaluationPrompt({ student:checked.student, record:evaluatedLesson, type:"normal" });
+      } else if (!checked.applied) pop(normalLessonEvaluationErrorText(error),9000);
+      return checked.applied === true;
+    } finally {
+      normalLessonEvaluationWritingRef.current = false;
+      setNormalLessonEvaluationBusyId("");
+    }
+  };
+
   const handleAction = async (sid, action, note="", lid=null, actionOptions={}) => {
+    if (action === "attended") return handleNormalLessonEvaluation(sid,note,lid,actionOptions);
+    if (normalLessonEvaluationIssueRef.current) {
+      pop("Önce bekleyen ders değerlendirmesi sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return;
+    }
     const sourceStudent = students.find(student=>student.id===sid);
     const sourceLesson = sourceStudent?.schedule?.find(lesson=>lesson.id===lid) || sourceStudent?.schedule?.find(lesson=>lesson.status==="upcoming");
     if (action === "telafi" || action === "lm-telafi") {
@@ -8398,6 +8809,17 @@ export default function App() {
       setActionModal(null);
     }
   };
+
+  useEffect(() => {
+    const issue = normalLessonEvaluationIssue;
+    if (!giris || !browserOnline || !accessContext || !currentBranch?.id || !issue?.operationId) return;
+    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return;
+    if (issue.branchId !== currentBranch.id || ["not_applied","conflict"].includes(issue.state)) return;
+    if (normalLessonEvaluationWritingRef.current || normalLessonEvaluationCheckingRef.current) return;
+    if (normalLessonEvaluationAutoCheckRef.current === issue.operationId) return;
+    normalLessonEvaluationAutoCheckRef.current = issue.operationId;
+    void checkNormalLessonEvaluationOperation(issue,{ notify:false });
+  },[giris,browserOnline,accessContext,currentBranch?.id,normalLessonEvaluationIssue?.operationId,normalLessonEvaluationIssue?.state,authSession?.user?.id]);
 
   const handleToggleFreeze = async (sid, frozen, resumeDate=null) => {
     const resumeStart = resumeDate ? new Date(resumeDate+"T12:00:00") : null;
@@ -8839,6 +9261,10 @@ export default function App() {
 
   const retryFailedOperation = async (op) => {
     if (!op?.studentId || retryingOps[op.id]) return;
+    if (op.type === "lessonAction" && op.action === "attended") {
+      pop("Eski bekleyen Katıldı kaydı güvenli işlem kimliği taşımıyor. Bu kayıt otomatik tekrar gönderilmedi; güncel öğrenci ekranından yeniden değerlendirin.",9000);
+      return;
+    }
     const branchId = currentBranch?.id;
     if (!branchId || (op.branchId && op.branchId !== branchId)) {
       pop("Bekleyen işlem yalnız ait olduğu şubede yeniden denenebilir.",8000);
@@ -9501,6 +9927,7 @@ export default function App() {
   const organizationBranches = Array.isArray(activeOrganization?.branches) ? activeOrganization.branches : [];
   const activeStaffBranches = organizationBranches.filter(branch=>branch.active !== false);
   const staffActivationByInvitation = new Map(staffActivations.map(operation=>[operation.invitation_id,operation]));
+  const visibleNormalLessonEvaluationIssue = normalLessonEvaluationIssue && (!normalLessonEvaluationIssue.actorUserId || normalLessonEvaluationIssue.actorUserId === authSession?.user?.id) ? normalLessonEvaluationIssue : null;
   const visibleBranchLifecycleIssue = branchLifecycleIssue && (!branchLifecycleIssue.actorUserId || branchLifecycleIssue.actorUserId === authSession?.user?.id) ? branchLifecycleIssue : null;
   const visibleStaffInvitationIssue = staffInvitationIssue && (!staffInvitationIssue.actorUserId || staffInvitationIssue.actorUserId === authSession?.user?.id) ? staffInvitationIssue : null;
   const visibleStaffActivationIssue = staffActivationIssue && (!staffActivationIssue.actorUserId || staffActivationIssue.actorUserId === authSession?.user?.id) ? staffActivationIssue : null;
@@ -9819,6 +10246,18 @@ export default function App() {
           </div>
         </header>
         <section className="crm-page">
+        {visibleNormalLessonEvaluationIssue ? (
+          <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
+            <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Ders değerlendirmesi kontrolü gerekli</p>
+            <p style={{ margin:"0 0 4px", fontSize:12, color:"#9a3412", fontWeight:650, lineHeight:1.5 }}>{normalLessonEvaluationIssueMessage(visibleNormalLessonEvaluationIssue)}</p>
+            {visibleNormalLessonEvaluationIssue.label ? <p style={{ margin:"0 0 10px", fontSize:11, color:"#9a3412", fontWeight:800 }}>İşlem: {visibleNormalLessonEvaluationIssue.label}</p> : null}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              <button type="button" onClick={()=>checkNormalLessonEvaluationOperation(visibleNormalLessonEvaluationIssue)} disabled={!browserOnline || normalLessonEvaluationIssueChecking || normalLessonEvaluationWritingRef.current} style={{ border:"none", borderRadius:9, padding:"8px 11px", background:"#ea580c", color:"#fff", fontSize:12, fontWeight:850, cursor:(!browserOnline || normalLessonEvaluationIssueChecking || normalLessonEvaluationWritingRef.current)?"wait":"pointer", opacity:(!browserOnline || normalLessonEvaluationIssueChecking || normalLessonEvaluationWritingRef.current)?0.65:1 }}>{normalLessonEvaluationIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button>
+              {visibleNormalLessonEvaluationIssue.state === "not_applied" ? <button type="button" onClick={()=>clearNormalLessonEvaluationIssue(visibleNormalLessonEvaluationIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
+            </div>
+            <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Yeniden kontrol yalnızca Supabase'den okur; ders değerlendirmesini kendiliğinden tekrar göndermez.</p>
+          </div>
+        ) : null}
         {visibleBranchLifecycleIssue ? (
           <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Şube işlemi kontrolü gerekli</p>
@@ -10297,7 +10736,7 @@ export default function App() {
         </Sheet>
       ) : null}
 
-      {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} onClose={()=>setActionModal(null)} onBack={actionModal.returnTo ? ()=>{ const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
+      {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} saving={normalLessonEvaluationBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
