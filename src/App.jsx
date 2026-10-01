@@ -28,12 +28,15 @@ const STAFF_ASSIGNMENT_ISSUE_KEY = "sonsuz_crm_staff_assignment_issue_v1";
 const STAFF_DEACTIVATION_ISSUE_KEY = "sonsuz_crm_staff_deactivation_issue_v1";
 const NORMAL_LESSON_EVALUATION_ISSUE_KEY = "sonsuz_crm_normal_lesson_evaluation_issue_v1";
 const NORMAL_LESSON_MAKEUP_ISSUE_KEY = "sonsuz_crm_normal_lesson_makeup_issue_v1";
+const NORMAL_LESSON_MAKEUP_PLAN_ISSUE_KEY = "sonsuz_crm_normal_lesson_makeup_plan_issue_v1";
 const STAFF_ISSUE_STORE_VERSION = 2;
 const STAFF_ISSUE_LEGACY_ACTOR_KEY = "__legacy__";
 const NORMAL_LESSON_EVALUATION_ISSUE_STORE_VERSION = 1;
 const NORMAL_LESSON_EVALUATION_ABSENCE_SETTLE_MS = 20000;
 const NORMAL_LESSON_MAKEUP_ISSUE_STORE_VERSION = 1;
 const NORMAL_LESSON_MAKEUP_ABSENCE_SETTLE_MS = 20000;
+const NORMAL_LESSON_MAKEUP_PLAN_ISSUE_STORE_VERSION = 1;
+const NORMAL_LESSON_MAKEUP_PLAN_ABSENCE_SETTLE_MS = 20000;
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -859,6 +862,43 @@ function writeNormalLessonMakeupIssue(actorUserId, issue, expectedOperationId=""
   }
 }
 
+function readNormalLessonMakeupPlanIssueStore() {
+  try {
+    const raw = localStorage.getItem(NORMAL_LESSON_MAKEUP_PLAN_ISSUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed?.version !== NORMAL_LESSON_MAKEUP_PLAN_ISSUE_STORE_VERSION || !parsed.issues || typeof parsed.issues !== "object") return {};
+    return Object.fromEntries(Object.entries(parsed.issues).filter(([,issue])=>issue && typeof issue === "object" && issue.operationId));
+  } catch {
+    return {};
+  }
+}
+
+function readNormalLessonMakeupPlanIssue(actorUserId="") {
+  const actorKey = String(actorUserId || "");
+  if (!actorKey) return null;
+  return readNormalLessonMakeupPlanIssueStore()[actorKey] || null;
+}
+
+function writeNormalLessonMakeupPlanIssue(actorUserId, issue, expectedOperationId="") {
+  if (typeof window === "undefined" || !actorUserId) return false;
+  try {
+    const issues = readNormalLessonMakeupPlanIssueStore();
+    const actorKey = String(actorUserId);
+    const current = issues[actorKey];
+    if (expectedOperationId && current?.operationId !== expectedOperationId) return false;
+    if (issue) issues[actorKey] = issue;
+    else delete issues[actorKey];
+    if (Object.keys(issues).length) {
+      localStorage.setItem(NORMAL_LESSON_MAKEUP_PLAN_ISSUE_KEY,JSON.stringify({ version:NORMAL_LESSON_MAKEUP_PLAN_ISSUE_STORE_VERSION, issues }));
+    } else {
+      localStorage.removeItem(NORMAL_LESSON_MAKEUP_PLAN_ISSUE_KEY);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return value.map(canonicalJson);
   if (value && typeof value === "object") {
@@ -896,6 +936,14 @@ function normalLessonMakeupIssueMessage(issue) {
   if (issue.state === "applied_pending_refresh") return "Telafi hakkı Supabase'e kaydedildi; güncel öğrenci kaydı henüz yüklenemedi. İşlemi yeniden göndermeyin.";
   if (issue.state === "conflict") return "Telafi hakkı kanıtı beklenen öğrenci, ders veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.";
   return "Telafi hakkı işleminin sonucu henüz kesinleştirilemedi. Sistem işlemi tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
+}
+
+function normalLessonMakeupPlanIssueMessage(issue) {
+  if (!issue) return "";
+  if (issue.state === "not_applied") return "Telafi planı Supabase'de bulunamadı. Kayıt oluşmadı; uyarıyı kapattıktan sonra işlemi yeniden yapabilirsiniz.";
+  if (issue.state === "applied_pending_refresh") return "Telafi planı Supabase'e kaydedildi; güncel öğrenci kaydı henüz yüklenemedi. İşlemi yeniden göndermeyin.";
+  if (issue.state === "conflict") return "Telafi planı kanıtı beklenen öğrenci, telafi hakkı veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.";
+  return "Telafi planının sonucu henüz kesinleştirilemedi. Sistem planı tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
 }
 
 function staffInvitationIssueMessage(issue) {
@@ -2064,6 +2112,57 @@ function normalLessonMakeupSuccessMessage(actionKind, createdRecord, quotaNormal
   return actionKind === "lm-telafi" ? "Son dakika + telafi kaydedildi" : "Telafi oluşturuldu";
 }
 
+function normalLessonMakeupPlanIntent(student, makeupRecordId, payload={}) {
+  const matchingRecords = (student?.telafi_records || []).filter(record=>String(record?.id || "") === String(makeupRecordId || ""));
+  const record = matchingRecords.length === 1 ? matchingRecords[0] : null;
+  const expectedRecordVersion = Math.max(0,parseInt(student?.record_version) || 0);
+  const plannedAt = String(payload.plannedAt || "");
+  const plannedDurationMinutes = parseInt(payload.plannedDurationMinutes);
+  const plannedNote = String(payload.plannedNote || "");
+  const expectedOperationKind = record && telafiPlannedAt(record) ? "rescheduled" : "planned";
+  const requestPayload = {
+    studentId:String(student?.id || ""),
+    makeupRecordId:String(makeupRecordId || ""),
+    expectedRecordVersion,
+    plannedAt,
+    plannedDurationMinutes,
+    plannedNote,
+  };
+  return { record, matchingRecordCount:matchingRecords.length, expectedRecordVersion, expectedOperationKind, plannedAt, plannedDurationMinutes, plannedNote, requestPayload };
+}
+
+function normalLessonMakeupPlanIntentSignature(value) {
+  return normalLessonEvaluationIntentSignature(value);
+}
+
+function normalLessonMakeupPlanKnownRejection(error) {
+  const message = String(error?.message || error || "");
+  return [
+    "NORMAL_LESSON_MAKEUP_PLAN_NOT_AUTHORIZED",
+    "NORMAL_LESSON_MAKEUP_PLAN_INVALID_INPUT",
+    "NORMAL_LESSON_MAKEUP_PLAN_INPUT_TOO_LONG",
+    "NORMAL_LESSON_MAKEUP_PLAN_INVALID_DATE",
+    "NORMAL_LESSON_MAKEUP_PLAN_STUDENT_NOT_FOUND",
+    "NORMAL_LESSON_MAKEUP_PLAN_STALE_STUDENT",
+    "NORMAL_LESSON_MAKEUP_PLAN_INVALID_STUDENT_DATA",
+    "NORMAL_LESSON_MAKEUP_PLAN_RECORD_NOT_FOUND",
+    "NORMAL_LESSON_MAKEUP_PLAN_AMBIGUOUS_RECORD",
+    "NORMAL_LESSON_MAKEUP_PLAN_ALREADY_COMPLETED",
+    "NORMAL_LESSON_MAKEUP_PLAN_OPERATION_ID_CONFLICT",
+    "NORMAL_LESSON_MAKEUP_PLAN_TARGET_REMOVED",
+  ].some(code=>message.includes(code));
+}
+
+function normalLessonMakeupPlanErrorText(error) {
+  const message = String(error?.message || error || "");
+  if (message.includes("STALE_STUDENT")) return "Öğrenci kaydı başka bir işlemle değişti. Eski telafi planı gönderilmedi; liste Supabase'den yenilendi.";
+  if (message.includes("ALREADY_COMPLETED")) return "Bu telafi dersi bu sırada tamamlanmış. Plan değişikliği kaydedilmedi; liste yenilendi.";
+  if (message.includes("NOT_AUTHORIZED")) return "Bu öğrencinin şubesinde telafi planlama yetkisi doğrulanamadı. Kayıt yapılmadı.";
+  if (message.includes("RECORD_NOT_FOUND") || message.includes("STUDENT_NOT_FOUND") || message.includes("AMBIGUOUS")) return "Öğrenci veya telafi hakkı güvenli biçimde eşleştirilemedi. Kayıt yapılmadı; liste yenilendi.";
+  if (message.includes("INVALID") || message.includes("TOO_LONG") || message.includes("TARGET_REMOVED") || message.includes("OPERATION_ID_CONFLICT")) return "Telafi planı bilgileri doğrulanamadı. Kayıt yapılmadı.";
+  return "Telafi planı kaydedilemedi. Sonuç Supabase'den kontrol edilecek; işlemi tekrar göndermeyin.";
+}
+
 function lessonEngagementStats(student, info) {
   const ids = new Set(info?.lessonIds || []);
   const lessons = (student.schedule || []).filter(l => ids.has(l.id) && l.status === "completed");
@@ -2771,21 +2870,28 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
   const [homework, setHomework] = useState(record?.homework || "");
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === telafiCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
   const [formError, setFormError] = useState("");
+  const [savingPlan, setSavingPlan] = useState(false);
   const days = daysLeft(record.expiry);
   const expired = days !== null && days < 0;
   const urgent = !expired && days !== null && days <= 7;
-  const savePlan = () => {
-    onSave(record.id, {
-      action: "plan",
-      plannedAt: `${date}T${time}:00`,
-      plannedDurationMinutes: parseInt(duration) || getLessonDuration(student),
-      plannedNote: note,
-    });
-    onClose();
+  const savePlan = async () => {
+    if (savingPlan) return;
+    setSavingPlan(true);
+    try {
+      const saved = await onSave(record.id, {
+        action: "plan",
+        plannedAt: `${date}T${time}:00`,
+        plannedDurationMinutes: parseInt(duration) || getLessonDuration(student),
+        plannedNote: note,
+      });
+      if (saved !== false) onClose();
+    } finally {
+      setSavingPlan(false);
+    }
   };
 
   return (
-    <Sheet title="Telafi Dersi" subtitle={student?.name} onClose={onClose}>
+    <Sheet title="Telafi Dersi" subtitle={student?.name} onClose={()=>{ if (!savingPlan) onClose(); }}>
       <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
         <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", letterSpacing:1 }}>İptal Edilen Ders</p>
         <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color:"#111" }}>{fmtDate(record.lessonDate)}</p>
@@ -2847,8 +2953,8 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
               <input style={INP} type="number" min={15} step={5} value={duration} onChange={e=>setDuration(e.target.value)} />
               <label style={LBL}>Plan Notu</label>
               <NoteArea value={note} onChange={setNote} placeholder="Örn: Bu hafta uygunluk oluştu" />
-              <Btn bg="#10b981" onClick={savePlan}>Telafiyi Planla</Btn>
-              {plannedAt ? <Btn bg="#111" outline onClick={() => setStep("main")}>Geri</Btn> : null}
+              <Btn bg="#10b981" disabled={savingPlan} onClick={savePlan}>{savingPlan ? "Kaydediliyor..." : "Telafiyi Planla"}</Btn>
+              {plannedAt ? <Btn bg="#111" outline disabled={savingPlan} onClick={() => setStep("main")}>Geri</Btn> : null}
             </>
           : step === "attended"
             ? <>
@@ -3598,7 +3704,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
           <Btn bg="#ef4444" onClick={async() => { if(window.confirm(student.name+" öğrenci ekranlarından kaldırılsın mı? Geçmiş ders ve ödeme kayıtları finans geçmişinde korunacaktır.")){ const deleted=await onDelete(student.id); if(deleted) onClose(); } }}>Öğrenciyi Sil</Btn>
         </div>
       </Sheet>
-      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { onTelafiDone(student.id, id, payload); setTelafiSel(null); }} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
+      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { const result=onTelafiDone(student.id, id, payload); if (payload?.action !== "plan") setTelafiSel(null); return result; }} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => { onMoveOne(student.id, lid, date, time); setShiftSel(null); }} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} saving={paymentSavingId===student.id} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
@@ -5784,6 +5890,8 @@ export default function App() {
   const [normalLessonMakeupIssue, setNormalLessonMakeupIssue] = useState(null);
   const [normalLessonMakeupIssueChecking, setNormalLessonMakeupIssueChecking] = useState(false);
   const [normalLessonMakeupBusyId, setNormalLessonMakeupBusyId] = useState("");
+  const [normalLessonMakeupPlanIssue, setNormalLessonMakeupPlanIssue] = useState(null);
+  const [normalLessonMakeupPlanIssueChecking, setNormalLessonMakeupPlanIssueChecking] = useState(false);
   const [paymentSavingId, setPaymentSavingId] = useState("");
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
   const [connectionRevalidationRequired, setConnectionRevalidationRequired] = useState(false);
@@ -5808,6 +5916,10 @@ export default function App() {
   const normalLessonMakeupWritingRef = useRef(false);
   const normalLessonMakeupCheckingRef = useRef(false);
   const normalLessonMakeupAutoCheckRef = useRef("");
+  const normalLessonMakeupPlanIssueRef = useRef(null);
+  const normalLessonMakeupPlanWritingRef = useRef(false);
+  const normalLessonMakeupPlanCheckingRef = useRef(false);
+  const normalLessonMakeupPlanAutoCheckRef = useRef("");
   const connectionAutoRetryRef = useRef(false);
   const protectedDataLoadGenerationRef = useRef(0);
   const accessContextLoadSequenceRef = useRef(0);
@@ -5942,7 +6054,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const warnWhilePaymentIsWriting = event => {
-      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
+      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -6583,6 +6695,46 @@ export default function App() {
     return true;
   };
 
+  const persistNormalLessonMakeupPlanIssue = issue => {
+    const actorUserId = String(issue?.actorUserId || authSession?.user?.id || "");
+    if (!actorUserId) return false;
+    const current = normalLessonMakeupPlanIssueRef.current;
+    if (issue?.operationId && current?.operationId && current.operationId !== issue.operationId) return false;
+    const stored = issue ? {
+      operationId:String(issue.operationId || ""),
+      actorUserId,
+      branchId:String(issue.branchId || currentBranch?.id || ""),
+      studentId:String(issue.studentId || ""),
+      studentName:String(issue.studentName || "Öğrenci"),
+      makeupRecordId:String(issue.makeupRecordId || ""),
+      expectedRecordVersion:Number(issue.expectedRecordVersion) || 0,
+      expectedOperationKind:issue.expectedOperationKind === "rescheduled" ? "rescheduled" : "planned",
+      plannedAt:String(issue.plannedAt || ""),
+      plannedDurationMinutes:Number(issue.plannedDurationMinutes) || 0,
+      plannedNote:String(issue.plannedNote || ""),
+      requestSignature:String(issue.requestSignature || ""),
+      label:String(issue.label || "Telafi planı"),
+      state:String(issue.state || "unknown"),
+      createdAt:issue.createdAt || new Date().toISOString(),
+      ...(issue.notFoundSince ? { notFoundSince:issue.notFoundSince } : {}),
+    } : null;
+    if (!writeNormalLessonMakeupPlanIssue(actorUserId,stored,current?.operationId || "")) return false;
+    normalLessonMakeupPlanIssueRef.current = stored;
+    setNormalLessonMakeupPlanIssue(stored);
+    return true;
+  };
+
+  const clearNormalLessonMakeupPlanIssue = operationId => {
+    const current = normalLessonMakeupPlanIssueRef.current;
+    if (operationId && current?.operationId !== operationId) return false;
+    const actorUserId = String(authSession?.user?.id || current?.actorUserId || "");
+    if (!actorUserId || !writeNormalLessonMakeupPlanIssue(actorUserId,null,operationId || current?.operationId || "")) return false;
+    normalLessonMakeupPlanIssueRef.current = null;
+    setNormalLessonMakeupPlanIssue(null);
+    normalLessonMakeupPlanAutoCheckRef.current = "";
+    return true;
+  };
+
   const setSingleLessonRecordBusy = (lessonId, busy) => {
     if (!lessonId) return;
     const next = { ...singleLessonBusyIdsRef.current };
@@ -6639,6 +6791,7 @@ export default function App() {
     extraLessonPaymentIssueRef.current?.branchId,
     normalLessonEvaluationIssueRef.current?.branchId,
     normalLessonMakeupIssueRef.current?.branchId,
+    normalLessonMakeupPlanIssueRef.current?.branchId,
     singleLessonIssueRef.current?.kind === "operation" ? singleLessonIssueRef.current?.branchId : "",
     ...failedOps.map(operation=>operation.branchId || ""),
   ].filter(Boolean))];
@@ -6660,6 +6813,7 @@ export default function App() {
       || extraLessonPaymentWritingRef.current
       || normalLessonEvaluationWritingRef.current
       || normalLessonMakeupWritingRef.current
+      || normalLessonMakeupPlanWritingRef.current
       || singleLessonSavingRef.current
       || Object.keys(singleLessonBusyIdsRef.current).length > 0
       || branchScopedWriteCountRef.current > 0
@@ -7954,12 +8108,16 @@ export default function App() {
     staffDeactivationAutoCheckRef.current = "";
     normalLessonEvaluationAutoCheckRef.current = "";
     normalLessonMakeupAutoCheckRef.current = "";
+    normalLessonMakeupPlanAutoCheckRef.current = "";
     const savedNormalLessonEvaluationIssue = actorUserId ? readNormalLessonEvaluationIssue(actorUserId) : null;
     normalLessonEvaluationIssueRef.current = savedNormalLessonEvaluationIssue;
     setNormalLessonEvaluationIssue(savedNormalLessonEvaluationIssue);
     const savedNormalLessonMakeupIssue = actorUserId ? readNormalLessonMakeupIssue(actorUserId) : null;
     normalLessonMakeupIssueRef.current = savedNormalLessonMakeupIssue;
     setNormalLessonMakeupIssue(savedNormalLessonMakeupIssue);
+    const savedNormalLessonMakeupPlanIssue = actorUserId ? readNormalLessonMakeupPlanIssue(actorUserId) : null;
+    normalLessonMakeupPlanIssueRef.current = savedNormalLessonMakeupPlanIssue;
+    setNormalLessonMakeupPlanIssue(savedNormalLessonMakeupPlanIssue);
     setStaffInvitationIssue(actorUserId ? readStaffIssue(STAFF_INVITATION_ISSUE_KEY,actorUserId) : null);
     setStaffActivationIssue(actorUserId ? readStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,actorUserId) : null);
     setStaffAssignmentIssue(actorUserId ? readStaffIssue(STAFF_ASSIGNMENT_ISSUE_KEY,actorUserId) : null);
@@ -8836,6 +8994,10 @@ export default function App() {
       pop("Önce bekleyen telafi hakkı sonucunu üstteki uyarıdan kesinleştirin.",9000);
       return false;
     }
+    if (normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current) {
+      pop("Önce bekleyen telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return false;
+    }
     const intent = normalLessonEvaluationIntent(sourceStudent,lid,detail,actionOptions.correctionReason);
     if (!intent.lesson || !intent.evaluation.lessonFocus) {
       pop("Ders değerlendirme bilgileri eksik; kayıt gönderilmedi.",7000);
@@ -9043,6 +9205,10 @@ export default function App() {
       pop("Önce devam eden telafi hakkı sonucunu üstteki uyarıdan kesinleştirin.",9000);
       return false;
     }
+    if (normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current) {
+      pop("Önce bekleyen telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return false;
+    }
     const intent = normalLessonMakeupIntent(sourceStudent,lid,actionKind,note,actionOptions);
     if (!intent.lesson) {
       pop("Ders kaydı bulunamadı; telafi hakkı gönderilmedi.",7000);
@@ -9145,6 +9311,230 @@ export default function App() {
     }
   };
 
+  const checkNormalLessonMakeupPlanOperation = async (issue=normalLessonMakeupPlanIssueRef.current, options={}) => {
+    if (!issue?.operationId || normalLessonMakeupPlanCheckingRef.current) return { ok:false };
+    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return { ok:false, foreignUser:true };
+    if (!browserOnline) {
+      if (options.notify !== false) pop("İnternet bağlantısı olmadan telafi planı sonucu kontrol edilemez. Uyarı ekranda kalacak.",8000);
+      return { ok:false, offline:true };
+    }
+    normalLessonMakeupPlanCheckingRef.current = true;
+    setNormalLessonMakeupPlanIssueChecking(true);
+    try {
+      const result = await timedSingleLessonRequest(() => supabase
+        .from("normal_lesson_makeup_plan_operations")
+        .select("operation_id,student_id,branch_id,makeup_record_id,operation_kind,expected_record_version,resulting_record_version,request_payload,target_after,actor_user_id,created_at")
+        .eq("operation_id",issue.operationId)
+        .maybeSingle());
+      if (result.error) {
+        persistNormalLessonMakeupPlanIssue({ ...issue, state:"unknown" });
+        if (options.notify !== false) pop("Telafi planı sonucu henüz doğrulanamadı. Uyarı ekranda kalacak; işlemi tekrar göndermeyin.",9000);
+        return { ok:false, error:result.error };
+      }
+      if (!result.data) {
+        const createdAtMs = new Date(issue.createdAt || 0).getTime();
+        const waitedLongEnough = Number.isFinite(createdAtMs) && Date.now() - createdAtMs >= NORMAL_LESSON_MAKEUP_PLAN_ABSENCE_SETTLE_MS;
+        if (options.knownRejected !== true && !waitedLongEnough) {
+          persistNormalLessonMakeupPlanIssue({ ...issue, state:"unknown", notFoundSince:issue.notFoundSince || new Date().toISOString() });
+          if (options.notify !== false) pop("Telafi planı kanıtı henüz görünmüyor. Biraz sonra yeniden kontrol edin; işlemi tekrar göndermeyin.",9000);
+          return { ok:false, applied:false, uncertain:true };
+        }
+        if (currentBranch?.id === issue.branchId) await loadStudents(undefined,issue.branchId);
+        persistNormalLessonMakeupPlanIssue({ ...issue, state:"not_applied" });
+        if (options.notify !== false) pop("Telafi planı Supabase'de bulunamadı; kayıt oluşmadı.",7000);
+        return { ok:true, applied:false };
+      }
+      const row = result.data;
+      const targetAfter = row.target_after;
+      const exactEvidence = row.operation_id === issue.operationId
+        && row.student_id === issue.studentId
+        && row.branch_id === issue.branchId
+        && row.makeup_record_id === issue.makeupRecordId
+        && row.operation_kind === issue.expectedOperationKind
+        && Number(row.expected_record_version) === Number(issue.expectedRecordVersion)
+        && Number(row.resulting_record_version) === Number(row.expected_record_version) + 1
+        && row.actor_user_id === issue.actorUserId
+        && targetAfter?.id === issue.makeupRecordId
+        && telafiPlannedAt(targetAfter) === issue.plannedAt
+        && Number(targetAfter?.plannedDurationMinutes) === Number(issue.plannedDurationMinutes)
+        && String(targetAfter?.plannedNote || "") === issue.plannedNote
+        && normalLessonMakeupPlanIntentSignature(row.request_payload) === issue.requestSignature;
+      if (!exactEvidence) {
+        persistNormalLessonMakeupPlanIssue({ ...issue, state:"conflict" });
+        if (options.notify !== false) pop("Telafi planı kanıtı beklenen öğrenci, telafi hakkı veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.",9000);
+        return { ok:false, applied:true, conflict:true };
+      }
+      const studentResult = await timedSingleLessonRequest(() => supabase
+        .from("students")
+        .select("*")
+        .eq("id",issue.studentId)
+        .eq("branch_id",issue.branchId)
+        .single());
+      if (studentResult.error || !studentResult.data?.id) {
+        persistNormalLessonMakeupPlanIssue({ ...issue, state:"applied_pending_refresh" });
+        if (options.notify !== false) pop("Telafi planı Supabase'e kaydedildi; güncel öğrenci kaydı henüz yüklenemedi. İşlemi tekrarlamayın.",9000);
+        return { ok:false, applied:true, refreshFailed:true };
+      }
+      const savedStudent = studentResult.data;
+      const savedVersion = Number(savedStudent.record_version);
+      const resultVersion = Number(row.resulting_record_version);
+      const currentRecord = (savedStudent.telafi_records || []).find(record=>String(record?.id || "") === issue.makeupRecordId) || null;
+      const currentMatches = !!currentRecord
+        && telafiPlannedAt(currentRecord) === issue.plannedAt
+        && Number(currentRecord.plannedDurationMinutes) === Number(issue.plannedDurationMinutes)
+        && String(currentRecord.plannedNote || "") === issue.plannedNote;
+      const authoritative = savedStudent.branch_id === issue.branchId
+        && savedVersion >= resultVersion
+        && (savedVersion > resultVersion || (savedStudent.last_write_id === issue.operationId && currentMatches));
+      if (!authoritative) {
+        persistNormalLessonMakeupPlanIssue({ ...issue, state:"conflict" });
+        if (options.notify !== false) pop("Telafi planı bulundu fakat öğrenci kaydının güncel sürümü doğrulanamadı. İşlemi yeniden göndermeyin.",9000);
+        return { ok:false, applied:true, conflict:true };
+      }
+      if (currentBranch?.id !== issue.branchId) {
+        persistNormalLessonMakeupPlanIssue({ ...issue, state:"applied_pending_refresh" });
+        if (options.notify !== false) pop("Telafi planı kaydedildi. Güncel kaydı görmek için işlemin ait olduğu şubeyi açın.",9000);
+        return { ok:false, applied:true, wrongBranch:true };
+      }
+      setStudents(previous=>previous.map(student=>student.id === savedStudent.id ? savedStudent : student));
+      setDetailSt(previous=>previous?.id === savedStudent.id ? savedStudent : previous);
+      const cleared = clearNormalLessonMakeupPlanIssue(issue.operationId);
+      if (!cleared) {
+        normalLessonMakeupPlanIssueRef.current = { ...issue, state:"applied_pending_refresh" };
+        setNormalLessonMakeupPlanIssue({ ...issue, state:"applied_pending_refresh" });
+      }
+      if (options.notify !== false) pop("Telafi planı Supabase'de doğrulandı ve ekran yenilendi.",7000);
+      return { ok:true, applied:true, row, student:savedStudent, record:currentRecord, currentMatches };
+    } finally {
+      normalLessonMakeupPlanCheckingRef.current = false;
+      setNormalLessonMakeupPlanIssueChecking(false);
+    }
+  };
+
+  const handleNormalLessonMakeupPlan = async (sid, tid, payload={}) => {
+    const sourceStudent = students.find(student=>student.id === sid);
+    const branchId = currentBranch?.id;
+    if (!requireProtectedSources(["students"],"Telafi planı")) return false;
+    if (!browserOnline) {
+      pop("İnternet bağlantısı olmadan telafi planı kaydedilemez.",7000);
+      return false;
+    }
+    if (!sourceStudent?.id || !tid || !branchId || sourceStudent.branch_id !== branchId) {
+      pop("Öğrenci, telafi hakkı veya aktif şube güvenli biçimde doğrulanamadı; kayıt gönderilmedi.",8000);
+      return false;
+    }
+    if (normalLessonEvaluationWritingRef.current || normalLessonEvaluationIssueRef.current) {
+      pop("Önce bekleyen ders değerlendirmesi sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return false;
+    }
+    if (normalLessonMakeupWritingRef.current || normalLessonMakeupIssueRef.current) {
+      pop("Önce bekleyen telafi hakkı sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return false;
+    }
+    if (normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current) {
+      pop("Önce devam eden telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return false;
+    }
+    const intent = normalLessonMakeupPlanIntent(sourceStudent,tid,payload);
+    if (intent.matchingRecordCount !== 1 || !intent.record) {
+      pop("Telafi hakkı güvenli biçimde eşleştirilemedi; plan gönderilmedi.",7000);
+      return false;
+    }
+    if (intent.record.done === true || String(intent.record.done).toLowerCase() === "true") {
+      pop("Tamamlanmış telafi yeniden planlanamaz.",7000);
+      return false;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(intent.plannedAt) || !Number.isFinite(new Date(intent.plannedAt).getTime())) {
+      pop("Geçerli telafi tarihi ve saati seçin.",7000);
+      return false;
+    }
+    if (!Number.isInteger(intent.plannedDurationMinutes) || intent.plannedDurationMinutes < 15 || intent.plannedDurationMinutes > 1440 || intent.plannedNote.length > 10000) {
+      pop("Telafi süresi veya plan notu doğrulanamadı; kayıt gönderilmedi.",7000);
+      return false;
+    }
+    const operationId = uid();
+    const issue = {
+      operationId,
+      actorUserId:authSession?.user?.id || "",
+      branchId,
+      studentId:sid,
+      studentName:sourceStudent.name || "Öğrenci",
+      makeupRecordId:tid,
+      expectedRecordVersion:intent.expectedRecordVersion,
+      expectedOperationKind:intent.expectedOperationKind,
+      plannedAt:intent.plannedAt,
+      plannedDurationMinutes:intent.plannedDurationMinutes,
+      plannedNote:intent.plannedNote,
+      requestSignature:normalLessonMakeupPlanIntentSignature(intent.requestPayload),
+      label:(sourceStudent.name || "Öğrenci")+" · "+fmtDate(intent.plannedAt)+" "+timeFromISO(intent.plannedAt),
+      state:"writing",
+      createdAt:new Date().toISOString(),
+    };
+    if (!persistNormalLessonMakeupPlanIssue(issue)) {
+      pop("Telafi planı işlem güvenliği tarayıcıda hazırlanamadı; kayıt gönderilmedi.",9000);
+      return false;
+    }
+    normalLessonMakeupPlanWritingRef.current = true;
+    try {
+      const result = await runBranchScopedWrite(() => timedSingleLessonRequest(() => supabase.rpc("plan_normal_lesson_makeup",{
+        p_student_id:sid,
+        p_makeup_record_id:tid,
+        p_expected_record_version:intent.expectedRecordVersion,
+        p_planned_at:intent.plannedAt,
+        p_planned_duration_minutes:intent.plannedDurationMinutes,
+        p_planned_note:intent.plannedNote,
+        p_operation_id:operationId,
+      }).single()));
+      if (!result.error && result.data?.operation_state === "applied") {
+        const savedStudent = result.data.student_record;
+        const plannedRecord = (savedStudent?.telafi_records || []).find(record=>String(record?.id || "") === tid);
+        const exactResult = result.data.operation_kind === intent.expectedOperationKind
+          && savedStudent?.id === sid
+          && savedStudent?.branch_id === branchId
+          && Number(savedStudent?.record_version) === intent.expectedRecordVersion + 1
+          && savedStudent?.last_write_id === operationId
+          && !!plannedRecord
+          && telafiPlannedAt(plannedRecord) === intent.plannedAt
+          && Number(plannedRecord.plannedDurationMinutes) === intent.plannedDurationMinutes
+          && String(plannedRecord.plannedNote || "") === intent.plannedNote;
+        if (exactResult) {
+          setStudents(previous=>previous.map(student=>student.id === savedStudent.id ? savedStudent : student));
+          setDetailSt(previous=>previous?.id === savedStudent.id ? savedStudent : previous);
+          const cleared = clearNormalLessonMakeupPlanIssue(operationId);
+          if (!cleared) {
+            normalLessonMakeupPlanIssueRef.current = { ...issue, state:"applied_pending_refresh" };
+            setNormalLessonMakeupPlanIssue({ ...issue, state:"applied_pending_refresh" });
+          }
+          pop(intent.expectedOperationKind === "rescheduled" ? "Telafi yeniden planlandı" : "Telafi planlandı");
+          setTelafiPlanMessagePrompt({ student:savedStudent, record:plannedRecord });
+          return true;
+        }
+      }
+      persistNormalLessonMakeupPlanIssue({ ...issue, state:"unknown" });
+      if (normalLessonMakeupPlanKnownRejection(result.error)) {
+        await checkNormalLessonMakeupPlanOperation({ ...issue, state:"unknown" },{ notify:false, knownRejected:true });
+        pop(normalLessonMakeupPlanErrorText(result.error),9000);
+        return false;
+      }
+      const checked = await checkNormalLessonMakeupPlanOperation({ ...issue, state:"unknown" },{ notify:false });
+      if (checked.applied && checked.student) {
+        pop("Telafi planı Supabase'de doğrulandı ve ekran yenilendi.",7000);
+        if (checked.currentMatches && checked.record) setTelafiPlanMessagePrompt({ student:checked.student, record:checked.record });
+      } else if (!checked.applied) pop(normalLessonMakeupPlanErrorText(result.error),9000);
+      return checked.applied === true;
+    } catch (error) {
+      persistNormalLessonMakeupPlanIssue({ ...issue, state:"unknown" });
+      const checked = await checkNormalLessonMakeupPlanOperation({ ...issue, state:"unknown" },{ notify:false });
+      if (checked.applied && checked.student) {
+        pop("Telafi planı Supabase'de doğrulandı ve ekran yenilendi.",7000);
+        if (checked.currentMatches && checked.record) setTelafiPlanMessagePrompt({ student:checked.student, record:checked.record });
+      } else if (!checked.applied) pop(normalLessonMakeupPlanErrorText(error),9000);
+      return checked.applied === true;
+    } finally {
+      normalLessonMakeupPlanWritingRef.current = false;
+    }
+  };
+
   const handleAction = async (sid, action, note="", lid=null, actionOptions={}) => {
     if (action === "attended") return handleNormalLessonEvaluation(sid,note,lid,actionOptions);
     if (action === "telafi" || action === "lm-telafi") return handleNormalLessonMakeup(sid,action,note,lid,actionOptions);
@@ -9154,6 +9544,10 @@ export default function App() {
     }
     if (normalLessonMakeupIssueRef.current) {
       pop("Önce bekleyen telafi hakkı sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return;
+    }
+    if (normalLessonMakeupPlanIssueRef.current) {
+      pop("Önce bekleyen telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
       return;
     }
     const sourceStudent = students.find(student=>student.id===sid);
@@ -9215,6 +9609,17 @@ export default function App() {
     void checkNormalLessonMakeupOperation(issue,{ notify:false });
   },[giris,browserOnline,accessContext,currentBranch?.id,normalLessonMakeupIssue?.operationId,normalLessonMakeupIssue?.state,authSession?.user?.id]);
 
+  useEffect(() => {
+    const issue = normalLessonMakeupPlanIssue;
+    if (!giris || !browserOnline || !accessContext || !currentBranch?.id || !issue?.operationId) return;
+    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return;
+    if (issue.branchId !== currentBranch.id || ["not_applied","conflict"].includes(issue.state)) return;
+    if (normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanCheckingRef.current) return;
+    if (normalLessonMakeupPlanAutoCheckRef.current === issue.operationId) return;
+    normalLessonMakeupPlanAutoCheckRef.current = issue.operationId;
+    void checkNormalLessonMakeupPlanOperation(issue,{ notify:false });
+  },[giris,browserOnline,accessContext,currentBranch?.id,normalLessonMakeupPlanIssue?.operationId,normalLessonMakeupPlanIssue?.state,authSession?.user?.id]);
+
   const handleToggleFreeze = async (sid, frozen, resumeDate=null) => {
     const resumeStart = resumeDate ? new Date(resumeDate+"T12:00:00") : null;
     if (!frozen && resumeDate && (!/^\d{4}-\d{2}-\d{2}$/.test(resumeDate) || isNaN(resumeStart.getTime()) || midday(resumeStart) < midday())) {
@@ -9254,6 +9659,11 @@ export default function App() {
 
   const handleTelafiDone = async (sid, tid, payload = {}) => {
     const action = payload.action || "attended";
+    if (action === "plan") return handleNormalLessonMakeupPlan(sid,tid,payload);
+    if (normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current) {
+      pop("Önce bekleyen telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return false;
+    }
     const updated = students.map(s => {
       if (s.id !== sid) return s;
       const checkRef = homeworkCheckRef("telafi", tid);
@@ -9276,14 +9686,6 @@ export default function App() {
           };
         }
         if (r.id !== tid) return r;
-        if (action === "plan") {
-          return {
-            ...r,
-            plannedAt: payload.plannedAt,
-            plannedDurationMinutes: payload.plannedDurationMinutes,
-            plannedNote: payload.plannedNote || "",
-          };
-        }
         if (action === "counted") {
           return {
             ...r,
@@ -9320,14 +9722,12 @@ export default function App() {
     });
     setStudents(updated);
     const savedStudent = await saveStudent(updated.find(s=>s.id===sid));
-    pop(action === "plan" ? "Telafi planlandı" : "Telafi yapıldı");
-    if (action === "plan") {
-      const plannedRecord = (savedStudent.telafi_records || []).find(record => record.id === tid);
-      if (plannedRecord?.plannedAt) setTelafiPlanMessagePrompt({ student:savedStudent, record:plannedRecord });
-    } else if (action === "attended") {
+    pop("Telafi yapıldı");
+    if (action === "attended") {
       const evaluatedRecord = (savedStudent.telafi_records || []).find(record => record.id === tid);
       if (evaluatedRecord && storedLessonScore(evaluatedRecord) !== null) setLessonEvaluationPrompt({ student:savedStudent, record:evaluatedRecord, type:"telafi" });
     }
+    return true;
   };
 
   const handleShift = async (sid, fromLid, days) => {
@@ -10327,6 +10727,7 @@ export default function App() {
   const staffActivationByInvitation = new Map(staffActivations.map(operation=>[operation.invitation_id,operation]));
   const visibleNormalLessonEvaluationIssue = normalLessonEvaluationIssue && (!normalLessonEvaluationIssue.actorUserId || normalLessonEvaluationIssue.actorUserId === authSession?.user?.id) ? normalLessonEvaluationIssue : null;
   const visibleNormalLessonMakeupIssue = normalLessonMakeupIssue && (!normalLessonMakeupIssue.actorUserId || normalLessonMakeupIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupIssue : null;
+  const visibleNormalLessonMakeupPlanIssue = normalLessonMakeupPlanIssue && (!normalLessonMakeupPlanIssue.actorUserId || normalLessonMakeupPlanIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupPlanIssue : null;
   const visibleBranchLifecycleIssue = branchLifecycleIssue && (!branchLifecycleIssue.actorUserId || branchLifecycleIssue.actorUserId === authSession?.user?.id) ? branchLifecycleIssue : null;
   const visibleStaffInvitationIssue = staffInvitationIssue && (!staffInvitationIssue.actorUserId || staffInvitationIssue.actorUserId === authSession?.user?.id) ? staffInvitationIssue : null;
   const visibleStaffActivationIssue = staffActivationIssue && (!staffActivationIssue.actorUserId || staffActivationIssue.actorUserId === authSession?.user?.id) ? staffActivationIssue : null;
@@ -10667,6 +11068,18 @@ export default function App() {
               {visibleNormalLessonMakeupIssue.state === "not_applied" ? <button type="button" onClick={()=>clearNormalLessonMakeupIssue(visibleNormalLessonMakeupIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
             </div>
             <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Yeniden kontrol yalnızca Supabase'den okur; telafi hakkını kendiliğinden tekrar göndermez.</p>
+          </div>
+        ) : null}
+        {visibleNormalLessonMakeupPlanIssue ? (
+          <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
+            <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Telafi planı kontrolü gerekli</p>
+            <p style={{ margin:"0 0 4px", fontSize:12, color:"#9a3412", fontWeight:650, lineHeight:1.5 }}>{normalLessonMakeupPlanIssueMessage(visibleNormalLessonMakeupPlanIssue)}</p>
+            {visibleNormalLessonMakeupPlanIssue.label ? <p style={{ margin:"0 0 10px", fontSize:11, color:"#9a3412", fontWeight:800 }}>İşlem: {visibleNormalLessonMakeupPlanIssue.label}</p> : null}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              <button type="button" onClick={()=>checkNormalLessonMakeupPlanOperation(visibleNormalLessonMakeupPlanIssue)} disabled={!browserOnline || normalLessonMakeupPlanIssueChecking || normalLessonMakeupPlanWritingRef.current} style={{ border:"none", borderRadius:9, padding:"8px 11px", background:"#ea580c", color:"#fff", fontSize:12, fontWeight:850, cursor:(!browserOnline || normalLessonMakeupPlanIssueChecking || normalLessonMakeupPlanWritingRef.current)?"wait":"pointer", opacity:(!browserOnline || normalLessonMakeupPlanIssueChecking || normalLessonMakeupPlanWritingRef.current)?0.65:1 }}>{normalLessonMakeupPlanIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button>
+              {visibleNormalLessonMakeupPlanIssue.state === "not_applied" ? <button type="button" onClick={()=>clearNormalLessonMakeupPlanIssue(visibleNormalLessonMakeupPlanIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
+            </div>
+            <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Yeniden kontrol yalnızca Supabase'den okur; telafi planını kendiliğinden tekrar göndermez.</p>
           </div>
         ) : null}
         {visibleBranchLifecycleIssue ? (
