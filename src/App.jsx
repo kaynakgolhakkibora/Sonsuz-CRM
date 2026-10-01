@@ -6423,6 +6423,52 @@ export default function App() {
     }
   };
 
+  const revalidateCurrentAccess = async () => {
+    const organizationId = activeOrganization?.id;
+    const branchId = currentBranch?.id;
+    if (!organizationId || !branchId) return { ok:false, skipped:true };
+
+    const result = await timedSingleLessonRequest(() => supabase.rpc("get_my_access_context"));
+    if (result.error || !result.data || !Array.isArray(result.data.organizations)) {
+      const error = result.error || new Error("ACCESS_CONTEXT_INVALID");
+      console.error("Kurum/şube yetkisi arka planda doğrulanamadı:",error);
+      return { ok:false, error };
+    }
+
+    const selectable = accessBranchOptions(result.data).filter(option=>option.selectable);
+    if (!selectable.length) {
+      return {
+        ok:false,
+        accessState:"no_selectable_branch",
+        data:result.data,
+        error:new Error("ACCESS_CONTEXT_NO_SELECTABLE_BRANCH"),
+      };
+    }
+
+    const requiredBranches = pendingBranchIds();
+    const unavailablePendingBranches = requiredBranches.filter(requiredBranchId=>!selectable.some(option=>option.branchId===requiredBranchId));
+    if (unavailablePendingBranches.length) {
+      return {
+        ok:false,
+        accessState:"pending_branch_unavailable",
+        data:result.data,
+        error:new Error("ACCESS_CONTEXT_PENDING_BRANCH_UNAVAILABLE"),
+      };
+    }
+
+    const selectedOption = selectable.find(option=>option.organizationId===organizationId && option.branchId===branchId) || null;
+    if (!selectedOption) {
+      return {
+        ok:false,
+        accessState:"current_branch_unavailable",
+        data:result.data,
+        error:new Error("ACCESS_CONTEXT_CURRENT_BRANCH_UNAVAILABLE"),
+      };
+    }
+
+    return { ok:true, data:result.data, selectedOption };
+  };
+
   const persistBranchLifecycleIssue = issue => {
     const stored = issue ? {
       ...issue,
@@ -7513,7 +7559,7 @@ export default function App() {
     checkStaffDeactivationOperation(issue,options)
   ));
 
-  const loadAccessContextFromEffect = useEffectEvent(options => loadAccessContext(options));
+  const revalidateCurrentAccessFromEffect = useEffectEvent(() => revalidateCurrentAccess());
 
   const openStaffInvite = () => {
     const blockingIssue = (staffInvitationIssue && (!staffInvitationIssue.actorUserId || staffInvitationIssue.actorUserId === authSession?.user?.id))
@@ -7610,13 +7656,14 @@ export default function App() {
   }, [giris,authSession?.user?.id]);
 
   useEffect(() => {
-    if (!giris || !browserOnline || !authSession?.user?.id || typeof window === "undefined") return undefined;
+    if (!giris || !browserOnline || !authSession?.user?.id || !accessContext || accessContextLoading || !activeOrganization?.id || !currentBranch?.id || typeof window === "undefined") return undefined;
     let cancelled = false;
     const revalidateAccess = async () => {
       if (cancelled || staffAccessRevalidationRef.current) return;
       staffAccessRevalidationRef.current = true;
       try {
-        const result = await loadAccessContextFromEffect({ preserveSelection:true });
+        const result = await revalidateCurrentAccessFromEffect();
+        if (cancelled) return;
         const message = String(result?.error?.message || result?.error || "");
         if (!result.ok && message.includes("ACCESS_CONTEXT_ACTIVE_STAFF_REQUIRED")) {
           sessionStorage.removeItem(CRM_AUTH_KEY);
@@ -7628,6 +7675,37 @@ export default function App() {
             setGiris(false);
             setAuthError("Personel erişiminiz pasife alındı. Yeniden erişim için kurum sahibiyle görüşün.");
           }
+        } else if (!result.ok && !result.accessState) {
+          setAccessContext(null);
+          setActiveOrganization(null);
+          setCurrentBranch(null);
+          setAccessContextError("Kurum ve şube yetkileri Supabase'den doğrulanamadı.");
+        } else if (!result.ok && result.accessState === "no_selectable_branch") {
+          setAccessContext(result.data);
+          setActiveOrganization(null);
+          setCurrentBranch(null);
+          setAccessContextError("Bu hesap için kullanılabilir aktif şube bulunamadı.");
+        } else if (!result.ok && result.accessState === "pending_branch_unavailable") {
+          setAccessContext(result.data);
+          setActiveOrganization(null);
+          setCurrentBranch(null);
+          setAccessContextError("Sonucu bekleyen bir işlemin şubesine artık erişilemiyor. Yetki düzeltilmeden işlem güvenle kontrol edilemez.");
+        } else if (!result.ok && result.accessState === "current_branch_unavailable") {
+          setAccessContext(result.data);
+          setActiveOrganization(null);
+          setCurrentBranch(null);
+          setAccessContextError("");
+        } else if (result.ok && result.selectedOption) {
+          setAccessContext(result.data);
+          setAccessContextError("");
+          setActiveOrganization(result.selectedOption.organization);
+          setCurrentBranch({
+            ...result.selectedOption.branch,
+            id:result.selectedOption.branchId,
+            name:result.selectedOption.branchName,
+            organization_id:result.selectedOption.organizationId,
+            organizationName:result.selectedOption.organizationName,
+          });
         }
       } finally {
         staffAccessRevalidationRef.current = false;
@@ -7644,7 +7722,7 @@ export default function App() {
       window.removeEventListener("focus",onFocus);
       document.removeEventListener("visibilitychange",onVisibility);
     };
-  },[giris,browserOnline,authSession?.user?.id,currentBranch?.id]);
+  },[giris,browserOnline,authSession?.user?.id,accessContext,accessContextLoading,activeOrganization?.id,currentBranch?.id]);
 
   useEffect(() => {
     if (mainTab === "subeler" && activeOrganization && activeOrganization.canCreateBranches !== true) setMainTab("bugün");
