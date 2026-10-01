@@ -9362,7 +9362,7 @@ export default function App() {
       if (!exactEvidence) {
         persistNormalLessonMakeupPlanIssue({ ...issue, state:"conflict" });
         if (options.notify !== false) pop("Telafi planı kanıtı beklenen öğrenci, telafi hakkı veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.",9000);
-        return { ok:false, applied:true, conflict:true };
+        return { ok:false, applied:false, conflict:true };
       }
       const studentResult = await timedSingleLessonRequest(() => supabase
         .from("students")
@@ -9520,16 +9520,16 @@ export default function App() {
       if (checked.applied && checked.student) {
         pop("Telafi planı Supabase'de doğrulandı ve ekran yenilendi.",7000);
         if (checked.currentMatches && checked.record) setTelafiPlanMessagePrompt({ student:checked.student, record:checked.record });
-      } else if (!checked.applied) pop(normalLessonMakeupPlanErrorText(result.error),9000);
-      return checked.applied === true;
+      } else if (!checked.applied && !checked.conflict) pop(normalLessonMakeupPlanErrorText(result.error),9000);
+      return checked.applied === true && checked.conflict !== true;
     } catch (error) {
       persistNormalLessonMakeupPlanIssue({ ...issue, state:"unknown" });
       const checked = await checkNormalLessonMakeupPlanOperation({ ...issue, state:"unknown" },{ notify:false });
       if (checked.applied && checked.student) {
         pop("Telafi planı Supabase'de doğrulandı ve ekran yenilendi.",7000);
         if (checked.currentMatches && checked.record) setTelafiPlanMessagePrompt({ student:checked.student, record:checked.record });
-      } else if (!checked.applied) pop(normalLessonMakeupPlanErrorText(error),9000);
-      return checked.applied === true;
+      } else if (!checked.applied && !checked.conflict) pop(normalLessonMakeupPlanErrorText(error),9000);
+      return checked.applied === true && checked.conflict !== true;
     } finally {
       normalLessonMakeupPlanWritingRef.current = false;
     }
