@@ -278,6 +278,10 @@ function isCurrentTelafi(record) {
   return midday(expiryDate).getTime() >= midday().getTime();
 }
 function activeTelafiRecords(records) { return (records || []).filter(isCurrentTelafi); }
+function isTodayPlannedTelafi(record) {
+  const plannedAt = telafiPlannedAt(record);
+  return !record?.done && !!plannedAt && isToday(plannedAt);
+}
 function telafiPolicyDate(value) {
   if (!value) return null;
   const text = String(value);
@@ -4862,7 +4866,7 @@ function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStuden
     });
     (s.telafi_records || []).forEach(record => {
       const plannedAt = telafiPlannedAt(record);
-      if (isCurrentTelafi(record) && plannedAt && isToday(plannedAt)) {
+      if (isTodayPlannedTelafi(record)) {
         todayLessons.push({ kind:"telafi", student:s, record, time:timeFromISO(plannedAt) });
       }
     });
