@@ -1103,6 +1103,116 @@ function singleLessonMoveIssueMessage(issue) {
   return "Taşımanın sonucu henüz kesin değil. Yeniden Kontrol Et yalnız Supabase kaydını okur; taşıma otomatik tekrarlanmaz.";
 }
 
+// v174: read-only calendar proof. Never attach this evidence to a student payload.
+function calendarMoveReadRequests(students, scope, offset=0) {
+  if (!SINGLE_LESSON_MOVE_UUID.test(scope?.actorUserId || "") || !SINGLE_LESSON_MOVE_UUID.test(scope?.branchId || "")) return [];
+  const start = new Date();
+  const dow = start.getDay();
+  start.setDate(start.getDate() - (dow===0?6:dow-1) + offset*7);
+  start.setHours(0,0,0,0);
+  const visibleDates = new Set(Array.from({length:7},(_,index)=>{
+    const day = new Date(start);
+    day.setDate(start.getDate()+index);
+    return turkeyDateKey(day);
+  }));
+  return students.flatMap(student => {
+    if (student.branch_id !== scope.branchId || student.frozen || isStudentLeft(student)) return [];
+    const counts = new Map();
+    (student.schedule || []).forEach(lesson=>counts.set(lesson.id,(counts.get(lesson.id) || 0)+1));
+    return (student.schedule || []).flatMap(lesson => {
+      const origin = singleLessonMoveOrigin(lesson);
+      if (counts.get(lesson.id) !== 1 || !origin || !visibleDates.has(origin.localDate)
+        || lesson.calendarMove.operationId === lesson.calendarMove.originOperationId) return [];
+      return [{ studentId:student.id, branchId:student.branch_id, recordVersion:student.record_version,
+        lessonId:lesson.id, date:lesson.date, time:lesson.time, packageId:lesson.packageId,
+        packageLessonCount:lesson.packageLessonCount, marker:lesson.calendarMove }];
+    });
+  });
+}
+
+function calendarMoveVerifiedSources(request, rows) {
+  const same = (a,b) => JSON.stringify(canonicalJson(a)) === JSON.stringify(canonicalJson(b));
+  const current = { id:request.lessonId, date:request.date, time:request.time, calendarMove:request.marker };
+  const origin = singleLessonMoveOrigin(current);
+  if (!origin || !Number.isInteger(request.recordVersion)) return null;
+  const byId = new Map();
+  for (const row of rows) {
+    if (byId.has(row.operation_id)) return null;
+    byId.set(row.operation_id,row);
+  }
+  const sources = new Set();
+  const visited = new Set();
+  let operationId = request.marker.operationId;
+  let newer = null;
+  while (operationId) {
+    if (visited.has(operationId)) return null;
+    visited.add(operationId);
+    const row = byId.get(operationId);
+    const before = row?.target_before;
+    const after = row?.target_after;
+    const intent = row?.request_payload;
+    if (!row || row.student_id !== request.studentId || row.branch_id !== request.branchId || row.lesson_id !== request.lessonId
+      || !SINGLE_LESSON_MOVE_UUID.test(row.operation_id || "") || !SINGLE_LESSON_MOVE_UUID.test(row.actor_user_id || "")
+      || !Number.isInteger(intent?.expectedRecordVersion) || intent.expectedRecordVersion < 0
+      || !singleLessonMoveEvidenceMatches({ operationId, actorUserId:row.actor_user_id, branchId:request.branchId, requestPayload:intent },row)
+      || !same(row.origin_position,request.marker.origin) || row.origin_operation_id !== request.marker.originOperationId
+      || before.packageId !== request.packageId || after.packageId !== request.packageId
+      || before.packageLessonCount !== request.packageLessonCount || after.packageLessonCount !== request.packageLessonCount) return null;
+    if (!newer) {
+      if (!same(after.calendarMove,request.marker) || after.date !== request.date || after.time !== request.time
+        || request.recordVersion < Number(row.resulting_record_version)) return null;
+    } else if (after.date !== newer.target_before.date || after.time !== singleLessonMovePosition(newer.target_before.date)?.time
+      || Number(row.resulting_record_version) > Number(newer.expected_record_version)
+      || (newer.target_before.calendarMove && !same(after.calendarMove,newer.target_before.calendarMove))) return null;
+    const source = singleLessonMovePosition(before.date);
+    // Other dates/weeks may have independent program reservations: do not hide them.
+    if (source?.localDate === origin.localDate) sources.add(source.localDate+"|"+source.time);
+    if (operationId === request.marker.originOperationId) {
+      if (row.previous_operation_id != null || source?.date !== origin.date) return null;
+      return [...sources];
+    }
+    if (!SINGLE_LESSON_MOVE_UUID.test(row.previous_operation_id || "")) return null;
+    newer = row;
+    operationId = row.previous_operation_id;
+  }
+  return null;
+}
+
+async function readCalendarMoveEvidence(client, requests, scope, isCurrent) {
+  const rows = [];
+  const seen = new Set();
+  let pending = [...new Set(requests.map(request=>request.marker.operationId))];
+  // Fetch only explicit operation IDs, at most 40 rows/query (below server row caps).
+  for (let depth=0; pending.length && depth<128; depth+=1) {
+    const next = [];
+    for (let index=0; index<pending.length; index+=40) {
+      if (!isCurrent()) return null;
+      const ids = pending.slice(index,index+40);
+      const result = await timedSingleLessonRequest(()=>client.from("single_lesson_move_operations")
+        .select("operation_id,student_id,branch_id,lesson_id,operation_kind,expected_record_version,resulting_record_version,request_payload,target_before,target_after,origin_position,origin_operation_id,previous_operation_id,actor_user_id")
+        .eq("branch_id",scope.branchId).in("operation_id",ids));
+      if (!isCurrent()) return null;
+      if (result.error || !Array.isArray(result.data) || result.data.length !== ids.length) throw new Error("CALENDAR_MOVE_READ_INCOMPLETE");
+      for (const row of result.data) {
+        if (!ids.includes(row.operation_id) || seen.has(row.operation_id) || row.branch_id !== scope.branchId
+          || !requests.some(request=>request.studentId===row.student_id && request.lessonId===row.lesson_id)) throw new Error("CALENDAR_MOVE_READ_CONFLICT");
+        seen.add(row.operation_id);
+        rows.push(row);
+        if (rows.length > 4096) throw new Error("CALENDAR_MOVE_READ_LIMIT");
+        if (row.operation_id !== row.origin_operation_id) {
+          if (!SINGLE_LESSON_MOVE_UUID.test(row.previous_operation_id || "")) throw new Error("CALENDAR_MOVE_READ_CONFLICT");
+          next.push(row.previous_operation_id);
+        }
+      }
+    }
+    pending = [...new Set(next)].filter(id=>!seen.has(id));
+  }
+  if (pending.length) throw new Error("CALENDAR_MOVE_READ_LIMIT");
+  const sources = requests.map(request=>({ studentId:request.studentId, lessonId:request.lessonId, keys:calendarMoveVerifiedSources(request,rows) }));
+  if (sources.some(source=>source.keys===null)) throw new Error("CALENDAR_MOVE_READ_CONFLICT");
+  return sources;
+}
+
 function staffInvitationIssueMessage(issue) {
   if (!issue) return "";
   if (issue.state === "not_applied") return "Personel daveti Supabase'de bulunamadı. Davet oluşmadı; uyarıyı kapatıp işlemi yeniden başlatabilirsiniz.";
@@ -4547,7 +4657,25 @@ function ZamSheet({ student, onClose, onSave }) {
   );
 }
 
-function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "" }) {
+function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "", calendarMoveReadScope=null }) {
+  const moveRequests = calendarMoveReadRequests(students,calendarMoveReadScope,offset);
+  const moveReadKey = JSON.stringify([calendarMoveReadScope,moveRequests]);
+  const moveReadKeyRef = useRef(moveReadKey);
+  moveReadKeyRef.current = moveReadKey;
+  const [moveReadResult,setMoveReadResult] = useState(null);
+  const [moveReadRetry,setMoveReadRetry] = useState(0);
+  useEffect(()=>{
+    let cancelled = false;
+    const isCurrent = () => !cancelled && moveReadKeyRef.current===moveReadKey;
+    if (!moveRequests.length) { setMoveReadResult(null); return ()=>{ cancelled=true; }; }
+    setMoveReadResult({ key:moveReadKey, state:"loading", sources:[] });
+    readCalendarMoveEvidence(supabase,moveRequests,calendarMoveReadScope,isCurrent)
+      .then(sources=>{ if (isCurrent() && sources) setMoveReadResult({ key:moveReadKey, state:"ready", sources }); })
+      .catch(()=>{ if (isCurrent()) setMoveReadResult({ key:moveReadKey, state:"error", sources:[] }); });
+    return ()=>{ cancelled=true; };
+  },[moveReadKey,moveReadRetry]);
+  const verifiedMoveSources = moveReadResult?.key===moveReadKey && moveReadResult.state==="ready" ? moveReadResult.sources : [];
+  const moveReadState = moveRequests.length ? (moveReadResult?.key===moveReadKey ? moveReadResult.state : "loading") : "";
   const now = new Date();
   const dow = now.getDay();
   const start = new Date(now);
@@ -4592,7 +4720,8 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     const movedSourceKeys = new Set(schedule.flatMap(lesson => {
       if (lessonIdCounts.get(lesson.id) !== 1) return [];
       const origin = singleLessonMoveOrigin(lesson);
-      return origin ? [origin.localDate+"|"+origin.time] : [];
+      const verified = verifiedMoveSources.find(source=>source.studentId===student.id && source.lessonId===lesson.id);
+      return origin ? [origin.localDate+"|"+origin.time,...(verified?.keys || [])] : [];
     }));
 
     schedule.forEach(lesson => {
@@ -4745,6 +4874,9 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
           ["#7c3aed",1,"Tek Ders"],
         ].map(([color,opacity,text])=><span key={text} style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:20, height:10, borderRadius:3, background:color, opacity }} />{text}</span>)}
       </div>
+      {["loading","error"].includes(moveReadState) ? <div role="status" style={{ marginBottom:10, padding:"8px 12px", borderRadius:8, background:moveReadState==="error"?"#fff7ed":"#f8fafc", color:moveReadState==="error"?"#9a3412":"#64748b", fontSize:12 }}>
+        {moveReadState==="error" ? <>Taşınan derslerin eski program kartları doğrulanamadı; takvimde fazladan kart olabilir. <button onClick={()=>setMoveReadRetry(value=>value+1)} style={{ background:"none", border:"none", color:"inherit", textDecoration:"underline", cursor:"pointer", fontFamily:"inherit" }}>Yalnız takvimi yeniden kontrol et</button></> : moveReadState==="loading" ? "Taşınan derslerin takvim konumları kontrol ediliyor…" : null}
+      </div> : null}
       <div className="week-calendar-v66">
         <div className="week-calendar-v66-grid">
           <div style={{ gridColumn:1, gridRow:1, background:"#fbfaf9", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", zIndex:2 }} />
@@ -4789,7 +4921,7 @@ function studentAge(student) {
   return age >= 0 ? age : null;
 }
 
-function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentClick, onSingleLessonClick, onExtraLessonClick }) {
+function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentClick, onSingleLessonClick, onExtraLessonClick, calendarMoveReadScope=null }) {
   const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [teacherWeekOffset, setTeacherWeekOffset] = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
@@ -4853,7 +4985,7 @@ function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentCl
 
       <section style={{ marginBottom:20 }}>
         <p style={{ margin:"0 0 9px", fontSize:13, fontWeight:850, color:"#374151" }}>Haftalık ders takvimi</p>
-        <WeekCal students={students} singleLessons={singleLessons} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} onExtraLessonClick={onExtraLessonClick} teacherName={selectedTeacher.name} />
+        <WeekCal students={students} singleLessons={singleLessons} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} onExtraLessonClick={onExtraLessonClick} teacherName={selectedTeacher.name} calendarMoveReadScope={calendarMoveReadScope} />
       </section>
 
       <section style={{ ...CARD, padding:"16px 18px", marginBottom:16 }}>
@@ -12233,8 +12365,8 @@ export default function App() {
           </div>
         ) : null}
 
-        {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} /> : null}
-        {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} /> : null}
+        {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} /> : null}
+        {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} /> : null}
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
