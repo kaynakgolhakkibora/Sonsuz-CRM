@@ -4972,7 +4972,7 @@ function calendarAvailabilityText(model) {
     ...model.days.map(day=>day.dayName+" ("+day.dateLabel+"): "+(day.times.length?day.times.join(", "):"Uygun saat yok")),
     "",
     "Hazırlanma: "+model.generatedLabel,
-    "Saatler mevcut takvime göredir; rezervasyon değildir. Randevu öncesi tekrar kontrol edilir.",
+    "Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.",
   ].join("\n");
 }
 
@@ -5132,7 +5132,7 @@ function calendarAvailabilityPdfBytes(model) {
     }
   });
   text("Hazırlanma: "+model.generatedLabel,margin,73,9,"0.40 0.44 0.50");
-  text("Saatler mevcut takvime göredir; rezervasyon değildir. Randevu öncesi tekrar kontrol edilir.",margin,52,9,"0.40 0.44 0.50");
+  text("Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.",margin,52,9,"0.40 0.44 0.50");
   const fontBytes=Uint8Array.from(atob(font.font),character=>character.charCodeAt(0));
   const cmapEntries=Array.from(font.characters).map((character,index)=>"<"+index.toString(16).padStart(2,"0")+"> <"+character.codePointAt(0).toString(16).padStart(4,"0")+">");
   const cmap=["/CIDInit /ProcSet findresource begin","12 dict begin","begincmap","/CIDSystemInfo << /Registry (Sonsuz) /Ordering (Unicode) /Supplement 0 >> def","/CMapName /SonsuzAvailabilityUnicode def","/CMapType 2 def","1 begincodespacerange","<00> <FF>","endcodespacerange"];
@@ -5270,7 +5270,7 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
       {model ? <>
         <div className="crm-availability-summary"><span>Her ders 45 dakika</span><span className="crm-availability-count">{model.days.reduce((sum,day)=>sum+day.times.length,0)} uygun saat</span></div>
         <div className="crm-availability-grid">{model.days.map(day=><section className="crm-availability-day" key={day.dateKey} aria-label={day.dayName+" "+day.dateLabel}><div className="crm-availability-day-head"><h3>{day.dayName}</h3><span className="crm-availability-date">{day.dateLabel}</span></div><div className="crm-availability-times">{day.times.length?day.times.map(time=><span key={time} className="crm-availability-time">{time}</span>):<p className="crm-availability-empty">Uygun saat yok</p>}</div></section>)}</div>
-        <p className="crm-availability-note">Saatler mevcut takvime göredir; rezervasyon değildir. Randevu öncesi tekrar kontrol edilir. Paylaşımda öğrenci bilgileri yer almaz.</p>
+        <p className="crm-availability-note">Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.</p>
       </> : <div className="crm-availability-warning" role="status">{invalid?"Takvimdeki bir dersin tarih, saat veya süresi doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":moveReadState==="error"?"Taşınan derslerin konumları doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":"Taşınan derslerin konumları kontrol ediliyor. Liste doğrulama tamamlanınca açılacak."}{moveReadState==="error"?<button onClick={onRetry}>Yalnız takvimi yeniden kontrol et</button>:null}</div>}
       <div className="crm-availability-actions"><button onClick={copy} disabled={!model || copyBusy}>{copyBusy?"Kopyalanıyor…":"Metni Kopyala"}</button><button className="crm-availability-pdf" onClick={download} disabled={!model || copyBusy}>PDF İndir</button></div>
       <p className="crm-availability-feedback" role="status">{feedback}</p>
