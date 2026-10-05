@@ -998,6 +998,111 @@ function normalLessonMakeupCompletionIssueMessage(issue) {
   return "Telafi tamamlama işleminin sonucu henüz kesinleştirilemedi. Sistem işlemi tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
 }
 
+// v173: evidence belongs to one occurrence, never to an entire week/program.
+const SINGLE_LESSON_MOVE_ISSUE_PREFIX = "sonsuz_crm_single_lesson_move_issue_v1:";
+const SINGLE_LESSON_MOVE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function singleLessonMovePosition(iso) {
+  if (typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/.test(iso)) return null;
+  if (!isValidLocalDateInput(iso.slice(0,10))) return null;
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-GB",{ timeZone:"Europe/Istanbul", hour:"2-digit", minute:"2-digit", hourCycle:"h23" }).formatToParts(date);
+  return { date:iso, localDate:turkeyDateKey(date), time:parts.find(p=>p.type==="hour").value+":"+parts.find(p=>p.type==="minute").value };
+}
+
+function singleLessonMoveOrigin(lesson) {
+  const marker = lesson?.calendarMove;
+  if (marker?.kind !== "single_lesson_shift_v1" || marker.lessonId !== lesson.id || !lesson.id) return null;
+  const source = singleLessonMovePosition(marker?.origin?.date);
+  const target = singleLessonMovePosition(lesson?.date);
+  if (!source || !target
+    || !SINGLE_LESSON_MOVE_UUID.test(marker.operationId || "")
+    || !SINGLE_LESSON_MOVE_UUID.test(marker.originOperationId || "")
+    || !SINGLE_LESSON_MOVE_UUID.test(marker.actorUserId || "")
+    || !singleLessonMovePosition(marker.recordedAt)
+    || marker.origin.timezone !== "Europe/Istanbul"
+    || marker.origin.basis !== "observed_before_first_recorded_move"
+    || marker.origin.localDate !== source.localDate || marker.origin.time !== source.time
+    || marker.target?.date !== lesson.date || marker.target.localDate !== target.localDate
+    || marker.target.time !== target.time || lesson.time !== target.time) return null;
+  return source;
+}
+
+function singleLessonMoveIntent(student, lessonId, targetDate, targetTime) {
+  const lessons = (student?.schedule || []).filter(lesson=>lesson.id === lessonId);
+  const lesson = lessons.length === 1 ? lessons[0] : null;
+  const source = singleLessonMovePosition(lesson?.date);
+  if (!lesson || lesson.status !== "upcoming" || !source
+    || (Object.hasOwn(lesson,"time") && lesson.time !== source.time)
+    || !isValidLocalDateInput(targetDate) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(targetTime || "")
+    || !Number.isInteger(student.record_version) || student.record_version < 0
+    || source.localDate < turkeyDateKey() || targetDate < turkeyDateKey()
+    || (source.localDate === targetDate && source.time === targetTime)) return null;
+  return {
+    studentId:student.id, lessonId, expectedRecordVersion:student.record_version,
+    expectedDate:lesson.date, expectedTime:source.time, targetDate, targetTime,
+  };
+}
+
+function readSingleLessonMoveIssue(actorUserId) {
+  if (!actorUserId) return null;
+  const raw = localStorage.getItem(SINGLE_LESSON_MOVE_ISSUE_PREFIX+actorUserId);
+  if (!raw) return null;
+  const issue = JSON.parse(raw);
+  if (issue.version !== 1 || issue.actorUserId !== actorUserId || !issue.operationId || !issue.requestPayload) throw new Error("SINGLE_LESSON_MOVE_LOCAL_EVIDENCE_INVALID");
+  return issue;
+}
+
+function writeSingleLessonMoveIssue(actorUserId, issue, expectedOperationId="") {
+  try {
+    const current = readSingleLessonMoveIssue(actorUserId);
+    if (!actorUserId || (expectedOperationId ? current?.operationId !== expectedOperationId : !!current)) return false;
+    const key = SINGLE_LESSON_MOVE_ISSUE_PREFIX+actorUserId;
+    if (issue) localStorage.setItem(key,JSON.stringify({ ...issue, version:1 }));
+    else localStorage.removeItem(key);
+    const saved = readSingleLessonMoveIssue(actorUserId);
+    return issue ? JSON.stringify(canonicalJson(saved)) === JSON.stringify(canonicalJson({ ...issue,version:1 })) : !saved;
+  } catch { return false; }
+}
+
+function singleLessonMoveEvidenceMatches(issue, row) {
+  const request = issue?.requestPayload;
+  const before = row?.target_before;
+  const after = row?.target_after;
+  const origin = singleLessonMoveOrigin(after);
+  const marker = after?.calendarMove;
+  if (!request || !origin || row.operation_id !== issue.operationId
+    || row.student_id !== request.studentId || row.branch_id !== issue.branchId
+    || row.lesson_id !== request.lessonId || row.actor_user_id !== issue.actorUserId
+    || row.operation_kind !== "single_lesson_shift"
+    || Number(row.expected_record_version) !== request.expectedRecordVersion
+    || Number(row.resulting_record_version) !== request.expectedRecordVersion+1
+    || JSON.stringify(canonicalJson(row.request_payload)) !== JSON.stringify(canonicalJson(request))
+    || before?.id !== request.lessonId || after.id !== request.lessonId
+    || before.status !== "upcoming" || after.status !== "upcoming"
+    || before.date !== request.expectedDate || singleLessonMovePosition(before.date)?.time !== request.expectedTime
+    || (Object.hasOwn(before,"time") && before.time !== request.expectedTime)
+    || marker.operationId !== issue.operationId || marker.actorUserId !== issue.actorUserId
+    || marker.target.localDate !== request.targetDate || marker.target.time !== request.targetTime
+    || marker.originOperationId !== row.origin_operation_id
+    || JSON.stringify(canonicalJson(marker.origin)) !== JSON.stringify(canonicalJson(row.origin_position))) return false;
+  const withoutPosition = lesson => Object.fromEntries(Object.entries(lesson).filter(([key])=>!["date","time","calendarMove"].includes(key)));
+  return JSON.stringify(canonicalJson(withoutPosition(before))) === JSON.stringify(canonicalJson(withoutPosition(after)));
+}
+
+function singleLessonMoveKnownRejection(error) {
+  return /^SINGLE_LESSON_MOVE_(NOT_AUTHORIZED|INVALID_INPUT|INVALID_TARGET_DATE|STUDENT_NOT_FOUND|STALE_STUDENT|INVALID_SCHEDULE|LESSON_NOT_FOUND|AMBIGUOUS_LESSON|PROCESSED_LESSON|UNKNOWN_SOURCE_POSITION|SOURCE_POSITION_MISMATCH|PAST_LESSON|NO_CHANGE|SOURCE_EVIDENCE_CONFLICT|UNVERIFIED_SOURCE_EVIDENCE|INVALID_SCHEDULE_DATES)$/.test(String(error?.message || ""));
+}
+
+function singleLessonMoveIssueMessage(issue) {
+  if (issue.state === "writing") return "Seçilen ders taşınıyor. Supabase kaydı doğrulanmadan başarı gösterilmez.";
+  if (issue.state === "not_applied") return "Taşıma sunucu tarafından reddedildi ve kayıt oluşmadığı doğrulandı. Uyarıyı kapatıp güncel ders üzerinden tekrar seçebilirsiniz.";
+  if (issue.state === "applied_pending_refresh") return "Taşıma kaydedildi; güncel öğrenci henüz doğrulanamadı. İşlemi tekrar göndermeyin.";
+  if (issue.state === "conflict") return "Taşıma kanıtı beklenen öğrenci, ders veya içerikle eşleşmiyor. İşlemi tekrar göndermeyin.";
+  return "Taşımanın sonucu henüz kesin değil. Yeniden Kontrol Et yalnız Supabase kaydını okur; taşıma otomatik tekrarlanmaz.";
+}
+
 function staffInvitationIssueMessage(issue) {
   if (!issue) return "";
   if (issue.state === "not_applied") return "Personel daveti Supabase'de bulunamadı. Davet oluşmadı; uyarıyı kapatıp işlemi yeniden başlatabilirsiniz.";
@@ -3238,25 +3343,33 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
 }
 
 function ShiftSheet({ lesson, student, onClose, onShift, onMoveOne }) {
+  const [moving, setMoving] = useState(false);
+  const movingRef = useRef(false);
   const [moveDate, setMoveDate] = useState(dateKey(lesson.date) || new Date().toISOString().split("T")[0]);
   const [moveTime, setMoveTime] = useState(lessonTime(student, lesson) || student.time || "10:00");
   return (
-    <Sheet title="Ders Tarihi Kaydır" subtitle={fmtDate(lesson.date)+" - "+lessonTime(student, lesson)} onClose={onClose}>
+    <Sheet title="Ders Tarihi Kaydır" subtitle={fmtDate(lesson.date)+" - "+lessonTime(student, lesson)} onClose={()=>{ if (!movingRef.current) onClose(); }}>
       <p style={{ fontSize:13, color:"#666", marginBottom:16 }}>1/2 hafta ileri alırsan bu dersten sonraki planlı dersler de aynı şekilde kayar.</p>
-      <Btn bg="#6366f1" onClick={() => { onShift(lesson.id, 7); onClose(); }}>1 Hafta İleri Al</Btn>
-      <Btn bg="#8b5cf6" onClick={() => { onShift(lesson.id, 14); onClose(); }}>2 Hafta İleri Al</Btn>
+      <Btn bg="#6366f1" disabled={moving} onClick={() => { onShift(lesson.id, 7); onClose(); }}>1 Hafta İleri Al</Btn>
+      <Btn bg="#8b5cf6" disabled={moving} onClick={() => { onShift(lesson.id, 14); onClose(); }}>2 Hafta İleri Al</Btn>
       <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, padding:12, margin:"12px 0" }}>
         <p style={{ margin:"0 0 8px", fontSize:13, color:"#666" }}>Sadece bu dersi başka bir tarih ve saate taşı.</p>
-        <input style={INP} type="date" value={moveDate} onChange={e=>setMoveDate(e.target.value)} />
+        <input style={INP} type="date" value={moveDate} disabled={moving} onChange={e=>setMoveDate(e.target.value)} />
         <div style={{ height:8 }} />
-        <select style={INP} value={moveTime} onChange={e=>setMoveTime(e.target.value)}>
+        <select style={INP} value={moveTime} disabled={moving} onChange={e=>setMoveTime(e.target.value)}>
           {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
         <div style={{ marginTop:10 }}>
-          <Btn bg="#0ea5e9" onClick={() => { onMoveOne(lesson.id, moveDate, moveTime); onClose(); }}>Tarihe Taşı</Btn>
+          <Btn bg="#0ea5e9" disabled={moving} onClick={async () => {
+            if (movingRef.current) return;
+            movingRef.current = true;
+            setMoving(true);
+            try { if (await onMoveOne(lesson.id,moveDate,moveTime)) onClose(); }
+            finally { movingRef.current = false; setMoving(false); }
+          }}>{moving ? "Kaydediliyor…" : "Tarihe Taşı"}</Btn>
         </div>
       </div>
-      <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
+      <Btn bg="#111" outline disabled={moving} onClick={onClose}>İptal</Btn>
     </Sheet>
   );
 }
@@ -3907,7 +4020,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
         </div>
       </Sheet>
       {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => onTelafiDone(student.id, id, payload)} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
-      {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => { onMoveOne(student.id, lid, date, time); setShiftSel(null); }} /> : null}
+      {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => onMoveOne(student.id, lid, date, time)} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} saving={paymentSavingId===student.id} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
@@ -4474,6 +4587,13 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     const statedStart = student.lesson_start_date || student.lessonStartDate;
     const programStart = statedStart ? midday(new Date(statedStart+(/^\d{4}-\d{2}-\d{2}$/.test(statedStart)?"T12:00:00":""))) : (earliestScheduleWeek || todayMid);
     const actualKeys = new Set();
+    const lessonIdCounts = new Map();
+    schedule.forEach(lesson=>lessonIdCounts.set(lesson.id,(lessonIdCounts.get(lesson.id) || 0)+1));
+    const movedSourceKeys = new Set(schedule.flatMap(lesson => {
+      if (lessonIdCounts.get(lesson.id) !== 1) return [];
+      const origin = singleLessonMoveOrigin(lesson);
+      return origin ? [origin.localDate+"|"+origin.time] : [];
+    }));
 
     schedule.forEach(lesson => {
       if (teacherName && teacherForDate(student, lesson.date, lesson) !== teacherName) return;
@@ -4500,6 +4620,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       const slotDate = midday(days[dayIndex]);
       if (slotDate < midday(programStart) || slotDate < todayMid) return;
       if (actualKeys.has(dayIndex+"|"+slot.time)) return;
+      if (movedSourceKeys.has(turkeyDateKey(slotDate)+"|"+slot.time)) return;
       addItem({
         key:"slot-"+student.id+"-"+slotIndex+"-"+localDateKey(slotDate),
         student,
@@ -6096,6 +6217,14 @@ export default function App() {
   const [normalLessonMakeupPlanIssueChecking, setNormalLessonMakeupPlanIssueChecking] = useState(false);
   const [normalLessonMakeupCompletionIssue, setNormalLessonMakeupCompletionIssue] = useState(null);
   const [normalLessonMakeupCompletionIssueChecking, setNormalLessonMakeupCompletionIssueChecking] = useState(false);
+  const [singleLessonMoveIssue, setSingleLessonMoveIssue] = useState(null);
+  const [singleLessonMoveChecking, setSingleLessonMoveChecking] = useState(false);
+  const singleLessonMoveIssueRef = useRef(null);
+  const singleLessonMoveWritingRef = useRef(false);
+  const singleLessonMoveCheckingRef = useRef(false);
+  const singleLessonMoveAutoCheckRef = useRef("");
+  const singleLessonMoveActorRef = useRef("");
+  singleLessonMoveActorRef.current = authSession?.user?.id || "";
   const [paymentSavingId, setPaymentSavingId] = useState("");
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
   const [connectionRevalidationRequired, setConnectionRevalidationRequired] = useState(false);
@@ -6262,7 +6391,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const warnWhilePaymentIsWriting = event => {
-      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !normalLessonMakeupCompletionWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
+      if (!singleLessonMoveWritingRef.current && !extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !normalLessonMakeupCompletionWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -6578,6 +6707,8 @@ export default function App() {
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
 
   const runBranchScopedWrite = async task => {
+    // Do not let a legacy full-row writer race an unresolved single move.
+    if (singleLessonMoveIssueRef.current || singleLessonMoveWritingRef.current || readSingleLessonMoveIssue(singleLessonMoveActorRef.current)) throw new Error("SINGLE_LESSON_MOVE_PENDING");
     branchScopedWriteCountRef.current += 1;
     try {
       return await task();
@@ -7034,6 +7165,7 @@ export default function App() {
   };
 
   const pendingBranchIds = () => [...new Set([
+    singleLessonMoveIssueRef.current?.branchId,
     packagePaymentIssueRef.current?.branchId,
     extraLessonPaymentIssueRef.current?.branchId,
     normalLessonEvaluationIssueRef.current?.branchId,
@@ -7058,6 +7190,7 @@ export default function App() {
     const requiredBranches = pendingBranchIds();
     const currentBranchHasUnresolvedWrite = !!currentBranch?.id && requiredBranches.includes(currentBranch.id);
     const activeWrite = packagePaymentWritingRef.current
+      || singleLessonMoveWritingRef.current
       || extraLessonPaymentWritingRef.current
       || normalLessonEvaluationWritingRef.current
       || normalLessonMakeupWritingRef.current
@@ -10216,6 +10349,100 @@ export default function App() {
     return handleNormalLessonMakeupCompletion(sid,tid,payload);
   };
 
+  const persistSingleLessonMoveIssue = (issue, creating=false) => {
+    if (singleLessonMoveActorRef.current === issue.actorUserId && singleLessonMoveIssueRef.current?.operationId
+      && singleLessonMoveIssueRef.current.operationId !== issue.operationId) return false;
+    const saved = writeSingleLessonMoveIssue(issue.actorUserId,issue,creating ? "" : issue.operationId);
+    if (!saved && creating) return false;
+    if (singleLessonMoveActorRef.current === issue.actorUserId) {
+      if (!saved) {
+        try {
+          const newer = readSingleLessonMoveIssue(issue.actorUserId);
+          if (newer && newer.operationId !== issue.operationId) {
+            singleLessonMoveIssueRef.current = newer;
+            setSingleLessonMoveIssue(newer);
+            return false;
+          }
+        } catch { /* Keep unresolved evidence visible if storage is unavailable. */ }
+      }
+      singleLessonMoveIssueRef.current = issue;
+      setSingleLessonMoveIssue(issue);
+    }
+    return saved;
+  };
+
+  const clearSingleLessonMoveIssue = issue => {
+    if (!issue || singleLessonMoveWritingRef.current || singleLessonMoveActorRef.current !== issue.actorUserId) return false;
+    try {
+      const stored = readSingleLessonMoveIssue(issue.actorUserId);
+      if (stored && !writeSingleLessonMoveIssue(issue.actorUserId,null,issue.operationId)) return false;
+    } catch { return false; }
+    singleLessonMoveIssueRef.current = null;
+    setSingleLessonMoveIssue(null);
+    singleLessonMoveAutoCheckRef.current = "";
+    return true;
+  };
+
+  const checkSingleLessonMoveOperation = async (issue=singleLessonMoveIssueRef.current, options={}) => {
+    if (!issue?.operationId || !issue.requestPayload || singleLessonMoveCheckingRef.current
+      || singleLessonMoveIssueRef.current?.operationId !== issue.operationId
+      || issue.actorUserId !== singleLessonMoveActorRef.current || !giris || !browserOnline
+      || currentBranch?.id !== issue.branchId) return { ok:false };
+    const generation = protectedDataLoadGenerationRef.current;
+    const currentContext = () => generation === protectedDataLoadGenerationRef.current && issue.actorUserId === singleLessonMoveActorRef.current
+      && singleLessonMoveIssueRef.current?.operationId === issue.operationId;
+    singleLessonMoveCheckingRef.current = true;
+    setSingleLessonMoveChecking(true);
+    try {
+      const evidence = await timedSingleLessonRequest(() => supabase.from("single_lesson_move_operations")
+        .select("*").eq("operation_id",issue.operationId).eq("branch_id",issue.branchId).maybeSingle());
+      if (!currentContext()) return { ok:false, superseded:true };
+      if (evidence.error) {
+        persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
+        return { ok:false };
+      }
+      if (!evidence.data && options.knownRejected !== true) {
+        // A timed-out request can still be waiting for a server row lock.
+        // Absence, even after a delay, is not proof that it cannot commit later.
+        persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
+        return { ok:false, uncertain:true };
+      }
+      if (evidence.data && !singleLessonMoveEvidenceMatches(issue,evidence.data)) {
+        persistSingleLessonMoveIssue({ ...issue,state:"conflict" });
+        return { ok:false, conflict:true };
+      }
+      const request = issue.requestPayload;
+      const studentResult = await timedSingleLessonRequest(() => supabase.from("students").select("*")
+        .eq("id",request.studentId).eq("branch_id",issue.branchId).single());
+      if (!currentContext()) return { ok:false, superseded:true };
+      const savedStudent = studentResult.data;
+      if (studentResult.error || savedStudent?.id !== request.studentId || savedStudent.branch_id !== issue.branchId
+        || !Number.isInteger(savedStudent.record_version)
+        || Number(savedStudent.record_version) < Number(evidence.data?.resulting_record_version ?? request.expectedRecordVersion)) {
+        persistSingleLessonMoveIssue({ ...issue,state:evidence.data ? "applied_pending_refresh" : "unknown" });
+        return { ok:false, applied:!!evidence.data };
+      }
+      // Always use the current row, not the older audit snapshot/response.
+      setStudents(previous=>previous.map(student=>student.id === savedStudent.id && Number(student.record_version) <= Number(savedStudent.record_version) ? savedStudent : student));
+      setDetailSt(previous=>previous?.id === savedStudent.id && Number(previous.record_version) <= Number(savedStudent.record_version) ? savedStudent : previous);
+      if (!evidence.data) {
+        persistSingleLessonMoveIssue({ ...issue,state:"not_applied" });
+        return { ok:true, applied:false };
+      }
+      // Write handler keeps its lock until finally; clearing there is deferred.
+      if (singleLessonMoveWritingRef.current) persistSingleLessonMoveIssue({ ...issue,state:"verified" });
+      else if (!clearSingleLessonMoveIssue(issue)) persistSingleLessonMoveIssue({ ...issue,state:"applied_pending_refresh" });
+      if (options.notify !== false) pop("Ders taşıması Supabase'de doğrulandı ve ekran yenilendi.",7000);
+      return { ok:true, applied:true, student:savedStudent };
+    } catch {
+      if (currentContext()) persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
+      return { ok:false };
+    } finally {
+      singleLessonMoveCheckingRef.current = false;
+      setSingleLessonMoveChecking(false);
+    }
+  };
+
   const handleShift = async (sid, fromLid, days) => {
     const updated = students.map(s => {
       if (s.id!==sid) return s;
@@ -10229,22 +10456,112 @@ export default function App() {
   };
 
   const handleMoveOneLesson = async (sid, lid, date, time) => {
-    const updated = students.map(s => {
-      if (s.id!==sid) return s;
-      return {
-        ...s,
-        schedule: (s.schedule||[]).map(l => {
-          if (l.id !== lid) return l;
-          const nextTime = time || lessonTime(s, l) || s.time || "10:00";
-          const moved = setTimeOnDate(new Date((date || dateKey(l.date)) + "T12:00:00"), nextTime);
-          return { ...l, date:moved.toISOString(), time:nextTime };
-        }).sort((a,b)=>new Date(a.date)-new Date(b.date))
-      };
-    });
-    setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
-    pop("Ders tarih ve saate taşındı");
+    if (!requireProtectedSources(["students"],"Ders taşıma") || !browserOnline || connectionRevalidationRequired) return false;
+    const actorUserId = authSession?.user?.id || "";
+    if (!actorUserId || !navigator.locks?.request) {
+      pop("Güvenli tek ders taşıma için güncel tarayıcı ve geçerli oturum gereklidir; kayıt gönderilmedi.",9000);
+      return false;
+    }
+    const generation = protectedDataLoadGenerationRef.current;
+    try {
+      return await navigator.locks.request("sonsuz-single-lesson-move:"+actorUserId,{ ifAvailable:true },async lock => {
+        if (!lock || singleLessonMoveWritingRef.current || singleLessonMoveCheckingRef.current) return false;
+        const savedIssue = readSingleLessonMoveIssue(actorUserId);
+        if (savedIssue || singleLessonMoveIssueRef.current) {
+          singleLessonMoveIssueRef.current = savedIssue || singleLessonMoveIssueRef.current;
+          setSingleLessonMoveIssue(singleLessonMoveIssueRef.current);
+          pop("Önce bekleyen tek ders taşıma sonucunu üstteki uyarıdan kesinleştirin.",9000);
+          return false;
+        }
+        const sourceStudent = students.find(student=>student.id === sid);
+        const branchId = currentBranch?.id;
+        const intent = singleLessonMoveIntent(sourceStudent,lid,date,time);
+        if (!intent || !branchId || sourceStudent.branch_id !== branchId || generation !== protectedDataLoadGenerationRef.current
+          || actorUserId !== singleLessonMoveActorRef.current) {
+          pop("Ders konumu doğrulanamadı. Yalnız bugün/gelecekteki planlı ders için farklı geçerli tarih ve saat seçin; kayıt gönderilmedi.",9000);
+          return false;
+        }
+        if (branchScopedWriteCountRef.current || packagePaymentWritingRef.current || packagePaymentIssueRef.current
+          || extraLessonPaymentWritingRef.current || extraLessonPaymentIssueRef.current
+          || normalLessonEvaluationWritingRef.current || normalLessonEvaluationIssueRef.current
+          || normalLessonMakeupWritingRef.current || normalLessonMakeupIssueRef.current
+          || normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current
+          || normalLessonMakeupCompletionWritingRef.current || normalLessonMakeupCompletionIssueRef.current
+          || failedOps.length) {
+          pop("Önce devam eden veya sonucu bekleyen öğrenci işlemini sonuçlandırın; taşıma gönderilmedi.",9000);
+          return false;
+        }
+        const operationId = uid();
+        if (!SINGLE_LESSON_MOVE_UUID.test(operationId)) return false;
+        const issue = { operationId,actorUserId,branchId,requestPayload:intent,state:"writing",createdAt:new Date().toISOString(),label:(sourceStudent.name || "Öğrenci")+" · "+date+" "+time };
+        if (!persistSingleLessonMoveIssue(issue,true)) {
+          pop("Taşıma niyeti tarayıcıda güvenli saklanamadı; kayıt gönderilmedi.",9000);
+          return false;
+        }
+        singleLessonMoveWritingRef.current = true;
+        branchScopedWriteCountRef.current += 1;
+        try {
+          const result = await timedSingleLessonRequest(() => supabase.rpc("move_single_normal_lesson",{
+            p_student_id:sid,p_lesson_id:lid,p_expected_record_version:intent.expectedRecordVersion,
+            p_expected_date:intent.expectedDate,p_expected_time:intent.expectedTime,
+            p_target_date:intent.targetDate,p_target_time:intent.targetTime,p_operation_id:operationId,
+          }).single());
+          if (generation !== protectedDataLoadGenerationRef.current || actorUserId !== singleLessonMoveActorRef.current) return false;
+          persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
+          const checked = await checkSingleLessonMoveOperation(issue,{ notify:false,knownRejected:singleLessonMoveKnownRejection(result.error) });
+          if (checked.ok && checked.applied) {
+            pop("Ders tarih ve saate taşındı");
+            return true;
+          }
+          pop(singleLessonMoveIssueMessage(singleLessonMoveIssueRef.current || issue),9000);
+          return false;
+        } catch {
+          persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
+          return false;
+        } finally {
+          singleLessonMoveWritingRef.current = false;
+          branchScopedWriteCountRef.current = Math.max(0,branchScopedWriteCountRef.current-1);
+          if (singleLessonMoveIssueRef.current?.operationId === operationId) {
+            if (singleLessonMoveIssueRef.current.state === "verified") clearSingleLessonMoveIssue(issue);
+            else {
+              if (singleLessonMoveIssueRef.current.state === "writing") persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
+              if (generation === protectedDataLoadGenerationRef.current && actorUserId === singleLessonMoveActorRef.current) setDetailSt(null);
+            }
+          }
+        }
+      });
+    } catch {
+      pop("Tek ders taşıma güvenliği hazırlanamadı. Kayıt tekrar gönderilmedi.",9000);
+      return false;
+    }
   };
+
+  useEffect(() => {
+    const actor = authSession?.user?.id || "";
+    singleLessonMoveAutoCheckRef.current = "";
+    const restore = () => {
+      let issue = null;
+      try { issue = readSingleLessonMoveIssue(actor); }
+      catch { issue = { actorUserId:actor,operationId:"invalid-local-evidence",state:"conflict" }; }
+      singleLessonMoveIssueRef.current = issue;
+      setSingleLessonMoveIssue(issue);
+    };
+    restore();
+    const changed = event => { if (event.key === SINGLE_LESSON_MOVE_ISSUE_PREFIX+actor || event.key === null) restore(); };
+    window.addEventListener("storage",changed);
+    return () => window.removeEventListener("storage",changed);
+  },[authSession?.user?.id]);
+
+  useEffect(() => {
+    const issue = singleLessonMoveIssue;
+    if (!browserOnline) singleLessonMoveAutoCheckRef.current = "";
+    if (!giris || !browserOnline || !accessContext || issue?.branchId !== currentBranch?.id
+      || issue?.actorUserId !== authSession?.user?.id || !issue?.operationId
+      || ["not_applied","conflict"].includes(issue.state) || singleLessonMoveWritingRef.current
+      || singleLessonMoveCheckingRef.current || singleLessonMoveAutoCheckRef.current === issue.operationId) return;
+    singleLessonMoveAutoCheckRef.current = issue.operationId;
+    void checkSingleLessonMoveOperation(issue,{ notify:false });
+  },[giris,browserOnline,accessContext,currentBranch?.id,singleLessonMoveIssue?.operationId,singleLessonMoveIssue?.state,authSession?.user?.id]);
 
   const handleDelete = async (sid) => {
     const source = students.find(student=>student.id===sid);
@@ -11212,6 +11529,14 @@ export default function App() {
   const activeStaffBranches = organizationBranches.filter(branch=>branch.active !== false);
   const staffActivationByInvitation = new Map(staffActivations.map(operation=>[operation.invitation_id,operation]));
   const visibleNormalLessonEvaluationIssue = normalLessonEvaluationIssue && (!normalLessonEvaluationIssue.actorUserId || normalLessonEvaluationIssue.actorUserId === authSession?.user?.id) ? normalLessonEvaluationIssue : null;
+  const visibleSingleLessonMoveIssue = singleLessonMoveIssue?.actorUserId === authSession?.user?.id ? singleLessonMoveIssue : null;
+  const guardSingleLessonMoveInteraction = event => {
+    if (!visibleSingleLessonMoveIssue && !singleLessonMoveWritingRef.current) return;
+    if (event.target.closest?.("[data-single-lesson-move-control],.crm-nav-btn,.crm-mobile-nav,.crm-branch-switch,.crm-desktop-logout,[data-crm-security]")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    pop("Önce tek ders taşıma sonucunu üstteki uyarıdan kesinleştirin.",7000);
+  };
   const visibleNormalLessonMakeupIssue = normalLessonMakeupIssue && (!normalLessonMakeupIssue.actorUserId || normalLessonMakeupIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupIssue : null;
   const visibleNormalLessonMakeupPlanIssue = normalLessonMakeupPlanIssue && (!normalLessonMakeupPlanIssue.actorUserId || normalLessonMakeupPlanIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupPlanIssue : null;
   const visibleNormalLessonMakeupCompletionIssue = normalLessonMakeupCompletionIssue && (!normalLessonMakeupCompletionIssue.actorUserId || normalLessonMakeupCompletionIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupCompletionIssue : null;
@@ -11503,7 +11828,7 @@ export default function App() {
   return (
     <>
     <style>{MIZAN_UI_CSS}</style>
-    <div className="crm-app">
+    <div className="crm-app" onClickCapture={guardSingleLessonMoveInteraction} onKeyDownCapture={event=>{ if (event.key === "Enter" || event.key === " ") guardSingleLessonMoveInteraction(event); }}>
       <aside className="crm-sidebar">
         <div className="crm-brand">
           <div className="crm-brand-mark">S</div>
@@ -11533,6 +11858,15 @@ export default function App() {
           </div>
         </header>
         <section className="crm-page">
+        {visibleSingleLessonMoveIssue ? (
+          <div role="alert" data-single-lesson-move-control style={{ background:"#fff7ed",border:"1.5px solid #fdba74",borderRadius:14,padding:"12px 14px",marginBottom:14 }}>
+            <p style={{ margin:"0 0 5px",fontSize:13,fontWeight:850,color:"#9a3412" }}>Tek ders taşıma kontrolü</p>
+            <p style={{ margin:"0 0 8px",fontSize:12,color:"#9a3412",lineHeight:1.5 }}>{singleLessonMoveIssueMessage(visibleSingleLessonMoveIssue)}</p>
+            <p style={{ fontSize:11,color:"#9a3412" }}>{visibleSingleLessonMoveIssue.label}</p>
+            <button type="button" disabled={!browserOnline || singleLessonMoveChecking || singleLessonMoveWritingRef.current} onClick={()=>checkSingleLessonMoveOperation(visibleSingleLessonMoveIssue)} style={{ border:0,borderRadius:9,padding:"8px 11px",background:"#ea580c",color:"#fff",fontWeight:850 }}>{singleLessonMoveChecking ? "Kontrol Ediliyor…" : "Yeniden Kontrol Et"}</button>
+            {visibleSingleLessonMoveIssue.state === "not_applied" ? <button type="button" onClick={()=>clearSingleLessonMoveIssue(visibleSingleLessonMoveIssue)} style={{ marginLeft:8,border:"1px solid #fdba74",borderRadius:9,padding:"8px 11px",background:"#fff",color:"#9a3412",fontWeight:850 }}>Uyarıyı Gördüm</button> : null}
+          </div>
+        ) : null}
         {visibleNormalLessonEvaluationIssue ? (
           <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Ders değerlendirmesi kontrolü gerekli</p>
@@ -11994,17 +12328,19 @@ export default function App() {
             <span>{t.icon}</span>{t.label}
           </button>
         ))}
-        <button disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>
+        <button data-crm-security disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>
           <span>↪</span>Çıkış
         </button>
       </nav>
 
       {showSecurityMenu ? (
+        <div data-crm-security>
         <Sheet title="Hesap ve cihaz güvenliği" subtitle="Nasıl çıkış yapmak istediğinizi seçin" onClose={()=>{ if(!authBusy) setShowSecurityMenu(false); }}>
           <p style={{fontSize:13,color:"#666",lineHeight:1.6,margin:"0 0 16px"}}>Normal çıkışta bu tarayıcı 30 gün boyunca güvenilen cihaz olarak kalır. Bir sonraki girişte parolanız sorulur, doğrulama kodu sorulmaz.</p>
           <Btn bg="#5b42d6" onClick={()=>handleSecureLogout(false)}>Yalnızca Güvenli Çıkış</Btn>
           <Btn bg="#dc5d51" outline onClick={()=>handleSecureLogout(true)}>Çıkış Yap ve Bu Cihazı Unut</Btn>
         </Sheet>
+        </div>
       ) : null}
 
       {showStaffInvite ? (
@@ -12045,6 +12381,7 @@ export default function App() {
       ) : null}
 
       {showBranchMenu ? (
+        <div data-single-lesson-move-control>
         <Sheet title="Şube değiştir" subtitle={activeOrganization?.name || "Yetkili şubeler"} onClose={()=>setShowBranchMenu(false)}>
           <p style={{fontSize:12,color:"#6b6470",lineHeight:1.55,margin:"0 0 13px"}}>Yalnız hesabınıza atanmış aktif şubeler gösterilir. Yeni şube tamamen yüklenmeden eski şubenin verileri ekranda tutulmaz.</p>
           <div style={{display:"flex",flexDirection:"column",gap:9}}>
@@ -12057,6 +12394,7 @@ export default function App() {
             })}
           </div>
         </Sheet>
+        </div>
       ) : null}
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} saving={normalLessonEvaluationBusyId===actionModal.lessonId || normalLessonMakeupBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current || normalLessonMakeupWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
