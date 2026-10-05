@@ -4965,14 +4965,15 @@ function calendarAvailabilityModel(days,intervals,generatedAt=new Date()) {
 }
 function calendarAvailabilityText(model) {
   return [
-    "Sonsuz Sanat - Uygun Ders Saatleri",
+    "BODRUM SONSUZ SANAT",
     model.weekLabel,
+    "Uygun Ders Saatleri",
     "Her ders 45 dakikadır.",
     "",
     ...model.days.map(day=>day.dayName+" ("+day.dateLabel+"): "+(day.times.length?day.times.join(", "):"Uygun saat yok")),
     "",
     "Hazırlanma: "+model.generatedLabel,
-    "Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.",
+    "Yukarıda belirtilen ders saatleri şu an için uygundur. Yeni talepler doğrultusunda saatlerin uygunluğu değişebilir. Size uygun gün ve saati kesinleştirmek için lütfen bizimle iletişime geçin.",
   ].join("\n");
 }
 
@@ -4998,14 +4999,14 @@ function calendarAvailabilityPhone(value) {
 }
 function calendarAvailabilityWhatsAppText(model) {
   return [
-    "*SONSUZ SANAT*",
-    "*Uygun Ders Saatleri*",
+    "*BODRUM SONSUZ SANAT*",
     model.weekLabel,
+    "*Uygun Ders Saatleri*",
     "Her ders 45 dakikadır.",
     "",
     ...model.days.map(day=>"*"+day.dayName+" · "+day.dateLabel+"*\n"+(day.times.length?day.times.join(" · "):"Uygun saat yok")).join("\n\n").split("\n"),
     "",
-    "Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.",
+    "Yukarıda belirtilen ders saatleri şu an için uygundur. Yeni talepler doğrultusunda saatlerin uygunluğu değişebilir. Size uygun gün ve saati kesinleştirmek için lütfen bizimle iletişime geçin.",
     "",
     "Hazırlanma: "+model.generatedLabel,
   ].join("\n");
@@ -5142,12 +5143,12 @@ function calendarAvailabilityPdfBytes(model) {
   const rect=(x,y,w,h,color)=>commands.push(color+" rg "+[x,y,w,h].map(n=>n.toFixed(2)).join(" ")+" re f");
   const line=(x1,y1,x2,y2,color="0.88 0.90 0.93")=>commands.push(color+" RG 0.6 w "+x1+" "+y1+" m "+x2+" "+y2+" l S");
   const pageWidth=841.89,pageHeight=595.28,margin=32,columnWidth=(pageWidth-margin*2)/7;
-  text("SONSUZ SANAT",margin,548,13,"0.36 0.24 0.77");
-  text("Uygun Ders Saatleri",margin,513,27,"0.16 0.13 0.28");
-  text(model.weekLabel,margin,487,13);
+  text("BODRUM SONSUZ SANAT",margin,548,13,"0.36 0.24 0.77");
+  text(model.weekLabel,margin,522,13);
+  text("Uygun Ders Saatleri",margin,487,27,"0.16 0.13 0.28");
   text("45 dakikalık dersler",margin,464,11,"0.40 0.44 0.50");
   const count=model.days.reduce((sum,day)=>sum+day.times.length,0);
-  text(count+" uygun saat",pageWidth-margin-width(count+" uygun saat",12),513,12,"0.10 0.43 0.29");
+  text(count+" uygun saat",pageWidth-margin-width(count+" uygun saat",12),487,12,"0.10 0.43 0.29");
   rect(margin,100,pageWidth-margin*2,344,"0.985 0.987 0.992");
   rect(margin,390,pageWidth-margin*2,54,"0.95 0.93 0.99");
   for (let index=0;index<=7;index++) line(margin+columnWidth*index,100,margin+columnWidth*index,444);
@@ -5167,7 +5168,8 @@ function calendarAvailabilityPdfBytes(model) {
     }
   });
   text("Hazırlanma: "+model.generatedLabel,margin,73,9,"0.40 0.44 0.50");
-  text("Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.",margin,52,9,"0.40 0.44 0.50");
+  text("Yukarıda belirtilen ders saatleri şu an için uygundur. Yeni talepler doğrultusunda saatlerin uygunluğu değişebilir.",margin,52,9,"0.40 0.44 0.50");
+  text("Size uygun gün ve saati kesinleştirmek için lütfen bizimle iletişime geçin.",margin,38,9,"0.40 0.44 0.50");
   const fontBytes=Uint8Array.from(atob(font.font),character=>character.charCodeAt(0));
   const cmapEntries=Array.from(font.characters).map((character,index)=>"<"+index.toString(16).padStart(2,"0")+"> <"+character.codePointAt(0).toString(16).padStart(4,"0")+">");
   const cmap=["/CIDInit /ProcSet findresource begin","12 dict begin","begincmap","/CIDSystemInfo << /Registry (Sonsuz) /Ordering (Unicode) /Supplement 0 >> def","/CMapName /SonsuzAvailabilityUnicode def","/CMapType 2 def","1 begincodespacerange","<00> <FF>","endcodespacerange"];
@@ -5295,7 +5297,7 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
       .crm-availability-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;}
       .crm-availability-brand{margin:0 0 7px;color:#6a46c9;font-size:11px;font-weight:800;letter-spacing:1.7px;}
       .crm-availability-title{margin:0;font-size:27px;line-height:1.2;}
-      .crm-availability-subtitle{margin:9px 0 0;color:#716b7e;font-size:13px;line-height:1.6;}
+      .crm-availability-subtitle{margin:0 0 9px;color:#716b7e;font-size:13px;line-height:1.6;}
       .crm-availability-close{border:0;border-radius:10px;background:#f3f0f8;color:#514563;width:36px;height:36px;font-size:23px;cursor:pointer;flex-shrink:0;}
       .crm-availability-summary{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:24px 0 13px;font-size:12px;color:#777182;}
       .crm-availability-count{color:#217653;font-weight:700;}
@@ -5349,11 +5351,11 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
       }
     `}</style>
     <div ref={dialogRef} className="crm-availability-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-availability-title">
-      <div className="crm-availability-header"><div><p className="crm-availability-brand">SONSUZ SANAT</p><h2 id="crm-availability-title" className="crm-availability-title">Uygun Ders Saatleri</h2><p className="crm-availability-subtitle">{days[0].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})} - {days[6].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})}</p></div><button className="crm-availability-close" onClick={onClose} aria-label="Uygun saatleri kapat">×</button></div>
+      <div className="crm-availability-header"><div><p className="crm-availability-brand">BODRUM SONSUZ SANAT</p><p className="crm-availability-subtitle">{days[0].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})} - {days[6].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})}</p><h2 id="crm-availability-title" className="crm-availability-title">Uygun Ders Saatleri</h2></div><button className="crm-availability-close" onClick={onClose} aria-label="Uygun saatleri kapat">×</button></div>
       {model ? <>
         <div className="crm-availability-summary"><span>Her ders 45 dakika</span><span className="crm-availability-count">{model.days.reduce((sum,day)=>sum+day.times.length,0)} uygun saat</span></div>
         <div className="crm-availability-grid">{model.days.map(day=><section className="crm-availability-day" key={day.dateKey} aria-label={day.dayName+" "+day.dateLabel}><div className="crm-availability-day-head"><h3>{day.dayName}</h3><span className="crm-availability-date">{day.dateLabel}</span></div><div className="crm-availability-times">{day.times.length?day.times.map(time=><span key={time} className="crm-availability-time">{time}</span>):<p className="crm-availability-empty">Uygun saat yok</p>}</div></section>)}</div>
-        <p className="crm-availability-note">Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.</p>
+        <p className="crm-availability-note">Yukarıda belirtilen ders saatleri şu an için uygundur. Yeni talepler doğrultusunda saatlerin uygunluğu değişebilir. Size uygun gün ve saati kesinleştirmek için lütfen bizimle iletişime geçin.</p>
       </> : <div className="crm-availability-warning" role="status">{invalid?"Takvimdeki bir dersin tarih, saat veya süresi doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":moveReadState==="error"?"Taşınan derslerin konumları doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":"Taşınan derslerin konumları kontrol ediliyor. Liste doğrulama tamamlanınca açılacak."}{moveReadState==="error"?<button onClick={onRetry}>Yalnız takvimi yeniden kontrol et</button>:null}</div>}
       <div className="crm-availability-actions"><button onClick={copy} disabled={!model || copyBusy}>{copyBusy?"Kopyalanıyor…":"Metni Kopyala"}</button><button className="crm-availability-pdf" onClick={download} disabled={!model || copyBusy}>PDF İndir</button><button className="crm-availability-send" onClick={()=>{setShareOpen(value=>!value);setFeedback("");}} disabled={!model || copyBusy} aria-expanded={shareOpen}>Gönder</button></div>
       {shareOpen && model ? <section ref={sharePanelRef} className="crm-availability-share" aria-label="WhatsApp gönderimi">
@@ -5363,7 +5365,7 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
           <div className="crm-availability-recipient-fields"><label>Öğrenci ara<input value={recipientSearch} onChange={event=>setRecipientSearch(event.target.value)} placeholder="Öğrenci veya veli adı" disabled={copyBusy} /></label><label>Öğrenci seç<select value={recipientId} onChange={event=>{setRecipientId(event.target.value);setFeedback("");}} disabled={copyBusy}><option value="">Öğrenci seçin</option>{matchingRecipients.map(item=><option key={item.id} value={item.id}>{item.name}{item.guardian?" — "+item.guardian:""}</option>)}</select></label></div>
           {!recipients.length ? <p className="crm-availability-recipient-info">Seçili şubede mevcut öğrenci yok. Numara yaz seçeneğini kullanabilirsiniz.</p> : null}
           {recipient ? <p className={"crm-availability-recipient-info"+(recipientPhone?"":" crm-availability-recipient-error")}>{recipient.name}{recipient.guardian?" · Veli: "+recipient.guardian:""}<br/>{recipientPhone?"WhatsApp numarası: +"+recipientPhone:"Kayıtlı telefon yok veya biçimi geçersiz. Numara yaz seçeneğini kullanabilirsiniz."}</p> : null}
-        </> : <><label>WhatsApp numarası<input type="tel" inputMode="tel" autoComplete="off" value={manualPhone} onChange={event=>{setManualPhone(event.target.value);setFeedback("");}} placeholder="05xx xxx xx xx veya +ülke kodu" disabled={copyBusy} /></label><p className={"crm-availability-recipient-info"+(manualPhone && !recipientPhone?" crm-availability-recipient-error":"")}>{recipientPhone?"Alıcı: +"+recipientPhone:manualPhone?"Geçerli bir numara girin. Yurt dışı için +ülke kodunu ekleyin.":"Bu numara öğrenci kaydına kaydedilmez."}</p></>}
+        </> : <><label>WhatsApp numarası<input type="tel" inputMode="tel" autoComplete="off" value={manualPhone} onChange={event=>{setManualPhone(event.target.value);setFeedback("");}} placeholder="05xx xxx xx xx" disabled={copyBusy} /></label><p className={"crm-availability-recipient-info"+(manualPhone && !recipientPhone?" crm-availability-recipient-error":"")}>{recipientPhone?"Alıcı: +"+recipientPhone:manualPhone?"Geçerli bir numara girin. Yurt dışı için +ülke kodunu ekleyin.":"Bu numara öğrenci kaydına kaydedilmez."}</p></>}
         <p className="crm-availability-share-note">Yalnız aşağıdaki uygun saatler metni paylaşılır. WhatsApp açılır; son Gönder onayı sizdedir.</p>
         <label>Mesaj önizlemesi<textarea readOnly value={calendarAvailabilityWhatsAppText(model)} /></label>
         <div className="crm-availability-actions"><button className="crm-availability-send" onClick={send} disabled={!recipientPhone || copyBusy || whatsAppOpened}>{whatsAppOpened?"WhatsApp açıldı":"WhatsApp'ta Aç"}</button></div>
