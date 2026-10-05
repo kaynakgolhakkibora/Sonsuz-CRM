@@ -4921,7 +4921,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
           </div>)}
         </div>
       </div>
-      {availabilityOpen ? <CalendarAvailabilitySheet key={JSON.stringify([calendarMoveReadScope,offset])} days={days} intervals={availabilityIntervals} invalid={availabilityInvalid} moveReadState={moveReadState} onRetry={()=>setMoveReadRetry(value=>value+1)} onClose={onAvailabilityClose} /> : null}
+      {availabilityOpen ? <CalendarAvailabilitySheet key={JSON.stringify([calendarMoveReadScope,offset])} days={days} intervals={availabilityIntervals} invalid={availabilityInvalid} moveReadState={moveReadState} onRetry={()=>setMoveReadRetry(value=>value+1)} onClose={onAvailabilityClose} recipients={calendarAvailabilityRecipients(students,calendarMoveReadScope?.branchId)} /> : null}
     </div>
   );
 }
@@ -4973,6 +4973,41 @@ function calendarAvailabilityText(model) {
     "",
     "Hazırlanma: "+model.generatedLabel,
     "Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.",
+  ].join("\n");
+}
+
+// These helpers belong only to the availability sharing UI; no student or reminder writes.
+function calendarAvailabilityRecipients(students,branchId) {
+  if (!branchId) return [];
+  return students.filter(student=>student.id && student.branch_id===branchId && !isStudentDeleted(student) && !isStudentLeft(student))
+    .map(student=>({id:String(student.id),name:student.name || "İsimsiz öğrenci",guardian:student.veli_adi || "",phone:student.phone || ""}))
+    .sort((a,b)=>a.name.localeCompare(b.name,"tr-TR"));
+}
+function calendarAvailabilityPhone(value) {
+  const raw=String(value || "").trim();
+  if (!raw || !/^[+\d\s().-]+$/.test(raw)) return "";
+  const compact=raw.replace(/[\s().-]/g,"");
+  let phone="";
+  if (compact.startsWith("+")) phone=compact.slice(1);
+  else if (compact.startsWith("00")) phone=compact.slice(2);
+  else if (/^05\d{9}$/.test(compact)) phone="90"+compact.slice(1);
+  else if (/^5\d{9}$/.test(compact)) phone="90"+compact;
+  else if (/^90\d{10}$/.test(compact)) phone=compact;
+  if (!/^[1-9]\d{6,14}$/.test(phone) || (phone.startsWith("90") && !/^90\d{10}$/.test(phone))) return "";
+  return phone;
+}
+function calendarAvailabilityWhatsAppText(model) {
+  return [
+    "*SONSUZ SANAT*",
+    "*Uygun Ders Saatleri*",
+    model.weekLabel,
+    "Her ders 45 dakikadır.",
+    "",
+    ...model.days.map(day=>"*"+day.dayName+" · "+day.dateLabel+"*\n"+(day.times.length?day.times.join(" · "):"Uygun saat yok")).join("\n\n").split("\n"),
+    "",
+    "Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.",
+    "",
+    "Hazırlanma: "+model.generatedLabel,
   ].join("\n");
 }
 
@@ -5164,18 +5199,32 @@ function calendarAvailabilityPdfBytes(model) {
   return concatPdfBytes(parts);
 }
 
-function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry,onClose}) {
+function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry,onClose,recipients=[]}) {
   const dialogRef=useRef(null);
   const aliveRef=useRef(true);
   const exportBusyRef=useRef(false);
   const [feedback,setFeedback]=useState("");
   const [copyBusy,setCopyBusy]=useState(false);
+  const [shareOpen,setShareOpen]=useState(false);
+  const [recipientMode,setRecipientMode]=useState("student");
+  const [recipientSearch,setRecipientSearch]=useState("");
+  const [recipientId,setRecipientId]=useState("");
+  const [manualPhone,setManualPhone]=useState("");
+  const [whatsAppOpened,setWhatsAppOpened]=useState(false);
+  const sendStartedRef=useRef(false);
+  const sharePanelRef=useRef(null);
+  const recipient=recipients.find(item=>item.id===recipientId);
+  const recipientPhone=calendarAvailabilityPhone(recipientMode==="student"?recipient?.phone:manualPhone);
+  const query=recipientSearch.trim().toLocaleLowerCase("tr-TR");
+  const matchingRecipients=recipients.filter(item=>[item.name,item.guardian,item.phone].some(value=>String(value).toLocaleLowerCase("tr-TR").includes(query)) || item.id===recipientId);
   const blocked=invalid || ["loading","error"].includes(moveReadState);
   const model=blocked?null:calendarAvailabilityModel(days,intervals);
   const signature=JSON.stringify(model?.days || [moveReadState,invalid]);
   const currentSignatureRef=useRef(signature);
   currentSignatureRef.current=signature;
   useEffect(()=>{ setFeedback(""); },[signature]);
+  useEffect(()=>{ sendStartedRef.current=false;setWhatsAppOpened(false); },[shareOpen,recipientMode,recipientId,manualPhone,recipient?.phone,signature]);
+  useEffect(()=>{ if(shareOpen)sharePanelRef.current?.querySelector("input,select")?.focus(); },[shareOpen,recipientMode]);
   useEffect(()=>{
     aliveRef.current=true;
     const previous=document.activeElement,overflow=document.body.style.overflow;
@@ -5184,7 +5233,7 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
     const onKey=event=>{
       if (event.key==="Escape") { event.preventDefault();onClose();return; }
       if (event.key!=="Tab") return;
-      const buttons=Array.from(dialogRef.current?.querySelectorAll("button:not(:disabled)") || []);
+      const buttons=Array.from(dialogRef.current?.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)") || []);
       if (!buttons.length) return;
       const first=buttons[0],last=buttons.at(-1);
       if(event.shiftKey && document.activeElement===first){event.preventDefault();last.focus();}
@@ -5220,6 +5269,25 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
     } catch { setFeedback("PDF hazırlanamadı. Lütfen tekrar deneyin."); }
     finally { link?.remove();if(url)window.setTimeout(()=>URL.revokeObjectURL(url),10000); }
   };
+  const send=()=>{
+    if (!shareOpen || !model || !recipientPhone || exportBusyRef.current || sendStartedRef.current) return;
+    if (recipientMode==="student" && recipients.filter(item=>item.id===recipientId).length!==1) return;
+    const freshModel=calendarAvailabilityModel(days,intervals);
+    if (!freshModel) return;
+    sendStartedRef.current=true;setFeedback("");
+    let opened=null;
+    try {
+      // Detach the opener before navigating; a blocked popup is not a successful send.
+      opened=window.open("about:blank","_blank");
+      if (!opened) throw new Error("Popup blocked");
+      opened.opener=null;
+      opened.location.replace("https://wa.me/"+recipientPhone+"?text="+encodeURIComponent(calendarAvailabilityWhatsAppText(freshModel)));
+      setWhatsAppOpened(true);setFeedback("Mesaj WhatsApp'ta hazırlandı. Kontrol edip Gönder'e basın.");
+    } catch {
+      try { opened?.close(); } catch {}
+      sendStartedRef.current=false;setFeedback("WhatsApp açılamadı. Tarayıcının açılır pencere iznini kontrol edip tekrar deneyin.");
+    }
+  };
   return <div className="crm-availability-backdrop" onClick={event=>{if(event.target===event.currentTarget)onClose();}}>
     <style>{`
       .crm-availability-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(24,18,44,.45);padding:24px;display:flex;align-items:center;justify-content:center;}
@@ -5244,7 +5312,20 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
       .crm-availability-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;}
       .crm-availability-actions button{padding:11px 18px;border:1px solid #ded6ec;border-radius:10px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:#fff;color:#60468c;}
       .crm-availability-actions .crm-availability-pdf{background:#6440d7;border-color:#6440d7;color:#fff;}
+      .crm-availability-actions .crm-availability-send{background:#e4f5ed;border-color:#cfebdd;color:#166534;}
       .crm-availability-actions button:disabled{opacity:.45;cursor:not-allowed;}
+      .crm-availability-share{margin-top:20px;padding:18px;border:1px solid #e8e3f0;border-radius:14px;background:#fcfbfe;}
+      .crm-availability-share h3{margin:0 0 12px;font-size:16px;}
+      .crm-availability-share-modes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;}
+      .crm-availability-share-modes button{border:1px solid #ded6ec;border-radius:9px;background:#fff;padding:9px 12px;color:#60468c;font:inherit;font-size:12px;cursor:pointer;}
+      .crm-availability-share-modes button[aria-pressed=true]{background:#ede7fa;border-color:#b9a5e8;}
+      .crm-availability-recipient-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+      .crm-availability-share label{display:block;min-width:0;font-size:12px;font-weight:700;color:#514563;}
+      .crm-availability-share input,.crm-availability-share select,.crm-availability-share textarea{display:block;box-sizing:border-box;width:100%;min-width:0;margin-top:7px;border:1px solid #ded6ec;border-radius:9px;padding:10px;background:#fff;color:#292438;font:inherit;font-size:13px;}
+      .crm-availability-share textarea{height:240px;resize:vertical;line-height:1.6;}
+      .crm-availability-recipient-info{font-size:12px;line-height:1.7;overflow-wrap:anywhere;color:#635477;}
+      .crm-availability-recipient-error{color:#9a3412;}
+      .crm-availability-share-note{margin:14px 0;font-size:12px;line-height:1.6;color:#716b7e;}
       .crm-availability-feedback{min-height:18px;margin:12px 0 0;color:#635477;font-size:12px;text-align:right;}
       .crm-availability-warning{margin-top:24px;padding:20px;background:#fff7ed;color:#9a3412;border-radius:12px;font-size:13px;line-height:1.7;}
       .crm-availability-warning button{display:block;margin-top:12px;background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:9px 12px;color:inherit;font:inherit;cursor:pointer;}
@@ -5263,6 +5344,8 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
         .crm-availability-empty{margin:0;}
         .crm-availability-summary{align-items:flex-start;}
         .crm-availability-actions button{flex:1;padding:11px 8px;font-size:12px;}
+        .crm-availability-recipient-fields{grid-template-columns:1fr;}
+        .crm-availability-share{padding:14px;}
       }
     `}</style>
     <div ref={dialogRef} className="crm-availability-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-availability-title">
@@ -5272,7 +5355,19 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
         <div className="crm-availability-grid">{model.days.map(day=><section className="crm-availability-day" key={day.dateKey} aria-label={day.dayName+" "+day.dateLabel}><div className="crm-availability-day-head"><h3>{day.dayName}</h3><span className="crm-availability-date">{day.dateLabel}</span></div><div className="crm-availability-times">{day.times.length?day.times.map(time=><span key={time} className="crm-availability-time">{time}</span>):<p className="crm-availability-empty">Uygun saat yok</p>}</div></section>)}</div>
         <p className="crm-availability-note">Bu saatler şu an için uygundur. Ders saatinizi kesinleştirmek için lütfen bizimle iletişime geçin.</p>
       </> : <div className="crm-availability-warning" role="status">{invalid?"Takvimdeki bir dersin tarih, saat veya süresi doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":moveReadState==="error"?"Taşınan derslerin konumları doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":"Taşınan derslerin konumları kontrol ediliyor. Liste doğrulama tamamlanınca açılacak."}{moveReadState==="error"?<button onClick={onRetry}>Yalnız takvimi yeniden kontrol et</button>:null}</div>}
-      <div className="crm-availability-actions"><button onClick={copy} disabled={!model || copyBusy}>{copyBusy?"Kopyalanıyor…":"Metni Kopyala"}</button><button className="crm-availability-pdf" onClick={download} disabled={!model || copyBusy}>PDF İndir</button></div>
+      <div className="crm-availability-actions"><button onClick={copy} disabled={!model || copyBusy}>{copyBusy?"Kopyalanıyor…":"Metni Kopyala"}</button><button className="crm-availability-pdf" onClick={download} disabled={!model || copyBusy}>PDF İndir</button><button className="crm-availability-send" onClick={()=>{setShareOpen(value=>!value);setFeedback("");}} disabled={!model || copyBusy} aria-expanded={shareOpen}>Gönder</button></div>
+      {shareOpen && model ? <section ref={sharePanelRef} className="crm-availability-share" aria-label="WhatsApp gönderimi">
+        <h3>Uygun saatleri WhatsApp'ta paylaş</h3>
+        <div className="crm-availability-share-modes"><button aria-pressed={recipientMode==="student"} onClick={()=>{setRecipientMode("student");setManualPhone("");setFeedback("");}}>Kayıtlı öğrenci</button><button aria-pressed={recipientMode==="manual"} onClick={()=>{setRecipientMode("manual");setRecipientId("");setFeedback("");}}>Numara yaz</button></div>
+        {recipientMode==="student" ? <>
+          <div className="crm-availability-recipient-fields"><label>Öğrenci ara<input value={recipientSearch} onChange={event=>setRecipientSearch(event.target.value)} placeholder="Öğrenci veya veli adı" disabled={copyBusy} /></label><label>Öğrenci seç<select value={recipientId} onChange={event=>{setRecipientId(event.target.value);setFeedback("");}} disabled={copyBusy}><option value="">Öğrenci seçin</option>{matchingRecipients.map(item=><option key={item.id} value={item.id}>{item.name}{item.guardian?" — "+item.guardian:""}</option>)}</select></label></div>
+          {!recipients.length ? <p className="crm-availability-recipient-info">Seçili şubede mevcut öğrenci yok. Numara yaz seçeneğini kullanabilirsiniz.</p> : null}
+          {recipient ? <p className={"crm-availability-recipient-info"+(recipientPhone?"":" crm-availability-recipient-error")}>{recipient.name}{recipient.guardian?" · Veli: "+recipient.guardian:""}<br/>{recipientPhone?"WhatsApp numarası: +"+recipientPhone:"Kayıtlı telefon yok veya biçimi geçersiz. Numara yaz seçeneğini kullanabilirsiniz."}</p> : null}
+        </> : <><label>WhatsApp numarası<input type="tel" inputMode="tel" autoComplete="off" value={manualPhone} onChange={event=>{setManualPhone(event.target.value);setFeedback("");}} placeholder="05xx xxx xx xx veya +ülke kodu" disabled={copyBusy} /></label><p className={"crm-availability-recipient-info"+(manualPhone && !recipientPhone?" crm-availability-recipient-error":"")}>{recipientPhone?"Alıcı: +"+recipientPhone:manualPhone?"Geçerli bir numara girin. Yurt dışı için +ülke kodunu ekleyin.":"Bu numara öğrenci kaydına kaydedilmez."}</p></>}
+        <p className="crm-availability-share-note">Yalnız aşağıdaki uygun saatler metni paylaşılır. WhatsApp açılır; son Gönder onayı sizdedir.</p>
+        <label>Mesaj önizlemesi<textarea readOnly value={calendarAvailabilityWhatsAppText(model)} /></label>
+        <div className="crm-availability-actions"><button className="crm-availability-send" onClick={send} disabled={!recipientPhone || copyBusy || whatsAppOpened}>{whatsAppOpened?"WhatsApp açıldı":"WhatsApp'ta Aç"}</button></div>
+      </section> : null}
       <p className="crm-availability-feedback" role="status">{feedback}</p>
     </div>
   </div>;
