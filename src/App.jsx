@@ -2149,6 +2149,42 @@ function lastCompletedPackageInfo(student) {
   }) || null;
 }
 
+function completedPeriodInfos(student) {
+  const schedule = student?.schedule || [];
+  return [...customPackageInfos(student), ...regularPackageInfos(student)]
+    .sort((a,b)=>new Date(a.start)-new Date(b.start))
+    .filter(info => {
+      const ids = new Set(info.lessonIds || []);
+      const lessons = schedule.filter(lesson => ids.has(lesson.id));
+      return lessons.length > 0 && lessons.every(lesson => lesson.status !== "upcoming");
+    });
+}
+
+function completedPeriodInfoByKey(student, key) {
+  if (!student || !key) return null;
+  const matches = completedPeriodInfos(student).filter(info => packageSummaryKey(info) === key);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function pendingPeriodEvaluationRows(students) {
+  return (students || []).filter(student => !student.frozen).flatMap(student => {
+    const infos = completedPeriodInfos(student);
+    const keys = new Map();
+    infos.forEach(info => {
+      const key = packageSummaryKey(info);
+      keys.set(key, (keys.get(key) || 0) + 1);
+    });
+    // The latest period with no remaining lessons keeps its existing Today row.
+    const existingRowKey = calcBalance(student.schedule) === 0 ? packageSummaryKey(lastCompletedPackageInfo(student)) : "";
+    return infos.filter(info => {
+      const key = packageSummaryKey(info);
+      if (!info.complete || !key || keys.get(key) !== 1 || key === existingRowKey) return false;
+      const log = summarySentInfo(student, info);
+      return !log?.sentAt && (!!log?.evaluation || !!packageEvaluationStats(student, info)?.newEvaluationEligible);
+    }).map(info => ({ student, info }));
+  });
+}
+
 function summarySentInfo(student, info) {
   const key = packageSummaryKey(info);
   if (!key) return null;
@@ -4511,6 +4547,27 @@ function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
     }}>Değerlendirmeyi Kaydet</Btn></div>
     <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
   </Sheet>;
+}
+
+function BekleyenDonemDegerlendirmeleri({ rows, onStudentClick, onEvaluate, onSummary, busyStudentId }) {
+  if (!rows.length) return null;
+  return <AçılırBugünBölümü title={`Bekleyen Dönem Değerlendirmeleri (${rows.length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+    {rows.map(({ student, info }) => {
+      const key = packageSummaryKey(info);
+      const log = periodEvaluationInfo(student, info);
+      const busy = busyStudentId === student.id;
+      const startYear = info.startKey.slice(0,4);
+      const endYear = info.endKey.slice(0,4);
+      return <div key={student.id+"|"+key} style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, padding:"10px 0", borderBottom:"1px solid #f3e8ff" }}>
+        <div style={{ flex:"1 1 210px", minWidth:0 }}>
+          <button type="button" onClick={()=>onStudentClick(student)} style={{ padding:0, border:"none", background:"transparent", textAlign:"left", fontFamily:"inherit", fontWeight:700, fontSize:14, color:"#111", cursor:"pointer", overflowWrap:"anywhere" }}>{student.name}</button>
+          <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Tamamlanan dönem · {info.donem} · {startYear === endYear ? startYear : startYear+"–"+endYear} · {info.packageSize} ders</p>
+          <p style={{ margin:"2px 0 0", fontSize:12, color:log?"#7e22ce":"#c2410c", fontWeight:700 }}>{log ? "Dönem puanı: "+fmtNumber(log.evaluation.periodScore)+"/100 · Özet gönderilmedi" : "Dönem değerlendirilmedi"}</p>
+        </div>
+        <button type="button" disabled={busy} onClick={()=>log ? onSummary(student.id,key) : onEvaluate(student.id,key)} style={{ background:log?"#25D366":"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>{log ? "Dönem Özetini Gönder" : "Dönemi Değerlendir"}</button>
+      </div>;
+    })}
+  </AçılırBugünBölümü>;
 }
 
 function MesajSheet({ student, onClose, initialKey = "" }) {
@@ -11570,10 +11627,10 @@ export default function App() {
     pop("Ödeme kaydı silindi");
   };
 
-  const handleDonemDegerlendirmeAc = (sid) => {
+  const handleDonemDegerlendirmeAc = (sid, periodKey="") => {
     const student = students.find(s => s.id === sid);
     if (!student) { pop("Öğrenci kaydı bulunamadı", 5000); return; }
-    const info = lastCompletedPackageInfo(student);
+    const info = periodKey ? completedPeriodInfoByKey(student, periodKey) : lastCompletedPackageInfo(student);
     if (!info || !packageSummaryKey(info)) { pop("Dönem kaydı oluşturulamadı", 5000); return; }
     const stats = packageEvaluationStats(student, info);
     if (!periodEvaluationInfo(student, info) && !stats?.newEvaluationEligible) { pop("Bu dönem v73 öncesi dersleri içerdiği için yeni değerlendirmeye alınmıyor", 6000); return; }
@@ -11641,9 +11698,9 @@ export default function App() {
     }
   };
 
-  const handlePaketOzetiAc = (sid) => {
+  const handlePaketOzetiAc = (sid, periodKey="") => {
     const student = students.find(s => s.id === sid);
-    const info = lastCompletedPackageInfo(student);
+    const info = periodKey ? completedPeriodInfoByKey(student, periodKey) : lastCompletedPackageInfo(student);
     const log = periodEvaluationInfo(student, info);
     if (!student || !info || !log) { pop("Önce dönem değerlendirmesini tamamlayın", 5000); return; }
     setPeriodSummaryPrompt({ student, info, log });
@@ -12118,6 +12175,7 @@ export default function App() {
   };
 
   const operationalStudents = students.filter(student=>!isStudentDeleted(student));
+  const pendingPeriodEvaluations = mainTab === "bugün" ? pendingPeriodEvaluationRows(operationalStudents) : [];
   const todayPayments = operationalStudents.filter(isÖdemeBekleyen);
   const raiseDueList = operationalStudents.filter(isRaiseDue);
   const filtered = operationalStudents.filter(s => {
@@ -12809,6 +12867,7 @@ export default function App() {
             <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
             <GecikenTekDersÖdemeleri lessons={overdueSinglePayments} now={singleLessonResultClock} busyIds={singleLessonBusyIds} onPayment={handleSingleLessonPayment} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <BekleyenTelafiler students={operationalStudents} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
+            <BekleyenDonemDegerlendirmeleri rows={pendingPeriodEvaluations} onStudentClick={setDetailSt} onEvaluate={handleDonemDegerlendirmeAc} onSummary={handlePaketOzetiAc} busyStudentId={summaryOpeningId} />
             {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
@@ -12828,8 +12887,8 @@ export default function App() {
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
                         {evaluationLog
-                          ? <button disabled={summaryOpeningId===s.id} onClick={() => handlePaketOzetiAc(s.id)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönem Özetini Gönder</button>
-                          : newEvaluationEligible ? <button disabled={summaryOpeningId===s.id} onClick={() => handleDonemDegerlendirmeAc(s.id)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönemi Değerlendir</button> : null}
+                          ? <button disabled={summaryOpeningId===s.id} onClick={() => handlePaketOzetiAc(s.id,packageSummaryKey(info))} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönem Özetini Gönder</button>
+                          : newEvaluationEligible ? <button disabled={summaryOpeningId===s.id} onClick={() => handleDonemDegerlendirmeAc(s.id,packageSummaryKey(info))} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönemi Değerlendir</button> : null}
                         <button onClick={() => setÖdemeSt(s)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
                       </div>
                     </div>
@@ -12838,7 +12897,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            {pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
