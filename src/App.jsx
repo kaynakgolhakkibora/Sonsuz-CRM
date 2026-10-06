@@ -4563,7 +4563,52 @@ function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
   </Sheet>;
 }
 
+function sentPeriodSummaryStudentGroups(rows) {
+  const groups = new Map();
+  (rows || []).forEach(row => {
+    const id = row.student.id;
+    if (!groups.has(id)) groups.set(id, { student:row.student, rows:[] });
+    groups.get(id).rows.push(row);
+  });
+  return [...groups.values()]
+    .map(group => ({ ...group, rows:[...group.rows].sort((a,b)=>new Date(b.info.start)-new Date(a.info.start)) }))
+    .sort((a,b)=>(a.student.name || "").localeCompare(b.student.name || "", "tr"));
+}
+
+function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, busyStudentId }) {
+  const [openStudentId, setOpenStudentId] = useState(null);
+  const groups = sentPeriodSummaryStudentGroups(rows);
+  return <Sheet title="Gönderilmiş Özetler" subtitle={groups.length+" öğrenci · "+rows.length+" dönem özeti"} onClose={onClose}>
+    {groups.map(group => {
+      const open = openStudentId === group.student.id;
+      return <div key={group.student.id} style={{ border:"1px solid #e9d5ff", borderRadius:12, marginBottom:10, overflow:"hidden" }}>
+        <button type="button" aria-expanded={open} onClick={()=>setOpenStudentId(open ? null : group.student.id)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, width:"100%", padding:"12px 13px", border:0, background:"#faf5ff", color:"#7e22ce", textAlign:"left", fontWeight:700, fontSize:13, fontFamily:"inherit", cursor:"pointer" }}>
+          <span style={{ minWidth:0, overflowWrap:"anywhere" }}>{group.student.name} · {group.rows.length} özet</span>
+          <span aria-hidden="true">{open ? "▲" : "▼"}</span>
+        </button>
+        {open ? <div style={{ padding:"0 13px" }}>
+          <button type="button" onClick={()=>onStudentClick(group.student)} style={{ marginTop:10, padding:"6px 9px", border:"1px solid #d8b4fe", borderRadius:8, background:"#fff", color:"#7e22ce", fontWeight:700, fontSize:12, fontFamily:"inherit", cursor:"pointer" }}>Öğrenci Kartını Aç</button>
+          {group.rows.map(({ student, info }) => {
+          const key = packageSummaryKey(info);
+          const log = periodEvaluationInfo(student, info);
+          const busy = busyStudentId === student.id;
+          const startYear = info.startKey.slice(0,4), endYear = info.endKey.slice(0,4);
+          return <div key={key} style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:9, padding:"12px 0", borderBottom:"1px solid #f3e8ff" }}>
+            <div style={{ flex:"1 1 210px", minWidth:0 }}>
+              <p style={{ margin:0, fontSize:12, color:"#7e22ce", fontWeight:700 }}>{info.donem} · {startYear === endYear ? startYear : startYear+"–"+endYear} · {info.packageSize} ders</p>
+              <p style={{ margin:"3px 0 0", fontSize:12, color:"#059669", fontWeight:700 }}>Dönem puanı: {fmtNumber(log.evaluation.periodScore)}/100 · Özet gönderildi · {fmtMed(log.sentAt)}</p>
+            </div>
+            <button type="button" disabled={busy} onClick={()=>onSummary(student.id,key)} style={{ background:"#25D366", color:"#fff", border:0, borderRadius:8, padding:"7px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>Dönem Özetini Aç</button>
+          </div>;
+        })}</div> : null}
+      </div>;
+    })}
+    <Btn bg="#111" outline onClick={onClose}>Kapat</Btn>
+  </Sheet>;
+}
+
 function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEvaluate, onSummary, busyStudentId }) {
+  const [archiveOpen, setArchiveOpen] = useState(false);
   if (!rows.length && !sentRows.length) return null;
   const renderRow = ({ student, info }) => {
       const key = packageSummaryKey(info);
@@ -4580,13 +4625,12 @@ function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEval
         <button type="button" disabled={busy} onClick={()=>log ? onSummary(student.id,key) : onEvaluate(student.id,key)} style={{ background:log?"#25D366":"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>{log ? log.sentAt ? "Dönem Özetini Aç" : "Dönem Özetini Gönder" : "Dönemi Değerlendir"}</button>
       </div>;
   };
-  return <AçılırBugünBölümü title={`Dönem Değerlendirmeleri (${rows.length} bekleyen)`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+  return <><AçılırBugünBölümü title={`Dönem Değerlendirmeleri (${rows.length} bekleyen)`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
     {rows.map(renderRow)}
-    {sentRows.length ? <details style={{ marginTop:10 }}>
-      <summary style={{ cursor:"pointer", color:"#7e22ce", fontWeight:700, fontSize:12 }}>Gönderilmiş Özetler ({sentRows.length})</summary>
-      {sentRows.map(renderRow)}
-    </details> : null}
-  </AçılırBugünBölümü>;
+    {sentRows.length ? <button type="button" onClick={()=>setArchiveOpen(true)} style={{ marginTop:10, padding:"8px 10px", border:"1px solid #d8b4fe", borderRadius:8, background:"#fff", color:"#7e22ce", fontWeight:700, fontSize:12, fontFamily:"inherit", cursor:"pointer" }}>Gönderilmiş Özetler ({sentRows.length})</button> : null}
+  </AçılırBugünBölümü>
+    {archiveOpen && sentRows.length ? <SentPeriodSummariesSheet rows={sentRows} busyStudentId={busyStudentId} onClose={()=>setArchiveOpen(false)} onStudentClick={student=>{ setArchiveOpen(false); onStudentClick(student); }} onSummary={(sid,key)=>{ setArchiveOpen(false); onSummary(sid,key); }} /> : null}
+  </>;
 }
 
 function MesajSheet({ student, onClose, initialKey = "" }) {
