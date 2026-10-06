@@ -2174,13 +2174,27 @@ function pendingPeriodEvaluationRows(students) {
       const key = packageSummaryKey(info);
       keys.set(key, (keys.get(key) || 0) + 1);
     });
-    // The latest period with no remaining lessons keeps its existing Today row.
-    const existingRowKey = calcBalance(student.schedule) === 0 ? packageSummaryKey(lastCompletedPackageInfo(student)) : "";
     return infos.filter(info => {
       const key = packageSummaryKey(info);
-      if (!info.complete || !key || keys.get(key) !== 1 || key === existingRowKey) return false;
+      if (!key || keys.get(key) !== 1) return false;
       const log = summarySentInfo(student, info);
-      return !log?.sentAt && (!!log?.evaluation || !!packageEvaluationStats(student, info)?.newEvaluationEligible);
+      return !log?.sentAt && (!!log?.evaluation || (info.complete && !!packageEvaluationStats(student, info)?.newEvaluationEligible));
+    }).map(info => ({ student, info }));
+  });
+}
+
+function sentPeriodSummaryRows(students) {
+  return (students || []).filter(student => !student.frozen).flatMap(student => {
+    const infos = completedPeriodInfos(student);
+    const keys = new Map();
+    infos.forEach(info => {
+      const key = packageSummaryKey(info);
+      keys.set(key, (keys.get(key) || 0) + 1);
+    });
+    return infos.filter(info => {
+      const key = packageSummaryKey(info);
+      const log = summarySentInfo(student, info);
+      return !!key && keys.get(key) === 1 && !!log?.evaluation && !!log?.sentAt;
     }).map(info => ({ student, info }));
   });
 }
@@ -4549,10 +4563,9 @@ function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
   </Sheet>;
 }
 
-function BekleyenDonemDegerlendirmeleri({ rows, onStudentClick, onEvaluate, onSummary, busyStudentId }) {
-  if (!rows.length) return null;
-  return <AçılırBugünBölümü title={`Bekleyen Dönem Değerlendirmeleri (${rows.length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-    {rows.map(({ student, info }) => {
+function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEvaluate, onSummary, busyStudentId }) {
+  if (!rows.length && !sentRows.length) return null;
+  const renderRow = ({ student, info }) => {
       const key = packageSummaryKey(info);
       const log = periodEvaluationInfo(student, info);
       const busy = busyStudentId === student.id;
@@ -4562,11 +4575,17 @@ function BekleyenDonemDegerlendirmeleri({ rows, onStudentClick, onEvaluate, onSu
         <div style={{ flex:"1 1 210px", minWidth:0 }}>
           <button type="button" onClick={()=>onStudentClick(student)} style={{ padding:0, border:"none", background:"transparent", textAlign:"left", fontFamily:"inherit", fontWeight:700, fontSize:14, color:"#111", cursor:"pointer", overflowWrap:"anywhere" }}>{student.name}</button>
           <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Tamamlanan dönem · {info.donem} · {startYear === endYear ? startYear : startYear+"–"+endYear} · {info.packageSize} ders</p>
-          <p style={{ margin:"2px 0 0", fontSize:12, color:log?"#7e22ce":"#c2410c", fontWeight:700 }}>{log ? "Dönem puanı: "+fmtNumber(log.evaluation.periodScore)+"/100 · Özet gönderilmedi" : "Dönem değerlendirilmedi"}</p>
+          <p style={{ margin:"2px 0 0", fontSize:12, color:log?.sentAt?"#059669":log?"#7e22ce":"#c2410c", fontWeight:700 }}>{log ? "Dönem puanı: "+fmtNumber(log.evaluation.periodScore)+"/100 · "+(log.sentAt ? "Özet gönderildi · "+fmtMed(log.sentAt) : "Özet gönderilmedi") : "Dönem değerlendirilmedi"}</p>
         </div>
-        <button type="button" disabled={busy} onClick={()=>log ? onSummary(student.id,key) : onEvaluate(student.id,key)} style={{ background:log?"#25D366":"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>{log ? "Dönem Özetini Gönder" : "Dönemi Değerlendir"}</button>
+        <button type="button" disabled={busy} onClick={()=>log ? onSummary(student.id,key) : onEvaluate(student.id,key)} style={{ background:log?"#25D366":"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>{log ? log.sentAt ? "Dönem Özetini Aç" : "Dönem Özetini Gönder" : "Dönemi Değerlendir"}</button>
       </div>;
-    })}
+  };
+  return <AçılırBugünBölümü title={`Dönem Değerlendirmeleri (${rows.length} bekleyen)`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+    {rows.map(renderRow)}
+    {sentRows.length ? <details style={{ marginTop:10 }}>
+      <summary style={{ cursor:"pointer", color:"#7e22ce", fontWeight:700, fontSize:12 }}>Gönderilmiş Özetler ({sentRows.length})</summary>
+      {sentRows.map(renderRow)}
+    </details> : null}
   </AçılırBugünBölümü>;
 }
 
@@ -12176,6 +12195,7 @@ export default function App() {
 
   const operationalStudents = students.filter(student=>!isStudentDeleted(student));
   const pendingPeriodEvaluations = mainTab === "bugün" ? pendingPeriodEvaluationRows(operationalStudents) : [];
+  const sentPeriodSummaries = mainTab === "bugün" ? sentPeriodSummaryRows(operationalStudents) : [];
   const todayPayments = operationalStudents.filter(isÖdemeBekleyen);
   const raiseDueList = operationalStudents.filter(isRaiseDue);
   const filtered = operationalStudents.filter(s => {
@@ -12867,28 +12887,17 @@ export default function App() {
             <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
             <GecikenTekDersÖdemeleri lessons={overdueSinglePayments} now={singleLessonResultClock} busyIds={singleLessonBusyIds} onPayment={handleSingleLessonPayment} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <BekleyenTelafiler students={operationalStudents} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
-            <BekleyenDonemDegerlendirmeleri rows={pendingPeriodEvaluations} onStudentClick={setDetailSt} onEvaluate={handleDonemDegerlendirmeAc} onSummary={handlePaketOzetiAc} busyStudentId={summaryOpeningId} />
+            <BekleyenDonemDegerlendirmeleri rows={pendingPeriodEvaluations} sentRows={sentPeriodSummaries} onStudentClick={setDetailSt} onEvaluate={handleDonemDegerlendirmeAc} onSummary={handlePaketOzetiAc} busyStudentId={summaryOpeningId} />
             {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
-                  const info = lastCompletedPackageInfo(s);
-                  const evaluationLog = periodEvaluationInfo(s, info);
-                  const evaluationStats = packageEvaluationStats(s, info);
-                  const newEvaluationEligible = !!evaluationLog || !!evaluationStats?.newEvaluationEligible;
-                  const sent = evaluationLog?.sentAt;
                   return (
                     <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
                       <div onClick={() => setDetailSt(s)} style={{ cursor:"pointer" }}>
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                        <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Dönem tamamlandı{info?.donem ? " · "+info.donem : ""}</p>
-                        <p style={{ margin:"2px 0 0", fontSize:12, color:sent?"#059669":evaluationLog?"#7e22ce":"#c2410c", fontWeight:700 }}>
-                          {sent ? "Dönem özeti gönderildi · "+fmtMed(sent) : evaluationLog ? "Dönem puanı: "+fmtNumber(evaluationLog.evaluation.periodScore)+"/100 · Özet gönderilmedi" : newEvaluationEligible ? "Dönem değerlendirilmedi" : "v73 öncesi dönem · Yeni değerlendirmeye alınmaz"}
-                        </p>
+                        <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Ders hakkı tükendi · Yeni paket yükleyebilirsiniz.</p>
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                        {evaluationLog
-                          ? <button disabled={summaryOpeningId===s.id} onClick={() => handlePaketOzetiAc(s.id,packageSummaryKey(info))} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönem Özetini Gönder</button>
-                          : newEvaluationEligible ? <button disabled={summaryOpeningId===s.id} onClick={() => handleDonemDegerlendirmeAc(s.id,packageSummaryKey(info))} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönemi Değerlendir</button> : null}
                         <button onClick={() => setÖdemeSt(s)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
                       </div>
                     </div>
