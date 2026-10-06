@@ -1812,9 +1812,11 @@ function splitCurrentAndArchivedLessons(student) {
   const schedule = [...(student?.schedule || [])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const currentPeriodIds = currentOpenLessonPeriodIds(student);
   const currentPeriodLessons = schedule.filter(lesson=>currentPeriodIds.has(lesson.id));
-  const current = schedule.filter(lesson=>lesson.status === "upcoming" || currentPeriodIds.has(lesson.id));
+  const hasPeriodIdentity = currentPeriodLessons.length > 1 || currentPeriodLessons.some(lesson=>lesson.packageId);
+  const current = schedule.filter(lesson=>currentPeriodIds.has(lesson.id) || (!hasPeriodIdentity && lesson.status === "upcoming"));
+  const future = hasPeriodIdentity ? schedule.filter(lesson=>lesson.status === "upcoming" && !currentPeriodIds.has(lesson.id)) : [];
   const archived = schedule.filter(lesson=>lesson.status !== "upcoming" && !currentPeriodIds.has(lesson.id));
-  return { current, archived, currentPeriodLessons };
+  return { current, future, archived, currentPeriodLessons };
 }
 
 function historicalLessonYearGroups(student, lessons) {
@@ -3766,6 +3768,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
   const [showPieceAdd, setShowPieceAdd] = useState(false);
   const [ekDersOdemeSel, setEkDersOdemeSel] = useState(null);
   const [mevcutAcik, setMevcutAcik] = useState(true);
+  const [gelecekAcik, setGelecekAcik] = useState(false);
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
@@ -3943,6 +3946,15 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
                     <span>{mevcutAcik ? "▲" : "▼"}</span>
                   </button>
                   {mevcutAcik ? <div style={{ marginTop:7 }}>{güncel.map(l => <LessonCard key={l.id} l={l} />)}</div> : null}
+                </div>
+              ) : null}
+              {lessonSections.future.length > 0 ? (
+                <div>
+                  <button aria-expanded={gelecekAcik} onClick={() => setGelecekAcik(!gelecekAcik)} style={{ width:"100%", background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", fontSize:13, fontWeight:800, color:"#166534", cursor:"pointer", fontFamily:"inherit", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <span>Gelecek Dönemler ({lessonSections.future.length} ders)</span>
+                    <span>{gelecekAcik ? "▲" : "▼"}</span>
+                  </button>
+                  {gelecekAcik ? <div style={{ marginTop:7 }}>{lessonSections.future.map(l => <LessonCard key={l.id} l={l} />)}</div> : null}
                 </div>
               ) : null}
               {gecmisDersler.length > 0 ? (
