@@ -29,7 +29,6 @@ const STAFF_DEACTIVATION_ISSUE_KEY = "sonsuz_crm_staff_deactivation_issue_v1";
 const NORMAL_LESSON_EVALUATION_ISSUE_KEY = "sonsuz_crm_normal_lesson_evaluation_issue_v1";
 const NORMAL_LESSON_MAKEUP_ISSUE_KEY = "sonsuz_crm_normal_lesson_makeup_issue_v1";
 const NORMAL_LESSON_MAKEUP_PLAN_ISSUE_KEY = "sonsuz_crm_normal_lesson_makeup_plan_issue_v1";
-const NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_KEY = "sonsuz_crm_normal_lesson_makeup_completion_issue_v1";
 const STAFF_ISSUE_STORE_VERSION = 2;
 const STAFF_ISSUE_LEGACY_ACTOR_KEY = "__legacy__";
 const NORMAL_LESSON_EVALUATION_ISSUE_STORE_VERSION = 1;
@@ -38,8 +37,6 @@ const NORMAL_LESSON_MAKEUP_ISSUE_STORE_VERSION = 1;
 const NORMAL_LESSON_MAKEUP_ABSENCE_SETTLE_MS = 20000;
 const NORMAL_LESSON_MAKEUP_PLAN_ISSUE_STORE_VERSION = 1;
 const NORMAL_LESSON_MAKEUP_PLAN_ABSENCE_SETTLE_MS = 20000;
-const NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_STORE_VERSION = 1;
-const NORMAL_LESSON_MAKEUP_COMPLETION_ABSENCE_SETTLE_MS = 20000;
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
@@ -278,10 +275,6 @@ function isCurrentTelafi(record) {
   return midday(expiryDate).getTime() >= midday().getTime();
 }
 function activeTelafiRecords(records) { return (records || []).filter(isCurrentTelafi); }
-function isTodayPlannedTelafi(record) {
-  const plannedAt = telafiPlannedAt(record);
-  return !record?.done && !!plannedAt && isToday(plannedAt);
-}
 function telafiPolicyDate(value) {
   if (!value) return null;
   const text = String(value);
@@ -906,43 +899,6 @@ function writeNormalLessonMakeupPlanIssue(actorUserId, issue, expectedOperationI
   }
 }
 
-function readNormalLessonMakeupCompletionIssueStore() {
-  try {
-    const raw = localStorage.getItem(NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed?.version !== NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_STORE_VERSION || !parsed.issues || typeof parsed.issues !== "object") return {};
-    return Object.fromEntries(Object.entries(parsed.issues).filter(([,issue])=>issue && typeof issue === "object" && issue.operationId));
-  } catch {
-    return {};
-  }
-}
-
-function readNormalLessonMakeupCompletionIssue(actorUserId="") {
-  const actorKey = String(actorUserId || "");
-  if (!actorKey) return null;
-  return readNormalLessonMakeupCompletionIssueStore()[actorKey] || null;
-}
-
-function writeNormalLessonMakeupCompletionIssue(actorUserId, issue, expectedOperationId="") {
-  if (typeof window === "undefined" || !actorUserId) return false;
-  try {
-    const issues = readNormalLessonMakeupCompletionIssueStore();
-    const actorKey = String(actorUserId);
-    const current = issues[actorKey];
-    if (expectedOperationId && current?.operationId !== expectedOperationId) return false;
-    if (issue) issues[actorKey] = issue;
-    else delete issues[actorKey];
-    if (Object.keys(issues).length) {
-      localStorage.setItem(NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_KEY,JSON.stringify({ version:NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_STORE_VERSION, issues }));
-    } else {
-      localStorage.removeItem(NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_KEY);
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function canonicalJson(value) {
   if (Array.isArray(value)) return value.map(canonicalJson);
   if (value && typeof value === "object") {
@@ -988,229 +944,6 @@ function normalLessonMakeupPlanIssueMessage(issue) {
   if (issue.state === "applied_pending_refresh") return "Telafi planı Supabase'e kaydedildi; güncel öğrenci kaydı henüz yüklenemedi. İşlemi yeniden göndermeyin.";
   if (issue.state === "conflict") return "Telafi planı kanıtı beklenen öğrenci, telafi hakkı veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.";
   return "Telafi planının sonucu henüz kesinleştirilemedi. Sistem planı tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
-}
-
-function normalLessonMakeupCompletionIssueMessage(issue) {
-  if (!issue) return "";
-  if (issue.state === "not_applied") return "Telafi tamamlama işlemi Supabase'de bulunamadı. Kayıt oluşmadı; uyarıyı kapattıktan sonra işlemi yeniden yapabilirsiniz.";
-  if (issue.state === "applied_pending_refresh") return "Telafi sonucu Supabase'e kaydedildi; güncel öğrenci kaydı henüz yüklenemedi. İşlemi yeniden göndermeyin.";
-  if (issue.state === "conflict") return "Telafi tamamlama kanıtı beklenen öğrenci, telafi hakkı veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.";
-  return "Telafi tamamlama işleminin sonucu henüz kesinleştirilemedi. Sistem işlemi tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
-}
-
-// v173: evidence belongs to one occurrence, never to an entire week/program.
-const SINGLE_LESSON_MOVE_ISSUE_PREFIX = "sonsuz_crm_single_lesson_move_issue_v1:";
-const SINGLE_LESSON_MOVE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function singleLessonMovePosition(iso) {
-  if (typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/.test(iso)) return null;
-  if (!isValidLocalDateInput(iso.slice(0,10))) return null;
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return null;
-  const parts = new Intl.DateTimeFormat("en-GB",{ timeZone:"Europe/Istanbul", hour:"2-digit", minute:"2-digit", hourCycle:"h23" }).formatToParts(date);
-  return { date:iso, localDate:turkeyDateKey(date), time:parts.find(p=>p.type==="hour").value+":"+parts.find(p=>p.type==="minute").value };
-}
-
-function singleLessonMoveOrigin(lesson) {
-  const marker = lesson?.calendarMove;
-  if (marker?.kind !== "single_lesson_shift_v1" || marker.lessonId !== lesson.id || !lesson.id) return null;
-  const source = singleLessonMovePosition(marker?.origin?.date);
-  const target = singleLessonMovePosition(lesson?.date);
-  if (!source || !target
-    || !SINGLE_LESSON_MOVE_UUID.test(marker.operationId || "")
-    || !SINGLE_LESSON_MOVE_UUID.test(marker.originOperationId || "")
-    || !SINGLE_LESSON_MOVE_UUID.test(marker.actorUserId || "")
-    || !singleLessonMovePosition(marker.recordedAt)
-    || marker.origin.timezone !== "Europe/Istanbul"
-    || marker.origin.basis !== "observed_before_first_recorded_move"
-    || marker.origin.localDate !== source.localDate || marker.origin.time !== source.time
-    || marker.target?.date !== lesson.date || marker.target.localDate !== target.localDate
-    || marker.target.time !== target.time || lesson.time !== target.time) return null;
-  return source;
-}
-
-function singleLessonMoveIntent(student, lessonId, targetDate, targetTime) {
-  const lessons = (student?.schedule || []).filter(lesson=>lesson.id === lessonId);
-  const lesson = lessons.length === 1 ? lessons[0] : null;
-  const source = singleLessonMovePosition(lesson?.date);
-  if (!lesson || lesson.status !== "upcoming" || !source
-    || (Object.hasOwn(lesson,"time") && lesson.time !== source.time)
-    || !isValidLocalDateInput(targetDate) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(targetTime || "")
-    || !Number.isInteger(student.record_version) || student.record_version < 0
-    || source.localDate < turkeyDateKey() || targetDate < turkeyDateKey()
-    || (source.localDate === targetDate && source.time === targetTime)) return null;
-  return {
-    studentId:student.id, lessonId, expectedRecordVersion:student.record_version,
-    expectedDate:lesson.date, expectedTime:source.time, targetDate, targetTime,
-  };
-}
-
-function readSingleLessonMoveIssue(actorUserId) {
-  if (!actorUserId) return null;
-  const raw = localStorage.getItem(SINGLE_LESSON_MOVE_ISSUE_PREFIX+actorUserId);
-  if (!raw) return null;
-  const issue = JSON.parse(raw);
-  if (issue.version !== 1 || issue.actorUserId !== actorUserId || !issue.operationId || !issue.requestPayload) throw new Error("SINGLE_LESSON_MOVE_LOCAL_EVIDENCE_INVALID");
-  return issue;
-}
-
-function writeSingleLessonMoveIssue(actorUserId, issue, expectedOperationId="") {
-  try {
-    const current = readSingleLessonMoveIssue(actorUserId);
-    if (!actorUserId || (expectedOperationId ? current?.operationId !== expectedOperationId : !!current)) return false;
-    const key = SINGLE_LESSON_MOVE_ISSUE_PREFIX+actorUserId;
-    if (issue) localStorage.setItem(key,JSON.stringify({ ...issue, version:1 }));
-    else localStorage.removeItem(key);
-    const saved = readSingleLessonMoveIssue(actorUserId);
-    return issue ? JSON.stringify(canonicalJson(saved)) === JSON.stringify(canonicalJson({ ...issue,version:1 })) : !saved;
-  } catch { return false; }
-}
-
-function singleLessonMoveEvidenceMatches(issue, row) {
-  const request = issue?.requestPayload;
-  const before = row?.target_before;
-  const after = row?.target_after;
-  const origin = singleLessonMoveOrigin(after);
-  const marker = after?.calendarMove;
-  if (!request || !origin || row.operation_id !== issue.operationId
-    || row.student_id !== request.studentId || row.branch_id !== issue.branchId
-    || row.lesson_id !== request.lessonId || row.actor_user_id !== issue.actorUserId
-    || row.operation_kind !== "single_lesson_shift"
-    || Number(row.expected_record_version) !== request.expectedRecordVersion
-    || Number(row.resulting_record_version) !== request.expectedRecordVersion+1
-    || JSON.stringify(canonicalJson(row.request_payload)) !== JSON.stringify(canonicalJson(request))
-    || before?.id !== request.lessonId || after.id !== request.lessonId
-    || before.status !== "upcoming" || after.status !== "upcoming"
-    || before.date !== request.expectedDate || singleLessonMovePosition(before.date)?.time !== request.expectedTime
-    || (Object.hasOwn(before,"time") && before.time !== request.expectedTime)
-    || marker.operationId !== issue.operationId || marker.actorUserId !== issue.actorUserId
-    || marker.target.localDate !== request.targetDate || marker.target.time !== request.targetTime
-    || marker.originOperationId !== row.origin_operation_id
-    || JSON.stringify(canonicalJson(marker.origin)) !== JSON.stringify(canonicalJson(row.origin_position))) return false;
-  const withoutPosition = lesson => Object.fromEntries(Object.entries(lesson).filter(([key])=>!["date","time","calendarMove"].includes(key)));
-  return JSON.stringify(canonicalJson(withoutPosition(before))) === JSON.stringify(canonicalJson(withoutPosition(after)));
-}
-
-function singleLessonMoveKnownRejection(error) {
-  return /^SINGLE_LESSON_MOVE_(NOT_AUTHORIZED|INVALID_INPUT|INVALID_TARGET_DATE|STUDENT_NOT_FOUND|STALE_STUDENT|INVALID_SCHEDULE|LESSON_NOT_FOUND|AMBIGUOUS_LESSON|PROCESSED_LESSON|UNKNOWN_SOURCE_POSITION|SOURCE_POSITION_MISMATCH|PAST_LESSON|NO_CHANGE|SOURCE_EVIDENCE_CONFLICT|UNVERIFIED_SOURCE_EVIDENCE|INVALID_SCHEDULE_DATES)$/.test(String(error?.message || ""));
-}
-
-function singleLessonMoveIssueMessage(issue) {
-  if (issue.state === "writing") return "Seçilen ders taşınıyor. Supabase kaydı doğrulanmadan başarı gösterilmez.";
-  if (issue.state === "not_applied") return "Taşıma sunucu tarafından reddedildi ve kayıt oluşmadığı doğrulandı. Uyarıyı kapatıp güncel ders üzerinden tekrar seçebilirsiniz.";
-  if (issue.state === "applied_pending_refresh") return "Taşıma kaydedildi; güncel öğrenci henüz doğrulanamadı. İşlemi tekrar göndermeyin.";
-  if (issue.state === "conflict") return "Taşıma kanıtı beklenen öğrenci, ders veya içerikle eşleşmiyor. İşlemi tekrar göndermeyin.";
-  return "Taşımanın sonucu henüz kesin değil. Yeniden Kontrol Et yalnız Supabase kaydını okur; taşıma otomatik tekrarlanmaz.";
-}
-
-// v174: read-only calendar proof. Never attach this evidence to a student payload.
-function calendarMoveReadRequests(students, scope, offset=0) {
-  if (!SINGLE_LESSON_MOVE_UUID.test(scope?.actorUserId || "") || !SINGLE_LESSON_MOVE_UUID.test(scope?.branchId || "")) return [];
-  const start = new Date();
-  const dow = start.getDay();
-  start.setDate(start.getDate() - (dow===0?6:dow-1) + offset*7);
-  start.setHours(0,0,0,0);
-  const visibleDates = new Set(Array.from({length:7},(_,index)=>{
-    const day = new Date(start);
-    day.setDate(start.getDate()+index);
-    return turkeyDateKey(day);
-  }));
-  return students.flatMap(student => {
-    if (student.branch_id !== scope.branchId || student.frozen || isStudentLeft(student)) return [];
-    const counts = new Map();
-    (student.schedule || []).forEach(lesson=>counts.set(lesson.id,(counts.get(lesson.id) || 0)+1));
-    return (student.schedule || []).flatMap(lesson => {
-      const origin = singleLessonMoveOrigin(lesson);
-      if (counts.get(lesson.id) !== 1 || !origin || !visibleDates.has(origin.localDate)
-        || lesson.calendarMove.operationId === lesson.calendarMove.originOperationId) return [];
-      return [{ studentId:student.id, branchId:student.branch_id, recordVersion:student.record_version,
-        lessonId:lesson.id, date:lesson.date, time:lesson.time, packageId:lesson.packageId,
-        packageLessonCount:lesson.packageLessonCount, marker:lesson.calendarMove }];
-    });
-  });
-}
-
-function calendarMoveVerifiedSources(request, rows) {
-  const same = (a,b) => JSON.stringify(canonicalJson(a)) === JSON.stringify(canonicalJson(b));
-  const current = { id:request.lessonId, date:request.date, time:request.time, calendarMove:request.marker };
-  const origin = singleLessonMoveOrigin(current);
-  if (!origin || !Number.isInteger(request.recordVersion)) return null;
-  const byId = new Map();
-  for (const row of rows) {
-    if (byId.has(row.operation_id)) return null;
-    byId.set(row.operation_id,row);
-  }
-  const sources = new Set();
-  const visited = new Set();
-  let operationId = request.marker.operationId;
-  let newer = null;
-  while (operationId) {
-    if (visited.has(operationId)) return null;
-    visited.add(operationId);
-    const row = byId.get(operationId);
-    const before = row?.target_before;
-    const after = row?.target_after;
-    const intent = row?.request_payload;
-    if (!row || row.student_id !== request.studentId || row.branch_id !== request.branchId || row.lesson_id !== request.lessonId
-      || !SINGLE_LESSON_MOVE_UUID.test(row.operation_id || "") || !SINGLE_LESSON_MOVE_UUID.test(row.actor_user_id || "")
-      || !Number.isInteger(intent?.expectedRecordVersion) || intent.expectedRecordVersion < 0
-      || !singleLessonMoveEvidenceMatches({ operationId, actorUserId:row.actor_user_id, branchId:request.branchId, requestPayload:intent },row)
-      || !same(row.origin_position,request.marker.origin) || row.origin_operation_id !== request.marker.originOperationId
-      || before.packageId !== request.packageId || after.packageId !== request.packageId
-      || before.packageLessonCount !== request.packageLessonCount || after.packageLessonCount !== request.packageLessonCount) return null;
-    if (!newer) {
-      if (!same(after.calendarMove,request.marker) || after.date !== request.date || after.time !== request.time
-        || request.recordVersion < Number(row.resulting_record_version)) return null;
-    } else if (after.date !== newer.target_before.date || after.time !== singleLessonMovePosition(newer.target_before.date)?.time
-      || Number(row.resulting_record_version) > Number(newer.expected_record_version)
-      || (newer.target_before.calendarMove && !same(after.calendarMove,newer.target_before.calendarMove))) return null;
-    const source = singleLessonMovePosition(before.date);
-    // Other dates/weeks may have independent program reservations: do not hide them.
-    if (source?.localDate === origin.localDate) sources.add(source.localDate+"|"+source.time);
-    if (operationId === request.marker.originOperationId) {
-      if (row.previous_operation_id != null || source?.date !== origin.date) return null;
-      return [...sources];
-    }
-    if (!SINGLE_LESSON_MOVE_UUID.test(row.previous_operation_id || "")) return null;
-    newer = row;
-    operationId = row.previous_operation_id;
-  }
-  return null;
-}
-
-async function readCalendarMoveEvidence(client, requests, scope, isCurrent) {
-  const rows = [];
-  const seen = new Set();
-  let pending = [...new Set(requests.map(request=>request.marker.operationId))];
-  // Fetch only explicit operation IDs, at most 40 rows/query (below server row caps).
-  for (let depth=0; pending.length && depth<128; depth+=1) {
-    const next = [];
-    for (let index=0; index<pending.length; index+=40) {
-      if (!isCurrent()) return null;
-      const ids = pending.slice(index,index+40);
-      const result = await timedSingleLessonRequest(()=>client.from("single_lesson_move_operations")
-        .select("operation_id,student_id,branch_id,lesson_id,operation_kind,expected_record_version,resulting_record_version,request_payload,target_before,target_after,origin_position,origin_operation_id,previous_operation_id,actor_user_id")
-        .eq("branch_id",scope.branchId).in("operation_id",ids));
-      if (!isCurrent()) return null;
-      if (result.error || !Array.isArray(result.data) || result.data.length !== ids.length) throw new Error("CALENDAR_MOVE_READ_INCOMPLETE");
-      for (const row of result.data) {
-        if (!ids.includes(row.operation_id) || seen.has(row.operation_id) || row.branch_id !== scope.branchId
-          || !requests.some(request=>request.studentId===row.student_id && request.lessonId===row.lesson_id)) throw new Error("CALENDAR_MOVE_READ_CONFLICT");
-        seen.add(row.operation_id);
-        rows.push(row);
-        if (rows.length > 4096) throw new Error("CALENDAR_MOVE_READ_LIMIT");
-        if (row.operation_id !== row.origin_operation_id) {
-          if (!SINGLE_LESSON_MOVE_UUID.test(row.previous_operation_id || "")) throw new Error("CALENDAR_MOVE_READ_CONFLICT");
-          next.push(row.previous_operation_id);
-        }
-      }
-    }
-    pending = [...new Set(next)].filter(id=>!seen.has(id));
-  }
-  if (pending.length) throw new Error("CALENDAR_MOVE_READ_LIMIT");
-  const sources = requests.map(request=>({ studentId:request.studentId, lessonId:request.lessonId, keys:calendarMoveVerifiedSources(request,rows) }));
-  if (sources.some(source=>source.keys===null)) throw new Error("CALENDAR_MOVE_READ_CONFLICT");
-  return sources;
 }
 
 function staffInvitationIssueMessage(issue) {
@@ -1812,11 +1545,9 @@ function splitCurrentAndArchivedLessons(student) {
   const schedule = [...(student?.schedule || [])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const currentPeriodIds = currentOpenLessonPeriodIds(student);
   const currentPeriodLessons = schedule.filter(lesson=>currentPeriodIds.has(lesson.id));
-  const hasPeriodIdentity = currentPeriodLessons.length > 1 || currentPeriodLessons.some(lesson=>lesson.packageId);
-  const current = schedule.filter(lesson=>currentPeriodIds.has(lesson.id) || (!hasPeriodIdentity && lesson.status === "upcoming"));
-  const future = hasPeriodIdentity ? schedule.filter(lesson=>lesson.status === "upcoming" && !currentPeriodIds.has(lesson.id)) : [];
+  const current = schedule.filter(lesson=>lesson.status === "upcoming" || currentPeriodIds.has(lesson.id));
   const archived = schedule.filter(lesson=>lesson.status !== "upcoming" && !currentPeriodIds.has(lesson.id));
-  return { current, future, archived, currentPeriodLessons };
+  return { current, archived, currentPeriodLessons };
 }
 
 function historicalLessonYearGroups(student, lessons) {
@@ -2149,56 +1880,6 @@ function lastCompletedPackageInfo(student) {
   }) || null;
 }
 
-function completedPeriodInfos(student) {
-  const schedule = student?.schedule || [];
-  return [...customPackageInfos(student), ...regularPackageInfos(student)]
-    .sort((a,b)=>new Date(a.start)-new Date(b.start))
-    .filter(info => {
-      const ids = new Set(info.lessonIds || []);
-      const lessons = schedule.filter(lesson => ids.has(lesson.id));
-      return lessons.length > 0 && lessons.every(lesson => lesson.status !== "upcoming");
-    });
-}
-
-function completedPeriodInfoByKey(student, key) {
-  if (!student || !key) return null;
-  const matches = completedPeriodInfos(student).filter(info => packageSummaryKey(info) === key);
-  return matches.length === 1 ? matches[0] : null;
-}
-
-function pendingPeriodEvaluationRows(students) {
-  return (students || []).filter(student => !student.frozen).flatMap(student => {
-    const infos = completedPeriodInfos(student);
-    const keys = new Map();
-    infos.forEach(info => {
-      const key = packageSummaryKey(info);
-      keys.set(key, (keys.get(key) || 0) + 1);
-    });
-    return infos.filter(info => {
-      const key = packageSummaryKey(info);
-      if (!key || keys.get(key) !== 1) return false;
-      const log = summarySentInfo(student, info);
-      return !log?.sentAt && (!!log?.evaluation || (info.complete && !!packageEvaluationStats(student, info)?.newEvaluationEligible));
-    }).map(info => ({ student, info }));
-  });
-}
-
-function sentPeriodSummaryRows(students) {
-  return (students || []).filter(student => !student.frozen).flatMap(student => {
-    const infos = completedPeriodInfos(student);
-    const keys = new Map();
-    infos.forEach(info => {
-      const key = packageSummaryKey(info);
-      keys.set(key, (keys.get(key) || 0) + 1);
-    });
-    return infos.filter(info => {
-      const key = packageSummaryKey(info);
-      const log = summarySentInfo(student, info);
-      return !!key && keys.get(key) === 1 && !!log?.evaluation && !!log?.sentAt;
-    }).map(info => ({ student, info }));
-  });
-}
-
 function summarySentInfo(student, info) {
   const key = packageSummaryKey(info);
   if (!key) return null;
@@ -2480,140 +2161,6 @@ function normalLessonMakeupPlanErrorText(error) {
   if (message.includes("RECORD_NOT_FOUND") || message.includes("STUDENT_NOT_FOUND") || message.includes("AMBIGUOUS")) return "Öğrenci veya telafi hakkı güvenli biçimde eşleştirilemedi. Kayıt yapılmadı; liste yenilendi.";
   if (message.includes("INVALID") || message.includes("TOO_LONG") || message.includes("TARGET_REMOVED") || message.includes("OPERATION_ID_CONFLICT")) return "Telafi planı bilgileri doğrulanamadı. Kayıt yapılmadı.";
   return "Telafi planı kaydedilemedi. Sonuç Supabase'den kontrol edilecek; işlemi tekrar göndermeyin.";
-}
-
-function normalLessonMakeupCompletionIntent(student, makeupRecordId, payload={}, correctionReason="") {
-  const matchingRecords = (student?.telafi_records || []).filter(record=>String(record?.id || "") === String(makeupRecordId || ""));
-  const record = matchingRecords.length === 1 ? matchingRecords[0] : null;
-  const expectedRecordVersion = Math.max(0,parseInt(student?.record_version) || 0);
-  const actionKind = payload.action === "counted" ? "counted" : "attended";
-  const doneAt = String(payload.doneAt || telafiPlannedAt(record) || "");
-  const doneNote = String(payload.doneNote || "").trim();
-  const normalizedCorrectionReason = String(correctionReason || "").trim();
-  const expectedOperationKind = record && (record.done === true || String(record.done).toLowerCase() === "true") ? "corrected" : "completed";
-  const evaluation = actionKind === "attended" ? {
-    note:doneNote,
-    activeMinutes:parseInt(payload.activeMinutes) || 0,
-    taskFocusMinutes:parseInt(payload.taskFocusMinutes) || 0,
-    redirectionCount:parseInt(payload.redirectionCount) || 0,
-    lessonFocus:String(payload.lessonFocus || "").trim(),
-    homework:String(payload.homework || "").trim(),
-    ...(payload.previousHomeworkSource ? { previousHomeworkSource:String(payload.previousHomeworkSource) } : {}),
-    ...(payload.previousHomeworkSourceId ? { previousHomeworkSourceId:String(payload.previousHomeworkSourceId) } : {}),
-    ...(payload.previousHomeworkSource ? { homeworkStatus:String(payload.homeworkStatus || "") } : {}),
-  } : {};
-  const requestPayload = {
-    studentId:String(student?.id || ""),
-    makeupRecordId:String(makeupRecordId || ""),
-    expectedRecordVersion,
-    actionKind,
-    doneAt,
-    doneNote,
-    evaluation,
-    correctionReason:normalizedCorrectionReason,
-  };
-  return {
-    record,
-    matchingRecordCount:matchingRecords.length,
-    expectedRecordVersion,
-    expectedOperationKind,
-    actionKind,
-    doneAt,
-    doneNote,
-    evaluation,
-    expectedEvaluatedHomework:String(payload.evaluatedHomework || ""),
-    correctionReason:normalizedCorrectionReason,
-    requestPayload,
-  };
-}
-
-function normalLessonMakeupCompletionIntentSignature(value) {
-  return normalLessonEvaluationIntentSignature(value);
-}
-
-function normalLessonMakeupCompletionTargetMatches(target, intent) {
-  if (!target || String(target.id || "") !== String(intent?.record?.id || "")) return false;
-  if (String(target.done).toLowerCase() !== "true" || String(target.doneStatus || target.done_status || "") !== intent.actionKind) return false;
-  if (telafiDoneAt(target) !== intent.doneAt || String(target.doneNote || "") !== intent.doneNote) return false;
-  if (intent.actionKind === "counted") return true;
-  const storedScore = storedLessonScore(target);
-  const expectedScoreBreakdown = calculateLessonScore({
-    homeworkStatus:intent.evaluation.homeworkStatus,
-    homeworkApplicable:!!intent.evaluation.previousHomeworkSource,
-    activeMinutes:intent.evaluation.activeMinutes,
-    taskFocusMinutes:intent.evaluation.taskFocusMinutes,
-    redirectionCount:intent.evaluation.redirectionCount,
-  });
-  const homeworkChanged = String(intent.record?.homework || "") !== intent.evaluation.homework;
-  const expectedHomeworkStatus = intent.evaluation.homework
-    ? (homeworkChanged ? "pending" : String(intent.record?.homeworkStatus || "pending"))
-    : "";
-  return Number(target.activeMinutes || 0) === Number(intent.evaluation.activeMinutes)
-    && Number(target.taskFocusMinutes ?? target.task_focus_minutes ?? 0) === Number(intent.evaluation.taskFocusMinutes)
-    && Number(target.redirectionCount ?? target.redirection_count ?? 0) === Number(intent.evaluation.redirectionCount)
-    && String(target.lessonFocus || target.lesson_focus || "") === intent.evaluation.lessonFocus
-    && String(target.homework || "") === intent.evaluation.homework
-    && String(target.homeworkStatus || "") === expectedHomeworkStatus
-    && String(target.evaluatedHomework || "") === String(intent.expectedEvaluatedHomework || "")
-    && String(target.evaluatedHomeworkStatus || "") === String(intent.evaluation.homeworkStatus || "")
-    && storedScore === expectedScoreBreakdown.total
-    && JSON.stringify(canonicalJson(target.lessonScoreBreakdown || {})) === JSON.stringify(canonicalJson(expectedScoreBreakdown));
-}
-
-function normalLessonMakeupCompletionHomeworkMatches(student, intent) {
-  if (intent?.actionKind !== "attended" || !intent?.evaluation?.previousHomeworkSource) return true;
-  const sourceKind = intent.evaluation.previousHomeworkSource;
-  const sourceId = intent.evaluation.previousHomeworkSourceId;
-  const source = (sourceKind === "schedule" ? student?.schedule : student?.telafi_records || [])
-    ?.find(item=>String(item?.id || "") === String(sourceId || ""));
-  return !!source
-    && String(source.homework || "") === String(intent.expectedEvaluatedHomework || "")
-    && String(source.homeworkStatus || "") === intent.evaluation.homeworkStatus
-    && String(source.homeworkCheckNote || "") === ""
-    && !!source.homeworkCheckedAt
-    && String(source.homeworkCheckedInRef || "") === homeworkCheckRef("telafi",intent.record?.id);
-}
-
-function normalLessonMakeupCompletionKnownRejection(error) {
-  const message = String(error?.message || error || "");
-  return [
-    "NORMAL_LESSON_MAKEUP_COMPLETION_NOT_AUTHORIZED",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_INVALID_INPUT",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_INPUT_TOO_LONG",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_INVALID_DATE",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_INVALID_EVALUATION",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_INVALID_METRICS",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_INVALID_HOMEWORK_INPUT",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_COUNTED_HAS_EVALUATION",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_STUDENT_NOT_FOUND",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_STALE_STUDENT",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_INVALID_STUDENT_DATA",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_RECORD_NOT_FOUND",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_AMBIGUOUS_RECORD",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_NOT_PLANNED",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_PLAN_MISMATCH",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_ALREADY_COMPLETED",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_CORRECTION_REASON_REQUIRED",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_UNEXPECTED_CORRECTION_REASON",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_METRICS_EXCEED_DURATION",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_HOMEWORK_SOURCE_NOT_FOUND",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_AMBIGUOUS_HOMEWORK_SOURCE",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_OPERATION_ID_CONFLICT",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_TARGET_REMOVED",
-    "NORMAL_LESSON_MAKEUP_COMPLETION_HOMEWORK_SOURCE_REMOVED",
-  ].some(code=>message.includes(code));
-}
-
-function normalLessonMakeupCompletionErrorText(error) {
-  const message = String(error?.message || error || "");
-  if (message.includes("STALE_STUDENT") || message.includes("PLAN_MISMATCH")) return "Öğrenci veya telafi planı başka bir işlemle değişti. Eski ekran bilgisi gönderilmedi; liste Supabase'den yenilendi.";
-  if (message.includes("CORRECTION_REASON_REQUIRED")) return "Daha önce tamamlanmış telafi verilerini değiştirmek için düzeltme nedeni zorunludur. Kayıt yapılmadı.";
-  if (message.includes("ALREADY_COMPLETED")) return "Bu tamamlanmış telafi sonucu bu işlemle değiştirilemez. Kayıt yapılmadı; liste yenilendi.";
-  if (message.includes("NOT_AUTHORIZED")) return "Bu öğrencinin şubesinde telafi tamamlama yetkisi doğrulanamadı. Kayıt yapılmadı.";
-  if (message.includes("HOMEWORK_SOURCE")) return "Telafiyle bağlantılı ödev kaydı bu sırada değişti. Eski bilgi kaydedilmedi; liste yenilendi.";
-  if (message.includes("RECORD_NOT_FOUND") || message.includes("STUDENT_NOT_FOUND") || message.includes("AMBIGUOUS")) return "Öğrenci veya telafi hakkı güvenli biçimde eşleştirilemedi. Kayıt yapılmadı; liste yenilendi.";
-  if (message.includes("INVALID") || message.includes("EXCEED") || message.includes("TOO_LONG") || message.includes("NOT_PLANNED") || message.includes("TARGET_REMOVED") || message.includes("OPERATION_ID_CONFLICT")) return "Telafi tamamlama bilgileri doğrulanamadı. Kayıt yapılmadı.";
-  return "Telafi sonucu kaydedilemedi. Sonuç Supabase'den kontrol edilecek; işlemi tekrar göndermeyin.";
 }
 
 function lessonEngagementStats(student, info) {
@@ -3322,10 +2869,8 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
   const [lessonFocus, setLessonFocus] = useState(record?.lessonFocus || record?.lesson_focus || "");
   const [homework, setHomework] = useState(record?.homework || "");
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === telafiCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
-  const [correctionReason, setCorrectionReason] = useState("");
   const [formError, setFormError] = useState("");
   const [savingPlan, setSavingPlan] = useState(false);
-  const [savingCompletion, setSavingCompletion] = useState(false);
   const days = daysLeft(record.expiry);
   const expired = days !== null && days < 0;
   const urgent = !expired && days !== null && days <= 7;
@@ -3344,22 +2889,9 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
       setSavingPlan(false);
     }
   };
-  const saveCompletion = async payload => {
-    if (savingCompletion) return;
-    setSavingCompletion(true);
-    try {
-      const saved = await onSave(record.id,{
-        ...payload,
-        correctionReason:record.done ? correctionReason.trim() : "",
-      });
-      if (saved === true) onClose();
-    } finally {
-      setSavingCompletion(false);
-    }
-  };
 
   return (
-    <Sheet title="Telafi Dersi" subtitle={student?.name} onClose={()=>{ if (!savingPlan && !savingCompletion) onClose(); }}>
+    <Sheet title="Telafi Dersi" subtitle={student?.name} onClose={()=>{ if (!savingPlan) onClose(); }}>
       <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
         <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", letterSpacing:1 }}>İptal Edilen Ders</p>
         <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color:"#111" }}>{fmtDate(record.lessonDate)}</p>
@@ -3453,21 +2985,16 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
                 <NoteArea value={doneNote} onChange={value=>{ setDoneNote(value); setFormError(""); }} placeholder="Kısa not" />
                 <label style={LBL}>Gelecek Ders İçin Ödev (İsteğe Bağlı)</label>
                 <NoteArea value={homework} onChange={value=>{ setHomework(value); setFormError(""); }} placeholder="Örn. Beyer 1, sayfa 24–25; sağ el çalışılacak." />
-                {record.done ? <>
-                  <label style={LBL}>Düzeltme Nedeni</label>
-                  <NoteArea value={correctionReason} onChange={value=>{ setCorrectionReason(value); setFormError(""); }} placeholder="Örn. Öğretmen notundaki süre yanlış girilmişti." />
-                </> : null}
                 {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
-                <Btn bg="#10b981" disabled={savingCompletion} onClick={() => {
+                <Btn bg="#10b981" onClick={() => {
                   const lessonDuration = parseInt(duration) || getLessonDuration(student);
                   if (homeworkToEvaluate && !homeworkStatus) { setFormError("Ödev durumunu seçin."); return; }
                   if (activeMinutes === "" || parseInt(activeMinutes) < 0 || parseInt(activeMinutes) > lessonDuration) { setFormError("Geçerli aktif ders süresi girin."); return; }
                   if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > lessonDuration) { setFormError("Geçerli görev odağı süresi girin."); return; }
                   if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
                   if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
-                  if (record.done && !correctionReason.trim()) { setFormError("Düzeltme nedenini yazın."); return; }
                   const scoreBreakdown = calculateLessonScore({ homeworkStatus, homeworkApplicable:!!homeworkToEvaluate, activeMinutes, taskFocusMinutes, redirectionCount });
-                  void saveCompletion({
+                  onSave(record.id, {
                     action: "attended",
                     doneAt: plannedAt || `${date}T${time}:00`,
                     doneNote:doneNote.trim(),
@@ -3483,15 +3010,19 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
                     homeworkStatus:homeworkToEvaluate ? homeworkStatus : "",
                     evaluatedHomework:homeworkToEvaluate?.homework || "",
                   });
-                }}>{savingCompletion ? "Kaydediliyor..." : "Katılımı Kaydet"}</Btn>
-                <Btn bg="#111" outline disabled={savingCompletion} onClick={() => setStep("main")}>Geri</Btn>
+                  onClose();
+                }}>Katılımı Kaydet</Btn>
+                <Btn bg="#111" outline onClick={() => setStep("main")}>Geri</Btn>
               </>
             : step === "counted"
               ? <>
                   <p style={{ fontSize:13, color:"#666", marginBottom:8 }}>Neden yapıldı sayılıyor?</p>
                   <NoteArea value={doneNote} onChange={setDoneNote} placeholder="Açıklama" />
-                  <Btn bg="#f97316" disabled={savingCompletion} onClick={() => { void saveCompletion({ action: "counted", doneAt: plannedAt || `${date}T${time}:00`, doneNote }); }}>{savingCompletion ? "Kaydediliyor..." : "Kaydet"}</Btn>
-                  <Btn bg="#111" outline disabled={savingCompletion} onClick={() => setStep("main")}>Geri</Btn>
+                  <Btn bg="#f97316" onClick={() => {
+                    onSave(record.id, { action: "counted", doneAt: plannedAt || `${date}T${time}:00`, doneNote });
+                    onClose();
+                  }}>Kaydet</Btn>
+                  <Btn bg="#111" outline onClick={() => setStep("main")}>Geri</Btn>
                 </>
               : <>
                   <Btn bg="#25D366" onClick={() => onPlanMessage(record)}>Plan Mesajını Gönder</Btn>
@@ -3505,33 +3036,25 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
 }
 
 function ShiftSheet({ lesson, student, onClose, onShift, onMoveOne }) {
-  const [moving, setMoving] = useState(false);
-  const movingRef = useRef(false);
   const [moveDate, setMoveDate] = useState(dateKey(lesson.date) || new Date().toISOString().split("T")[0]);
   const [moveTime, setMoveTime] = useState(lessonTime(student, lesson) || student.time || "10:00");
   return (
-    <Sheet title="Ders Tarihi Kaydır" subtitle={fmtDate(lesson.date)+" - "+lessonTime(student, lesson)} onClose={()=>{ if (!movingRef.current) onClose(); }}>
+    <Sheet title="Ders Tarihi Kaydır" subtitle={fmtDate(lesson.date)+" - "+lessonTime(student, lesson)} onClose={onClose}>
       <p style={{ fontSize:13, color:"#666", marginBottom:16 }}>1/2 hafta ileri alırsan bu dersten sonraki planlı dersler de aynı şekilde kayar.</p>
-      <Btn bg="#6366f1" disabled={moving} onClick={() => { onShift(lesson.id, 7); onClose(); }}>1 Hafta İleri Al</Btn>
-      <Btn bg="#8b5cf6" disabled={moving} onClick={() => { onShift(lesson.id, 14); onClose(); }}>2 Hafta İleri Al</Btn>
+      <Btn bg="#6366f1" onClick={() => { onShift(lesson.id, 7); onClose(); }}>1 Hafta İleri Al</Btn>
+      <Btn bg="#8b5cf6" onClick={() => { onShift(lesson.id, 14); onClose(); }}>2 Hafta İleri Al</Btn>
       <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, padding:12, margin:"12px 0" }}>
         <p style={{ margin:"0 0 8px", fontSize:13, color:"#666" }}>Sadece bu dersi başka bir tarih ve saate taşı.</p>
-        <input style={INP} type="date" value={moveDate} disabled={moving} onChange={e=>setMoveDate(e.target.value)} />
+        <input style={INP} type="date" value={moveDate} onChange={e=>setMoveDate(e.target.value)} />
         <div style={{ height:8 }} />
-        <select style={INP} value={moveTime} disabled={moving} onChange={e=>setMoveTime(e.target.value)}>
+        <select style={INP} value={moveTime} onChange={e=>setMoveTime(e.target.value)}>
           {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
         <div style={{ marginTop:10 }}>
-          <Btn bg="#0ea5e9" disabled={moving} onClick={async () => {
-            if (movingRef.current) return;
-            movingRef.current = true;
-            setMoving(true);
-            try { if (await onMoveOne(lesson.id,moveDate,moveTime)) onClose(); }
-            finally { movingRef.current = false; setMoving(false); }
-          }}>{moving ? "Kaydediliyor…" : "Tarihe Taşı"}</Btn>
+          <Btn bg="#0ea5e9" onClick={() => { onMoveOne(lesson.id, moveDate, moveTime); onClose(); }}>Tarihe Taşı</Btn>
         </div>
       </div>
-      <Btn bg="#111" outline disabled={moving} onClick={onClose}>İptal</Btn>
+      <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
     </Sheet>
   );
 }
@@ -3818,7 +3341,6 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
   const [showPieceAdd, setShowPieceAdd] = useState(false);
   const [ekDersOdemeSel, setEkDersOdemeSel] = useState(null);
   const [mevcutAcik, setMevcutAcik] = useState(true);
-  const [gelecekAcik, setGelecekAcik] = useState(false);
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
@@ -3996,15 +3518,6 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
                     <span>{mevcutAcik ? "▲" : "▼"}</span>
                   </button>
                   {mevcutAcik ? <div style={{ marginTop:7 }}>{güncel.map(l => <LessonCard key={l.id} l={l} />)}</div> : null}
-                </div>
-              ) : null}
-              {lessonSections.future.length > 0 ? (
-                <div>
-                  <button aria-expanded={gelecekAcik} onClick={() => setGelecekAcik(!gelecekAcik)} style={{ width:"100%", background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", fontSize:13, fontWeight:800, color:"#166534", cursor:"pointer", fontFamily:"inherit", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <span>Gelecek Dönemler ({lessonSections.future.length} ders)</span>
-                    <span>{gelecekAcik ? "▲" : "▼"}</span>
-                  </button>
-                  {gelecekAcik ? <div style={{ marginTop:7 }}>{lessonSections.future.map(l => <LessonCard key={l.id} l={l} />)}</div> : null}
                 </div>
               ) : null}
               {gecmisDersler.length > 0 ? (
@@ -4191,8 +3704,8 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
           <Btn bg="#ef4444" onClick={async() => { if(window.confirm(student.name+" öğrenci ekranlarından kaldırılsın mı? Geçmiş ders ve ödeme kayıtları finans geçmişinde korunacaktır.")){ const deleted=await onDelete(student.id); if(deleted) onClose(); } }}>Öğrenciyi Sil</Btn>
         </div>
       </Sheet>
-      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => onTelafiDone(student.id, id, payload)} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
-      {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => onMoveOne(student.id, lid, date, time)} /> : null}
+      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => { const result=onTelafiDone(student.id, id, payload); if (payload?.action !== "plan") setTelafiSel(null); return result; }} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
+      {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => { onMoveOne(student.id, lid, date, time); setShiftSel(null); }} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} saving={paymentSavingId===student.id} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
@@ -4563,76 +4076,6 @@ function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
   </Sheet>;
 }
 
-function sentPeriodSummaryStudentGroups(rows) {
-  const groups = new Map();
-  (rows || []).forEach(row => {
-    const id = row.student.id;
-    if (!groups.has(id)) groups.set(id, { student:row.student, rows:[] });
-    groups.get(id).rows.push(row);
-  });
-  return [...groups.values()]
-    .map(group => ({ ...group, rows:[...group.rows].sort((a,b)=>new Date(b.info.start)-new Date(a.info.start)) }))
-    .sort((a,b)=>(a.student.name || "").localeCompare(b.student.name || "", "tr"));
-}
-
-function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, busyStudentId }) {
-  const [openStudentId, setOpenStudentId] = useState(null);
-  const groups = sentPeriodSummaryStudentGroups(rows);
-  return <Sheet title="Gönderilmiş Özetler" subtitle={groups.length+" öğrenci · "+rows.length+" dönem özeti"} onClose={onClose}>
-    {groups.map(group => {
-      const open = openStudentId === group.student.id;
-      return <div key={group.student.id} style={{ border:"1px solid #e9d5ff", borderRadius:12, marginBottom:10, overflow:"hidden" }}>
-        <button type="button" aria-expanded={open} onClick={()=>setOpenStudentId(open ? null : group.student.id)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, width:"100%", padding:"12px 13px", border:0, background:"#faf5ff", color:"#7e22ce", textAlign:"left", fontWeight:700, fontSize:13, fontFamily:"inherit", cursor:"pointer" }}>
-          <span style={{ minWidth:0, overflowWrap:"anywhere" }}>{group.student.name} · {group.rows.length} özet</span>
-          <span aria-hidden="true">{open ? "▲" : "▼"}</span>
-        </button>
-        {open ? <div style={{ padding:"0 13px" }}>
-          <button type="button" onClick={()=>onStudentClick(group.student)} style={{ marginTop:10, padding:"6px 9px", border:"1px solid #d8b4fe", borderRadius:8, background:"#fff", color:"#7e22ce", fontWeight:700, fontSize:12, fontFamily:"inherit", cursor:"pointer" }}>Öğrenci Kartını Aç</button>
-          {group.rows.map(({ student, info }) => {
-          const key = packageSummaryKey(info);
-          const log = periodEvaluationInfo(student, info);
-          const busy = busyStudentId === student.id;
-          const startYear = info.startKey.slice(0,4), endYear = info.endKey.slice(0,4);
-          return <div key={key} style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:9, padding:"12px 0", borderBottom:"1px solid #f3e8ff" }}>
-            <div style={{ flex:"1 1 210px", minWidth:0 }}>
-              <p style={{ margin:0, fontSize:12, color:"#7e22ce", fontWeight:700 }}>{info.donem} · {startYear === endYear ? startYear : startYear+"–"+endYear} · {info.packageSize} ders</p>
-              <p style={{ margin:"3px 0 0", fontSize:12, color:"#059669", fontWeight:700 }}>Dönem puanı: {fmtNumber(log.evaluation.periodScore)}/100 · Özet gönderildi · {fmtMed(log.sentAt)}</p>
-            </div>
-            <button type="button" disabled={busy} onClick={()=>onSummary(student.id,key)} style={{ background:"#25D366", color:"#fff", border:0, borderRadius:8, padding:"7px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>Dönem Özetini Aç</button>
-          </div>;
-        })}</div> : null}
-      </div>;
-    })}
-    <Btn bg="#111" outline onClick={onClose}>Kapat</Btn>
-  </Sheet>;
-}
-
-function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEvaluate, onSummary, busyStudentId }) {
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  if (!rows.length && !sentRows.length) return null;
-  const renderRow = ({ student, info }) => {
-      const key = packageSummaryKey(info);
-      const log = periodEvaluationInfo(student, info);
-      const busy = busyStudentId === student.id;
-      const startYear = info.startKey.slice(0,4);
-      const endYear = info.endKey.slice(0,4);
-      return <div key={student.id+"|"+key} style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, padding:"10px 0", borderBottom:"1px solid #f3e8ff" }}>
-        <div style={{ flex:"1 1 210px", minWidth:0 }}>
-          <button type="button" onClick={()=>onStudentClick(student)} style={{ padding:0, border:"none", background:"transparent", textAlign:"left", fontFamily:"inherit", fontWeight:700, fontSize:14, color:"#111", cursor:"pointer", overflowWrap:"anywhere" }}>{student.name}</button>
-          <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Tamamlanan dönem · {info.donem} · {startYear === endYear ? startYear : startYear+"–"+endYear} · {info.packageSize} ders</p>
-          <p style={{ margin:"2px 0 0", fontSize:12, color:log?.sentAt?"#059669":log?"#7e22ce":"#c2410c", fontWeight:700 }}>{log ? "Dönem puanı: "+fmtNumber(log.evaluation.periodScore)+"/100 · "+(log.sentAt ? "Özet gönderildi · "+fmtMed(log.sentAt) : "Özet gönderilmedi") : "Dönem değerlendirilmedi"}</p>
-        </div>
-        <button type="button" disabled={busy} onClick={()=>log ? onSummary(student.id,key) : onEvaluate(student.id,key)} style={{ background:log?"#25D366":"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>{log ? log.sentAt ? "Dönem Özetini Aç" : "Dönem Özetini Gönder" : "Dönemi Değerlendir"}</button>
-      </div>;
-  };
-  return <><AçılırBugünBölümü title={`Dönem Değerlendirmeleri (${rows.length} bekleyen)`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-    {rows.map(renderRow)}
-    {sentRows.length ? <button type="button" onClick={()=>setArchiveOpen(true)} style={{ marginTop:10, padding:"8px 10px", border:"1px solid #d8b4fe", borderRadius:8, background:"#fff", color:"#7e22ce", fontWeight:700, fontSize:12, fontFamily:"inherit", cursor:"pointer" }}>Gönderilmiş Özetler ({sentRows.length})</button> : null}
-  </AçılırBugünBölümü>
-    {archiveOpen && sentRows.length ? <SentPeriodSummariesSheet rows={sentRows} busyStudentId={busyStudentId} onClose={()=>setArchiveOpen(false)} onStudentClick={student=>{ setArchiveOpen(false); onStudentClick(student); }} onSummary={(sid,key)=>{ setArchiveOpen(false); onSummary(sid,key); }} /> : null}
-  </>;
-}
-
 function MesajSheet({ student, onClose, initialKey = "" }) {
   const msgs = [
     { key:"ders", label:"Ders Hatırlatma", text:msgDersHatirlatma(student) },
@@ -4789,25 +4232,7 @@ function ZamSheet({ student, onClose, onSave }) {
   );
 }
 
-function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "", calendarMoveReadScope=null, availabilityOpen=false, onAvailabilityClose=()=>{} }) {
-  const moveRequests = calendarMoveReadRequests(students,calendarMoveReadScope,offset);
-  const moveReadKey = JSON.stringify([calendarMoveReadScope,moveRequests]);
-  const moveReadKeyRef = useRef(moveReadKey);
-  moveReadKeyRef.current = moveReadKey;
-  const [moveReadResult,setMoveReadResult] = useState(null);
-  const [moveReadRetry,setMoveReadRetry] = useState(0);
-  useEffect(()=>{
-    let cancelled = false;
-    const isCurrent = () => !cancelled && moveReadKeyRef.current===moveReadKey;
-    if (!moveRequests.length) { setMoveReadResult(null); return ()=>{ cancelled=true; }; }
-    setMoveReadResult({ key:moveReadKey, state:"loading", sources:[] });
-    readCalendarMoveEvidence(supabase,moveRequests,calendarMoveReadScope,isCurrent)
-      .then(sources=>{ if (isCurrent() && sources) setMoveReadResult({ key:moveReadKey, state:"ready", sources }); })
-      .catch(()=>{ if (isCurrent()) setMoveReadResult({ key:moveReadKey, state:"error", sources:[] }); });
-    return ()=>{ cancelled=true; };
-  },[moveReadKey,moveReadRetry]);
-  const verifiedMoveSources = moveReadResult?.key===moveReadKey && moveReadResult.state==="ready" ? moveReadResult.sources : [];
-  const moveReadState = moveRequests.length ? (moveReadResult?.key===moveReadKey ? moveReadResult.state : "loading") : "";
+function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "" }) {
   const now = new Date();
   const dow = now.getDay();
   const start = new Date(now);
@@ -4823,15 +4248,6 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   const rowCount = (endMinutes - startMinutes) / slotMinutes;
   const dayKeyToIndex = new Map(days.map((day,index)=>[localDateKey(day), index]));
   const calendarItems = [];
-  // Read-only observation: uses the existing source filters, never changes calendar items.
-  const availabilityIntervals = [];
-  let availabilityInvalid = false;
-  const observeAvailability = (date,time,duration,kind) => {
-    if (!availabilityOpen || kind==="telafi-slot") return;
-    const interval = calendarAvailabilityInterval(date,time,duration);
-    if (interval) availabilityIntervals.push(interval);
-    else availabilityInvalid = true;
-  };
   const addItem = item => {
     const [hour, minute] = String(item.time || "").split(":").map(Number);
     if (!Number.isFinite(hour) || !Number.isFinite(minute)) return;
@@ -4856,18 +4272,9 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     const statedStart = student.lesson_start_date || student.lessonStartDate;
     const programStart = statedStart ? midday(new Date(statedStart+(/^\d{4}-\d{2}-\d{2}$/.test(statedStart)?"T12:00:00":""))) : (earliestScheduleWeek || todayMid);
     const actualKeys = new Set();
-    const lessonIdCounts = new Map();
-    schedule.forEach(lesson=>lessonIdCounts.set(lesson.id,(lessonIdCounts.get(lesson.id) || 0)+1));
-    const movedSourceKeys = new Set(schedule.flatMap(lesson => {
-      if (lessonIdCounts.get(lesson.id) !== 1) return [];
-      const origin = singleLessonMoveOrigin(lesson);
-      const verified = verifiedMoveSources.find(source=>source.studentId===student.id && source.lessonId===lesson.id);
-      return origin ? [origin.localDate+"|"+origin.time,...(verified?.keys || [])] : [];
-    }));
 
     schedule.forEach(lesson => {
       if (teacherName && teacherForDate(student, lesson.date, lesson) !== teacherName) return;
-      observeAvailability(lesson.date,lessonTime(student,lesson),getLessonDuration(student,lesson),lesson.status==="telafi"?"telafi-slot":"normal");
       const dayIndex = dayKeyToIndex.get(localDateKey(lesson.date));
       if (dayIndex === undefined) return;
       const time = lessonTime(student, lesson);
@@ -4891,8 +4298,6 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       const slotDate = midday(days[dayIndex]);
       if (slotDate < midday(programStart) || slotDate < todayMid) return;
       if (actualKeys.has(dayIndex+"|"+slot.time)) return;
-      if (movedSourceKeys.has(turkeyDateKey(slotDate)+"|"+slot.time)) return;
-      observeAvailability(slotDate,slot.time,getLessonDuration(student),packageEnded?"package-ended":"normal");
       addItem({
         key:"slot-"+student.id+"-"+slotIndex+"-"+localDateKey(slotDate),
         student,
@@ -4908,7 +4313,6 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       const plannedAt = telafiPlannedAt(record);
       if (!plannedAt) return;
       if (teacherName && teacherForDate(student, plannedAt, record) !== teacherName) return;
-      observeAvailability(plannedAt,timeFromISO(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student),"planned-telafi");
       const dayIndex = dayKeyToIndex.get(localDateKey(plannedAt));
       if (dayIndex === undefined) return;
       addItem({
@@ -4927,7 +4331,6 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       if (teacherName && teacherForDate(student, extra.date, extra) !== teacherName) return;
       const startAt = new Date(extra.date);
       if (isNaN(startAt.getTime())) return;
-      observeAvailability(startAt,timeFromISO(startAt),getLessonDuration(student,extra),"extra-lesson");
       const dayIndex = dayKeyToIndex.get(localDateKey(startAt));
       if (dayIndex === undefined) return;
       addItem({
@@ -4948,7 +4351,6 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     if (teacherName && lesson.teacher_name!==teacherName) return;
     const startAt = new Date(lesson.starts_at);
     if (isNaN(startAt.getTime())) return;
-    observeAvailability(startAt,timeFromISO(startAt),lesson.duration_minutes || 45,"single-lesson");
     const dayIndex = dayKeyToIndex.get(localDateKey(startAt));
     if (dayIndex===undefined) return;
     addItem({
@@ -5020,9 +4422,6 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
           ["#7c3aed",1,"Tek Ders"],
         ].map(([color,opacity,text])=><span key={text} style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:20, height:10, borderRadius:3, background:color, opacity }} />{text}</span>)}
       </div>
-      {["loading","error"].includes(moveReadState) ? <div role="status" style={{ marginBottom:10, padding:"8px 12px", borderRadius:8, background:moveReadState==="error"?"#fff7ed":"#f8fafc", color:moveReadState==="error"?"#9a3412":"#64748b", fontSize:12 }}>
-        {moveReadState==="error" ? <>Taşınan derslerin eski program kartları doğrulanamadı; takvimde fazladan kart olabilir. <button onClick={()=>setMoveReadRetry(value=>value+1)} style={{ background:"none", border:"none", color:"inherit", textDecoration:"underline", cursor:"pointer", fontFamily:"inherit" }}>Yalnız takvimi yeniden kontrol et</button></> : moveReadState==="loading" ? "Taşınan derslerin takvim konumları kontrol ediliyor…" : null}
-      </div> : null}
       <div className="week-calendar-v66">
         <div className="week-calendar-v66-grid">
           <div style={{ gridColumn:1, gridRow:1, background:"#fbfaf9", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", zIndex:2 }} />
@@ -5053,461 +4452,10 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
           </div>)}
         </div>
       </div>
-      {availabilityOpen ? <CalendarAvailabilitySheet key={JSON.stringify([calendarMoveReadScope,offset])} days={days} intervals={availabilityIntervals} invalid={availabilityInvalid} moveReadState={moveReadState} onRetry={()=>setMoveReadRetry(value=>value+1)} onClose={onAvailabilityClose} recipients={calendarAvailabilityRecipients(students,calendarMoveReadScope?.branchId)} /> : null}
     </div>
   );
 }
 
-
-// Availability is a read-only projection of WeekCal's selected sources, not a booking engine.
-function calendarAvailabilityStarts(dayIndex) {
-  const first = dayIndex<3 ? 14*60+45 : dayIndex<5 ? 14*60+30 : 10*60;
-  return Array.from({length:7},(_,index)=>{
-    const minutes=first+index*45;
-    return String(Math.floor(minutes/60)).padStart(2,"0")+":"+String(minutes%60).padStart(2,"0");
-  });
-}
-function calendarAvailabilityInterval(date,time,duration) {
-  const start=new Date(date);
-  const match=/^(\d{2}):(\d{2})$/.exec(String(time || ""));
-  const minutes=Number(duration);
-  if (isNaN(start.getTime()) || !match || Number(match[1])>23 || Number(match[2])>59 || !Number.isFinite(minutes) || minutes<=0) return null;
-  start.setHours(Number(match[1]),Number(match[2]),0,0);
-  const end=start.getTime()+minutes*60000;
-  return Number.isFinite(end) ? {start:start.getTime(),end} : null;
-}
-function calendarAvailabilityModel(days,intervals,generatedAt=new Date()) {
-  if (days.length!==7 || days.some(day=>isNaN(new Date(day).getTime())) || intervals.some(item=>!Number.isFinite(item.start)||!Number.isFinite(item.end)||item.end<=item.start)) return null;
-  const dayNames=["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"];
-  const dates=days.map(day=>new Date(day));
-  const weekLabel=dates[0].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})+" - "+dates[6].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"});
-  return {
-    weekLabel,
-    generatedLabel:new Date(generatedAt).toLocaleString("tr-TR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}).replace(/\s/g," "),
-    days:dates.map((day,index)=>({
-      dateKey:localDateKey(day),
-      dayName:dayNames[index],
-      dateLabel:day.toLocaleDateString("tr-TR",{day:"numeric",month:"long"}),
-      times:calendarAvailabilityStarts(index).filter(time=>{
-        const slot=calendarAvailabilityInterval(day,time,45);
-        return !intervals.some(item=>item.start<slot.end && item.end>slot.start);
-      }),
-    })),
-  };
-}
-function calendarAvailabilityText(model) {
-  return [
-    "BODRUM SONSUZ SANAT",
-    model.weekLabel,
-    "Uygun Ders Saatleri",
-    "Her ders 45 dakikadır.",
-    "",
-    ...model.days.map(day=>day.dayName+" ("+day.dateLabel+"): "+(day.times.length?day.times.join(", "):"Uygun saat yok")),
-    "",
-    "Hazırlanma: "+model.generatedLabel,
-    "Yukarıda belirtilen ders saatleri şu an için uygundur. Yeni talepler doğrultusunda saatlerin uygunluğu değişebilir. Size uygun gün ve saati kesinleştirmek için lütfen bizimle iletişime geçin.",
-  ].join("\n");
-}
-
-// These helpers belong only to the availability sharing UI; no student or reminder writes.
-function calendarAvailabilityRecipients(students,branchId) {
-  if (!branchId) return [];
-  return students.filter(student=>student.id && student.branch_id===branchId && !isStudentDeleted(student) && !isStudentLeft(student))
-    .map(student=>({id:String(student.id),name:student.name || "İsimsiz öğrenci",guardian:student.veli_adi || "",phone:student.phone || ""}))
-    .sort((a,b)=>a.name.localeCompare(b.name,"tr-TR"));
-}
-function calendarAvailabilityPhone(value) {
-  const raw=String(value || "").trim();
-  if (!raw || !/^[+\d\s().-]+$/.test(raw)) return "";
-  const compact=raw.replace(/[\s().-]/g,"");
-  let phone="";
-  if (compact.startsWith("+")) phone=compact.slice(1);
-  else if (compact.startsWith("00")) phone=compact.slice(2);
-  else if (/^05\d{9}$/.test(compact)) phone="90"+compact.slice(1);
-  else if (/^5\d{9}$/.test(compact)) phone="90"+compact;
-  else if (/^90\d{10}$/.test(compact)) phone=compact;
-  if (!/^[1-9]\d{6,14}$/.test(phone) || (phone.startsWith("90") && !/^90\d{10}$/.test(phone))) return "";
-  return phone;
-}
-function calendarAvailabilityWhatsAppText(model) {
-  return [
-    "*BODRUM SONSUZ SANAT*",
-    model.weekLabel,
-    "*Uygun Ders Saatleri*",
-    "Her ders 45 dakikadır.",
-    "",
-    ...model.days.map(day=>"*"+day.dayName+" · "+day.dateLabel+"*\n"+(day.times.length?day.times.join(" · "):"Uygun saat yok")).join("\n\n").split("\n"),
-    "",
-    "Yukarıda belirtilen ders saatleri şu an için uygundur. Yeni talepler doğrultusunda saatlerin uygunluğu değişebilir. Size uygun gün ve saati kesinleştirmek için lütfen bizimle iletişime geçin.",
-    "",
-    "Hazırlanma: "+model.generatedLabel,
-  ].join("\n");
-}
-
-/*
-Embedded TrueType subset for Turkish, selectable vector PDF text.
-Generated only from the bundled Liberation Sans font; no remote font request.
-Digitized data copyright (c) 2010 Google Corporation
-	with Reserved Font Arimo, Tinos and Cousine.
-Copyright (c) 2012 Red Hat, Inc.
-	with Reserved Font Name Liberation.
-
-This Font Software is licensed under the SIL Open Font License,
-Version 1.1.
-
-This license is copied below, and is also available with a FAQ at:
-http://scripts.sil.org/OFL
-
-SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
-
-PREAMBLE The goals of the Open Font License (OFL) are to stimulate
-worldwide development of collaborative font projects, to support the font
-creation efforts of academic and linguistic communities, and to provide
-a free and open framework in which fonts may be shared and improved in
-partnership with others.
-
-The OFL allows the licensed fonts to be used, studied, modified and
-redistributed freely as long as they are not sold by themselves.
-The fonts, including any derivative works, can be bundled, embedded,
-redistributed and/or sold with any software provided that any reserved
-names are not used by derivative works.  The fonts and derivatives,
-however, cannot be released under any other type of license.  The
-requirement for fonts to remain under this license does not apply to
-any document created using the fonts or their derivatives.
-
- 
-
-DEFINITIONS
-"Font Software" refers to the set of files released by the Copyright
-Holder(s) under this license and clearly marked as such.
-This may include source files, build scripts and documentation.
-
-"Reserved Font Name" refers to any names specified as such after the
-copyright statement(s).
-
-"Original Version" refers to the collection of Font Software components
-as distributed by the Copyright Holder(s).
-
-"Modified Version" refers to any derivative made by adding to, deleting,
-or substituting ? in part or in whole ?
-any of the components of the Original Version, by changing formats or
-by porting the Font Software to a new environment.
-
-"Author" refers to any designer, engineer, programmer, technical writer
-or other person who contributed to the Font Software.
-
-
-PERMISSION & CONDITIONS
-
-Permission is hereby granted, free of charge, to any person obtaining a
-copy of the Font Software, to use, study, copy, merge, embed, modify,
-redistribute, and sell modified and unmodified copies of the Font
-Software, subject to the following conditions:
-
-1) Neither the Font Software nor any of its individual components,in
-   Original or Modified Versions, may be sold by itself.
-
-2) Original or Modified Versions of the Font Software may be bundled,
-   redistributed and/or sold with any software, provided that each copy
-   contains the above copyright notice and this license. These can be
-   included either as stand-alone text files, human-readable headers or
-   in the appropriate machine-readable metadata fields within text or
-   binary files as long as those fields can be easily viewed by the user.
-
-3) No Modified Version of the Font Software may use the Reserved Font
-   Name(s) unless explicit written permission is granted by the
-   corresponding Copyright Holder. This restriction only applies to the
-   primary font name as presented to the users.
-
-4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
-   Software shall not be used to promote, endorse or advertise any
-   Modified Version, except to acknowledge the contribution(s) of the
-   Copyright Holder(s) and the Author(s) or with their explicit written
-   permission.
-
-5) The Font Software, modified or unmodified, in part or in whole, must
-   be distributed entirely under this license, and must not be distributed
-   under any other license. The requirement for fonts to remain under
-   this license does not apply to any document created using the Font
-   Software.
-
-
- 
-TERMINATION
-This license becomes null and void if any of the above conditions are not met.
-
- 
-
-DISCLAIMER
-THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
-OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT.  IN NO EVENT SHALL THE
-COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
-DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER
-DEALINGS IN THE FONT SOFTWARE.
-*/
-const CALENDAR_AVAILABILITY_PDF_FONT = {"characters":" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ÇçĞğİıÖöŞşÜü","widths":[277.832,277.832,354.98,556.152,556.152,889.16,666.992,190.918,333.008,333.008,389.16,583.984,277.832,333.008,277.832,277.832,556.152,556.152,556.152,556.152,556.152,556.152,556.152,556.152,556.152,556.152,277.832,277.832,583.984,583.984,583.984,556.152,1015.137,666.992,666.992,722.168,722.168,666.992,610.84,777.832,722.168,277.832,500,666.992,556.152,833.008,722.168,777.832,666.992,777.832,722.168,666.992,610.84,722.168,666.992,943.848,666.992,666.992,610.84,277.832,277.832,277.832,469.238,556.152,333.008,556.152,556.152,500,556.152,556.152,277.832,556.152,556.152,222.168,222.168,500,222.168,833.008,556.152,556.152,556.152,556.152,333.008,500,277.832,556.152,500,722.168,500,500,500,333.984,259.766,333.984,583.984,722.168,500,777.832,556.152,277.832,277.832,777.832,556.152,666.992,500,722.168,556.152],"bbox":[-203.125,-303.223,1050.293,910.156],"ascent":728.027,"descent":-210.449,"capHeight":687.988,"font":"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bwBuACAAUwBhAG4AcwAAQXNjZW5kZXIgLSBMaWJlcmF0aW9uIFNhbnMAAEwAaQBiAGUAcgBhAHQAaQBvAG4AIABTAGEAbgBzAABMaWJlcmF0aW9uIFNhbnMAAFYAZQByAHMAaQBvAG4AIAAxAC4AMAA3AC4ANAAAVmVyc2lvbiAxLjA3LjQAAEwAaQBiAGUAcgBhAHQAaQBvAG4AUwBhAG4AcwAATGliZXJhdGlvblNhbnMAAEwAaQBiAGUAcgBhAHQAaQBvAG4AIABpAHMAIABhACAAdAByAGEAZABlAG0AYQByAGsAIABvAGYAIABSAGUAZAAgAEgAYQB0ACwAIABJAG4AYwAuACAAcgBlAGcAaQBzAHQAZQByAGUAZAAgAGkAbgAgAFUALgBTAC4AIABQAGEAdABlAG4AdAAgAGEAbgBkACAAVAByAGEAZABlAG0AYQByAGsAIABPAGYAZgBpAGMAZQAgAGEAbgBkACAAYwBlAHIAdABhAGkAbgAgAG8AdABoAGUAcgAgAGoAdQByAGkAcwBkAGkAYwB0AGkAbwBuAHMALgAATGliZXJhdGlvbiBpcyBhIHRyYWRlbWFyayBvZiBSZWQgSGF0LCBJbmMuIHJlZ2lzdGVyZWQgaW4gVS5TLiBQYXRlbnQgYW5kIFRyYWRlbWFyayBPZmZpY2UgYW5kIGNlcnRhaW4gb3RoZXIganVyaXNkaWN0aW9ucy4AAEEAcwBjAGUAbgBkAGUAcgAgAEMAbwByAHAAbwByAGEAdABpAG8AbgAAQXNjZW5kZXIgQ29ycG9yYXRpb24AAFMAdABlAHYAZQAgAE0AYQB0AHQAZQBzAG8AbgAAU3RldmUgTWF0dGVzb24AAGgAdAB0AHAAOgAvAC8AdwB3AHcALgBhAHMAYwBlAG4AZABlAHIAYwBvAHIAcAAuAGMAbwBtAC8AAGh0dHA6Ly93d3cuYXNjZW5kZXJjb3JwLmNvbS8AAGgAdAB0AHAAOgAvAC8AdwB3AHcALgBhAHMAYwBlAG4AZABlAHIAYwBvAHIAcAAuAGMAbwBtAC8AdAB5AHAAZQBkAGUAcwBpAGcAbgBlAHIAcwAuAGgAdABtAGwAAGh0dHA6Ly93d3cuYXNjZW5kZXJjb3JwLmNvbS90eXBlZGVzaWduZXJzLmh0bWwAAEwAaQBjAGUAbgBzAGUAZAAgAHUAbgBkAGUAcgAgAHQAaABlACAATABpAGIAZQByAGEAdABpAG8AbgAgAEYAbwBuAHQAcwAgAGwAaQBjAGUAbgBzAGUALAAgAHMAZQBlACAAaAB0AHQAcABzADoALwAvAGYAZQBkAG8AcgBhAHAAcgBvAGoAZQBjAHQALgBvAHIAZwAvAHcAaQBrAGkALwBMAGkAYwBlAG4AcwBpAG4AZwAvAEwAaQBiAGUAcgBhAHQAaQBvAG4ARgBvAG4AdABMAGkAYwBlAG4AcwBlAABMaWNlbnNlZCB1bmRlciB0aGUgTGliZXJhdGlvbiBGb250cyBsaWNlbnNlLCBzZWUgaHR0cHM6Ly9mZWRvcmFwcm9qZWN0Lm9yZy93aWtpL0xpY2Vuc2luZy9MaWJlcmF0aW9uRm9udExpY2Vuc2UAAGgAdAB0AHAAcwA6AC8ALwBmAGUAZABvAHIAYQBwAHIAbwBqAGUAYwB0AC4AbwByAGcALwB3AGkAawBpAC8ATABpAGMAZQBuAHMAaQBuAGcALwBMAGkAYgBlAHIAYQB0AGkAbwBuAEYAbwBuAHQATABpAGMAZQBuAHMAZQAAaHR0cHM6Ly9mZWRvcmFwcm9qZWN0Lm9yZy93aWtpL0xpY2Vuc2luZy9MaWJlcmF0aW9uRm9udExpY2Vuc2UAAAAAAwAAAAAAAP+9AJYAAAAAAAAAAAAAAAAAAAAAAAAAALEJQL4BBwABAB8BBwABAJ8BBECOAcD9Aa/9AQD9AQpP+wEg+wH1UCgf8kYoH/FGKh/wRisfX+9/7wIP70/vX++P76/vBQvl5B4f4+JGHw/iAUDiRhYf4eBGH8/g3+Dv4ANA4DM2RuBGGB/dPd9V3j0DVd8BA1XcA/8fD9Uf1QIP1R/VAkDKGBtGz8IBvcA8H8FQJh+8vigf/7kBULhwuIC4A7j/wED/uBIyRh+3P7dPt2+3f7eft6+3B3CyoLKwsgMPsgGQtQGwtQEPtQEID7M/s++zA4CwkLACsLDAsNCwAy+vP68CoK2wrQLArdCtAi+sP6wCn6sBwKrQqgJPqY+pAi+pb6m/qf+pBJybJB9QmwFvlgG/lgGWRh0flZQXH3+Uj5T/lAMwkUCRAoCRAXCPgI8CkI8BwI/QjwJPjF+Mb4wDhkb/H5+FAYSDMR90cz8fc1AmH29uPB9uRjUfGgEYVRkzGFUHMwNVBgP/H2BQJh9fUCYfXEYxH1taSB9aRjEfEzISVQUBA1UEMgNVbwMBDwM/AwLvUf9RAkBRNThGQFElKEbPQFRQAUlGIB9IRjUfR0Y1H69GAd9G70YCgEYBFjIVVREBD1UQMg9VAgEAVQEAAR8fDz8PXw9/DwQPDy8PTw9vD48P3w//Dwc/D38P7w8DbwABgBYBBQG4AZCxVFMrK0u4B/9SS7AHUFuwAYiwJVOwAYiwQFFasAaIsABVWltYsQEBjlmFjY0AQh1LsDJTWLBgHVlLsGRTWLBAHVlLsIBTWLAQHbEWAEJZdHN0dSsrKysrAXN0dSsrKwB0Kytzc3UrKysBKysrACsrKysrKwErKwArKwErcysAdHN0dXN0cysBK3R1AHMrc3QBc3N0AHN0dHN0cwFec3N0c3MAcytzcwErACsBKwBzK3R1KysrKwErK3QrK15zKwArXnN0ASsrKwArc3Nec3NzAXNzcxheAAAA"};
-
-function calendarAvailabilityPdfBytes(model) {
-  // Only the anonymous export DTO is accepted. No student objects enter this writer.
-  if (!model || model.days.length!==7 || model.days.some((day,index)=>
-    day.dayName!==["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"][index] ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(day.dateKey) || day.times.some(time=>!calendarAvailabilityStarts(index).includes(time))
-  )) throw new Error("Uygun saatler çıktısı doğrulanamadı.");
-  const font=CALENDAR_AVAILABILITY_PDF_FONT;
-  const encoder=new TextEncoder();
-  const encodeText=value=>Array.from(String(value)).map(character=>{
-    const index=font.characters.indexOf(character);
-    if (index<0) throw new Error("PDF karakteri desteklenmiyor.");
-    return index.toString(16).padStart(2,"0");
-  }).join("");
-  const width=(value,size)=>Array.from(String(value)).reduce((sum,character)=>{
-    const index=font.characters.indexOf(character);
-    if (index<0) throw new Error("PDF karakteri desteklenmiyor.");
-    return sum+font.widths[index]*size/1000;
-  },0);
-  const commands=[];
-  const text=(value,x,y,size=12,color="0.13 0.16 0.22")=>commands.push("BT /F1 "+size+" Tf "+color+" rg 1 0 0 1 "+x.toFixed(2)+" "+y.toFixed(2)+" Tm <"+encodeText(value)+"> Tj ET");
-  const centered=(value,x,y,size,color)=>text(value,x-width(value,size)/2,y,size,color);
-  const rect=(x,y,w,h,color)=>commands.push(color+" rg "+[x,y,w,h].map(n=>n.toFixed(2)).join(" ")+" re f");
-  const line=(x1,y1,x2,y2,color="0.88 0.90 0.93")=>commands.push(color+" RG 0.6 w "+x1+" "+y1+" m "+x2+" "+y2+" l S");
-  const pageWidth=841.89,pageHeight=595.28,margin=32,columnWidth=(pageWidth-margin*2)/7;
-  text("BODRUM SONSUZ SANAT",margin,548,13,"0.36 0.24 0.77");
-  text(model.weekLabel,margin,522,13);
-  text("Uygun Ders Saatleri",margin,487,27,"0.16 0.13 0.28");
-  text("45 dakikalık dersler",margin,464,11,"0.40 0.44 0.50");
-  const count=model.days.reduce((sum,day)=>sum+day.times.length,0);
-  text(count+" uygun saat",pageWidth-margin-width(count+" uygun saat",12),487,12,"0.10 0.43 0.29");
-  rect(margin,100,pageWidth-margin*2,344,"0.985 0.987 0.992");
-  rect(margin,390,pageWidth-margin*2,54,"0.95 0.93 0.99");
-  for (let index=0;index<=7;index++) line(margin+columnWidth*index,100,margin+columnWidth*index,444);
-  for (const y of [100,390,444]) line(margin,y,pageWidth-margin,y);
-  model.days.forEach((day,index)=>{
-    const x=margin+index*columnWidth,center=x+columnWidth/2;
-    centered(day.dayName,center,423,12,"0.30 0.23 0.47");
-    centered(day.dateLabel,center,404,10,"0.43 0.40 0.53");
-    day.times.forEach((time,timeIndex)=>{
-      const y=349-timeIndex*37;
-      rect(x+12,y-10,columnWidth-24,29,"0.88 0.96 0.92");
-      centered(time,center,y,14,"0.10 0.43 0.29");
-    });
-    if (!day.times.length) {
-      centered("Uygun",center,340,11,"0.50 0.53 0.58");
-      centered("saat yok",center,323,11,"0.50 0.53 0.58");
-    }
-  });
-  text("Hazırlanma: "+model.generatedLabel,margin,73,9,"0.40 0.44 0.50");
-  text("Yukarıda belirtilen ders saatleri şu an için uygundur. Yeni talepler doğrultusunda saatlerin uygunluğu değişebilir.",margin,52,9,"0.40 0.44 0.50");
-  text("Size uygun gün ve saati kesinleştirmek için lütfen bizimle iletişime geçin.",margin,38,9,"0.40 0.44 0.50");
-  const fontBytes=Uint8Array.from(atob(font.font),character=>character.charCodeAt(0));
-  const cmapEntries=Array.from(font.characters).map((character,index)=>"<"+index.toString(16).padStart(2,"0")+"> <"+character.codePointAt(0).toString(16).padStart(4,"0")+">");
-  const cmap=["/CIDInit /ProcSet findresource begin","12 dict begin","begincmap","/CIDSystemInfo << /Registry (Sonsuz) /Ordering (Unicode) /Supplement 0 >> def","/CMapName /SonsuzAvailabilityUnicode def","/CMapType 2 def","1 begincodespacerange","<00> <FF>","endcodespacerange"];
-  for(let index=0;index<cmapEntries.length;index+=100) {
-    const batch=cmapEntries.slice(index,index+100);
-    cmap.push(batch.length+" beginbfchar",...batch,"endbfchar");
-  }
-  cmap.push("endcmap","CMapName currentdict /CMap defineresource pop","end","end");
-  const stream=(data,extra="")=>concatPdfBytes([encoder.encode("<< /Length "+data.length+extra+" >>\nstream\n"),data,encoder.encode("\nendstream")]);
-  const objects=[
-    encoder.encode("<< /Type /Catalog /Pages 2 0 R >>"),
-    encoder.encode("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
-    encoder.encode("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "+pageWidth+" "+pageHeight+"] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
-    stream(encoder.encode(commands.join("\n"))),
-    encoder.encode("<< /Type /Font /Subtype /TrueType /BaseFont /SONSUZ+Availability /FirstChar 0 /LastChar "+(font.characters.length-1)+" /Widths ["+font.widths.join(" ")+"] /FontDescriptor 6 0 R /ToUnicode 8 0 R >>"),
-    encoder.encode("<< /Type /FontDescriptor /FontName /SONSUZ+Availability /Flags 4 /FontBBox ["+font.bbox.join(" ")+"] /ItalicAngle 0 /Ascent "+font.ascent+" /Descent "+font.descent+" /CapHeight "+font.capHeight+" /StemV 80 /FontFile2 7 0 R >>"),
-    stream(fontBytes," /Length1 "+fontBytes.length),
-    stream(encoder.encode(cmap.join("\n"))),
-  ];
-  const parts=[encoder.encode("%PDF-1.4\n")],offsets=[0];
-  let offset=parts[0].length;
-  objects.forEach((object,index)=>{
-    offsets.push(offset);
-    const part=concatPdfBytes([encoder.encode((index+1)+" 0 obj\n"),object,encoder.encode("\nendobj\n")]);
-    parts.push(part);offset+=part.length;
-  });
-  const xref=offset;
-  parts.push(encoder.encode("xref\n0 "+(objects.length+1)+"\n0000000000 65535 f \n"+offsets.slice(1).map(value=>String(value).padStart(10,"0")+" 00000 n \n").join("")+"trailer\n<< /Size "+(objects.length+1)+" /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF"));
-  return concatPdfBytes(parts);
-}
-
-function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry,onClose,recipients=[]}) {
-  const dialogRef=useRef(null);
-  const aliveRef=useRef(true);
-  const exportBusyRef=useRef(false);
-  const [feedback,setFeedback]=useState("");
-  const [copyBusy,setCopyBusy]=useState(false);
-  const [shareOpen,setShareOpen]=useState(false);
-  const [recipientMode,setRecipientMode]=useState("student");
-  const [recipientSearch,setRecipientSearch]=useState("");
-  const [recipientId,setRecipientId]=useState("");
-  const [manualPhone,setManualPhone]=useState("");
-  const [whatsAppOpened,setWhatsAppOpened]=useState(false);
-  const sendStartedRef=useRef(false);
-  const sharePanelRef=useRef(null);
-  const recipient=recipients.find(item=>item.id===recipientId);
-  const recipientPhone=calendarAvailabilityPhone(recipientMode==="student"?recipient?.phone:manualPhone);
-  const query=recipientSearch.trim().toLocaleLowerCase("tr-TR");
-  const matchingRecipients=recipients.filter(item=>[item.name,item.guardian,item.phone].some(value=>String(value).toLocaleLowerCase("tr-TR").includes(query)) || item.id===recipientId);
-  const blocked=invalid || ["loading","error"].includes(moveReadState);
-  const model=blocked?null:calendarAvailabilityModel(days,intervals);
-  const signature=JSON.stringify(model?.days || [moveReadState,invalid]);
-  const currentSignatureRef=useRef(signature);
-  currentSignatureRef.current=signature;
-  useEffect(()=>{ setFeedback(""); },[signature]);
-  useEffect(()=>{ sendStartedRef.current=false;setWhatsAppOpened(false); },[shareOpen,recipientMode,recipientId,manualPhone,recipient?.phone,signature]);
-  useEffect(()=>{ if(shareOpen)sharePanelRef.current?.querySelector("input,select")?.focus(); },[shareOpen,recipientMode]);
-  useEffect(()=>{
-    aliveRef.current=true;
-    const previous=document.activeElement,overflow=document.body.style.overflow;
-    document.body.style.overflow="hidden";
-    dialogRef.current?.querySelector("button")?.focus();
-    const onKey=event=>{
-      if (event.key==="Escape") { event.preventDefault();onClose();return; }
-      if (event.key!=="Tab") return;
-      const buttons=Array.from(dialogRef.current?.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)") || []);
-      if (!buttons.length) return;
-      const first=buttons[0],last=buttons.at(-1);
-      if(event.shiftKey && document.activeElement===first){event.preventDefault();last.focus();}
-      else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first.focus();}
-    };
-    document.addEventListener("keydown",onKey);
-    return ()=>{ aliveRef.current=false;document.body.style.overflow=overflow;document.removeEventListener("keydown",onKey);if(previous?.isConnected)previous.focus(); };
-  },[onClose]);
-  const copy=async()=>{
-    if (!model || exportBusyRef.current) return;
-    const startedSignature=signature;
-    exportBusyRef.current=true;setCopyBusy(true);setFeedback("");
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(calendarAvailabilityText(calendarAvailabilityModel(days,intervals)));
-      if (aliveRef.current && currentSignatureRef.current===startedSignature) setFeedback("Metin kopyalandı.");
-    } catch {
-      if (aliveRef.current && currentSignatureRef.current===startedSignature) setFeedback("Kopyalama izni alınamadı. PDF'yi indirip gönderebilirsiniz.");
-    } finally {
-      exportBusyRef.current=false;if(aliveRef.current)setCopyBusy(false);
-    }
-  };
-  const download=()=>{
-    if (!model || exportBusyRef.current) return;
-    let url="",link=null;
-    try {
-      const freshModel=calendarAvailabilityModel(days,intervals);
-      const bytes=calendarAvailabilityPdfBytes(freshModel);
-      url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
-      link=document.createElement("a");link.href=url;
-      link.download="Sonsuz-Sanat-Uygun-Saatler-"+freshModel.days[0].dateKey+".pdf";
-      document.body.appendChild(link);link.click();setFeedback("PDF indirme başlatıldı.");
-    } catch { setFeedback("PDF hazırlanamadı. Lütfen tekrar deneyin."); }
-    finally { link?.remove();if(url)window.setTimeout(()=>URL.revokeObjectURL(url),10000); }
-  };
-  const send=()=>{
-    if (!shareOpen || !model || !recipientPhone || exportBusyRef.current || sendStartedRef.current) return;
-    if (recipientMode==="student" && recipients.filter(item=>item.id===recipientId).length!==1) return;
-    const freshModel=calendarAvailabilityModel(days,intervals);
-    if (!freshModel) return;
-    sendStartedRef.current=true;setFeedback("");
-    let opened=null;
-    try {
-      // Detach the opener before navigating; a blocked popup is not a successful send.
-      opened=window.open("about:blank","_blank");
-      if (!opened) throw new Error("Popup blocked");
-      opened.opener=null;
-      opened.location.replace("https://wa.me/"+recipientPhone+"?text="+encodeURIComponent(calendarAvailabilityWhatsAppText(freshModel)));
-      setWhatsAppOpened(true);setFeedback("Mesaj WhatsApp'ta hazırlandı. Kontrol edip Gönder'e basın.");
-    } catch {
-      try { opened?.close(); } catch {}
-      sendStartedRef.current=false;setFeedback("WhatsApp açılamadı. Tarayıcının açılır pencere iznini kontrol edip tekrar deneyin.");
-    }
-  };
-  return <div className="crm-availability-backdrop" onClick={event=>{if(event.target===event.currentTarget)onClose();}}>
-    <style>{`
-      .crm-availability-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(24,18,44,.45);padding:24px;display:flex;align-items:center;justify-content:center;}
-      .crm-availability-dialog{width:100%;max-width:1060px;max-height:calc(100dvh - 48px);overflow:auto;background:#fff;border-radius:22px;padding:28px;box-shadow:0 24px 80px rgba(24,18,44,.25);color:#292438;}
-      .crm-availability-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;}
-      .crm-availability-brand{margin:0 0 7px;color:#6a46c9;font-size:11px;font-weight:800;letter-spacing:1.7px;}
-      .crm-availability-title{margin:0;font-size:27px;line-height:1.2;}
-      .crm-availability-subtitle{margin:0 0 9px;color:#716b7e;font-size:13px;line-height:1.6;}
-      .crm-availability-close{border:0;border-radius:10px;background:#f3f0f8;color:#514563;width:36px;height:36px;font-size:23px;cursor:pointer;flex-shrink:0;}
-      .crm-availability-summary{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:24px 0 13px;font-size:12px;color:#777182;}
-      .crm-availability-count{color:#217653;font-weight:700;}
-      .crm-availability-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border:1px solid #e8e3f0;border-radius:14px;overflow:hidden;}
-      .crm-availability-day{min-width:0;border-right:1px solid #e8e3f0;background:#fcfbfe;}
-      .crm-availability-day:last-child{border-right:0;}
-      .crm-availability-day-head{background:#f2edfb;padding:16px 5px;text-align:center;min-height:75px;box-sizing:border-box;}
-      .crm-availability-day-head h3{margin:0;font-size:12px;line-height:1.5;color:#4f3c72;}
-      .crm-availability-date{display:block;margin-top:4px;font-size:11px;color:#8b7b9e;}
-      .crm-availability-times{padding:14px 10px;min-height:290px;display:flex;flex-direction:column;gap:9px;box-sizing:border-box;}
-      .crm-availability-time{display:block;background:#e4f5ed;color:#217653;border:1px solid #cfebdd;border-radius:9px;padding:9px 2px;text-align:center;font-size:14px;line-height:1.2;font-weight:700;font-variant-numeric:tabular-nums;}
-      .crm-availability-empty{font-size:12px;line-height:1.6;text-align:center;color:#9690a0;margin:10px 0;}
-      .crm-availability-note{margin:17px 0 0;color:#817a8f;font-size:11px;line-height:1.7;}
-      .crm-availability-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;}
-      .crm-availability-actions button{padding:11px 18px;border:1px solid #ded6ec;border-radius:10px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:#fff;color:#60468c;}
-      .crm-availability-actions .crm-availability-pdf{background:#6440d7;border-color:#6440d7;color:#fff;}
-      .crm-availability-actions .crm-availability-send{background:#e4f5ed;border-color:#cfebdd;color:#166534;}
-      .crm-availability-actions button:disabled{opacity:.45;cursor:not-allowed;}
-      .crm-availability-share{margin-top:20px;padding:18px;border:1px solid #e8e3f0;border-radius:14px;background:#fcfbfe;}
-      .crm-availability-share h3{margin:0 0 12px;font-size:16px;}
-      .crm-availability-share-modes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;}
-      .crm-availability-share-modes button{border:1px solid #ded6ec;border-radius:9px;background:#fff;padding:9px 12px;color:#60468c;font:inherit;font-size:12px;cursor:pointer;}
-      .crm-availability-share-modes button[aria-pressed=true]{background:#ede7fa;border-color:#b9a5e8;}
-      .crm-availability-recipient-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-      .crm-availability-share label{display:block;min-width:0;font-size:12px;font-weight:700;color:#514563;}
-      .crm-availability-share input,.crm-availability-share select,.crm-availability-share textarea{display:block;box-sizing:border-box;width:100%;min-width:0;margin-top:7px;border:1px solid #ded6ec;border-radius:9px;padding:10px;background:#fff;color:#292438;font:inherit;font-size:13px;}
-      .crm-availability-share textarea{height:240px;resize:vertical;line-height:1.6;}
-      .crm-availability-recipient-info{font-size:12px;line-height:1.7;overflow-wrap:anywhere;color:#635477;}
-      .crm-availability-recipient-error{color:#9a3412;}
-      .crm-availability-share-note{margin:14px 0;font-size:12px;line-height:1.6;color:#716b7e;}
-      .crm-availability-feedback{min-height:18px;margin:12px 0 0;color:#635477;font-size:12px;text-align:right;}
-      .crm-availability-warning{margin-top:24px;padding:20px;background:#fff7ed;color:#9a3412;border-radius:12px;font-size:13px;line-height:1.7;}
-      .crm-availability-warning button{display:block;margin-top:12px;background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:9px 12px;color:inherit;font:inherit;cursor:pointer;}
-      @media(max-width:760px){
-        .crm-availability-backdrop{padding:10px;}
-        .crm-availability-dialog{padding:20px 15px;border-radius:16px;max-height:calc(100dvh - 20px);}
-        .crm-availability-title{font-size:23px;}
-        .crm-availability-grid{grid-template-columns:1fr;}
-        .crm-availability-day{border-right:0;border-bottom:1px solid #e8e3f0;}
-        .crm-availability-day:last-child{border-bottom:0;}
-        .crm-availability-day-head{min-height:0;text-align:left;padding:12px 14px;}
-        .crm-availability-day-head h3{font-size:13px;display:inline;}
-        .crm-availability-date{display:inline;margin-left:9px;}
-        .crm-availability-times{min-height:0;flex-direction:row;flex-wrap:wrap;padding:12px 14px;gap:8px;}
-        .crm-availability-time{min-width:62px;padding:9px 8px;font-size:13px;}
-        .crm-availability-empty{margin:0;}
-        .crm-availability-summary{align-items:flex-start;}
-        .crm-availability-actions button{flex:1;padding:11px 8px;font-size:12px;}
-        .crm-availability-recipient-fields{grid-template-columns:1fr;}
-        .crm-availability-share{padding:14px;}
-      }
-    `}</style>
-    <div ref={dialogRef} className="crm-availability-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-availability-title">
-      <div className="crm-availability-header"><div><p className="crm-availability-brand">BODRUM SONSUZ SANAT</p><p className="crm-availability-subtitle">{days[0].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})} - {days[6].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})}</p><h2 id="crm-availability-title" className="crm-availability-title">Uygun Ders Saatleri</h2></div><button className="crm-availability-close" onClick={onClose} aria-label="Uygun saatleri kapat">×</button></div>
-      {model ? <>
-        <div className="crm-availability-summary"><span>Her ders 45 dakika</span><span className="crm-availability-count">{model.days.reduce((sum,day)=>sum+day.times.length,0)} uygun saat</span></div>
-        <div className="crm-availability-grid">{model.days.map(day=><section className="crm-availability-day" key={day.dateKey} aria-label={day.dayName+" "+day.dateLabel}><div className="crm-availability-day-head"><h3>{day.dayName}</h3><span className="crm-availability-date">{day.dateLabel}</span></div><div className="crm-availability-times">{day.times.length?day.times.map(time=><span key={time} className="crm-availability-time">{time}</span>):<p className="crm-availability-empty">Uygun saat yok</p>}</div></section>)}</div>
-        <p className="crm-availability-note">Yukarıda belirtilen ders saatleri şu an için uygundur. Yeni talepler doğrultusunda saatlerin uygunluğu değişebilir. Size uygun gün ve saati kesinleştirmek için lütfen bizimle iletişime geçin.</p>
-      </> : <div className="crm-availability-warning" role="status">{invalid?"Takvimdeki bir dersin tarih, saat veya süresi doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":moveReadState==="error"?"Taşınan derslerin konumları doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":"Taşınan derslerin konumları kontrol ediliyor. Liste doğrulama tamamlanınca açılacak."}{moveReadState==="error"?<button onClick={onRetry}>Yalnız takvimi yeniden kontrol et</button>:null}</div>}
-      <div className="crm-availability-actions"><button onClick={copy} disabled={!model || copyBusy}>{copyBusy?"Kopyalanıyor…":"Metni Kopyala"}</button><button className="crm-availability-pdf" onClick={download} disabled={!model || copyBusy}>PDF İndir</button><button className="crm-availability-send" onClick={()=>{setShareOpen(value=>!value);setFeedback("");}} disabled={!model || copyBusy} aria-expanded={shareOpen}>Gönder</button></div>
-      {shareOpen && model ? <section ref={sharePanelRef} className="crm-availability-share" aria-label="WhatsApp gönderimi">
-        <h3>Uygun saatleri WhatsApp'ta paylaş</h3>
-        <div className="crm-availability-share-modes"><button aria-pressed={recipientMode==="student"} onClick={()=>{setRecipientMode("student");setManualPhone("");setFeedback("");}}>Kayıtlı öğrenci</button><button aria-pressed={recipientMode==="manual"} onClick={()=>{setRecipientMode("manual");setRecipientId("");setFeedback("");}}>Numara yaz</button></div>
-        {recipientMode==="student" ? <>
-          <div className="crm-availability-recipient-fields"><label>Öğrenci ara<input value={recipientSearch} onChange={event=>setRecipientSearch(event.target.value)} placeholder="Öğrenci veya veli adı" disabled={copyBusy} /></label><label>Öğrenci seç<select value={recipientId} onChange={event=>{setRecipientId(event.target.value);setFeedback("");}} disabled={copyBusy}><option value="">Öğrenci seçin</option>{matchingRecipients.map(item=><option key={item.id} value={item.id}>{item.name}{item.guardian?" — "+item.guardian:""}</option>)}</select></label></div>
-          {!recipients.length ? <p className="crm-availability-recipient-info">Seçili şubede mevcut öğrenci yok. Numara yaz seçeneğini kullanabilirsiniz.</p> : null}
-          {recipient ? <p className={"crm-availability-recipient-info"+(recipientPhone?"":" crm-availability-recipient-error")}>{recipient.name}{recipient.guardian?" · Veli: "+recipient.guardian:""}<br/>{recipientPhone?"WhatsApp numarası: +"+recipientPhone:"Kayıtlı telefon yok veya biçimi geçersiz. Numara yaz seçeneğini kullanabilirsiniz."}</p> : null}
-        </> : <><label>WhatsApp numarası<input type="tel" inputMode="tel" autoComplete="off" value={manualPhone} onChange={event=>{setManualPhone(event.target.value);setFeedback("");}} placeholder="05xx xxx xx xx" disabled={copyBusy} /></label><p className={"crm-availability-recipient-info"+(manualPhone && !recipientPhone?" crm-availability-recipient-error":"")}>{recipientPhone?"Alıcı: +"+recipientPhone:manualPhone?"Geçerli bir numara girin. Yurt dışı için +ülke kodunu ekleyin.":"Bu numara öğrenci kaydına kaydedilmez."}</p></>}
-        <p className="crm-availability-share-note">Yalnız aşağıdaki uygun saatler metni paylaşılır. WhatsApp açılır; son Gönder onayı sizdedir.</p>
-        <label>Mesaj önizlemesi<textarea readOnly value={calendarAvailabilityWhatsAppText(model)} /></label>
-        <div className="crm-availability-actions"><button className="crm-availability-send" onClick={send} disabled={!recipientPhone || copyBusy || whatsAppOpened}>{whatsAppOpened?"WhatsApp açıldı":"WhatsApp'ta Aç"}</button></div>
-      </section> : null}
-      <p className="crm-availability-feedback" role="status">{feedback}</p>
-    </div>
-  </div>;
-}
-
- 
 function studentAge(student) {
   if (!student?.dogum_tarihi) return null;
   const birth = new Date(student.dogum_tarihi+(/^\d{4}-\d{2}-\d{2}$/.test(student.dogum_tarihi)?"T12:00:00":""));
@@ -5518,7 +4466,7 @@ function studentAge(student) {
   return age >= 0 ? age : null;
 }
 
-function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentClick, onSingleLessonClick, onExtraLessonClick, calendarMoveReadScope=null }) {
+function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentClick, onSingleLessonClick, onExtraLessonClick }) {
   const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [teacherWeekOffset, setTeacherWeekOffset] = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
@@ -5582,7 +4530,7 @@ function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentCl
 
       <section style={{ marginBottom:20 }}>
         <p style={{ margin:"0 0 9px", fontSize:13, fontWeight:850, color:"#374151" }}>Haftalık ders takvimi</p>
-        <WeekCal students={students} singleLessons={singleLessons} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} onExtraLessonClick={onExtraLessonClick} teacherName={selectedTeacher.name} calendarMoveReadScope={calendarMoveReadScope} />
+        <WeekCal students={students} singleLessons={singleLessons} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} onExtraLessonClick={onExtraLessonClick} teacherName={selectedTeacher.name} />
       </section>
 
       <section style={{ ...CARD, padding:"16px 18px", marginBottom:16 }}>
@@ -5716,7 +4664,7 @@ function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStuden
     });
     (s.telafi_records || []).forEach(record => {
       const plannedAt = telafiPlannedAt(record);
-      if (isTodayPlannedTelafi(record)) {
+      if (isCurrentTelafi(record) && plannedAt && isToday(plannedAt)) {
         todayLessons.push({ kind:"telafi", student:s, record, time:timeFromISO(plannedAt) });
       }
     });
@@ -6944,16 +5892,6 @@ export default function App() {
   const [normalLessonMakeupBusyId, setNormalLessonMakeupBusyId] = useState("");
   const [normalLessonMakeupPlanIssue, setNormalLessonMakeupPlanIssue] = useState(null);
   const [normalLessonMakeupPlanIssueChecking, setNormalLessonMakeupPlanIssueChecking] = useState(false);
-  const [normalLessonMakeupCompletionIssue, setNormalLessonMakeupCompletionIssue] = useState(null);
-  const [normalLessonMakeupCompletionIssueChecking, setNormalLessonMakeupCompletionIssueChecking] = useState(false);
-  const [singleLessonMoveIssue, setSingleLessonMoveIssue] = useState(null);
-  const [singleLessonMoveChecking, setSingleLessonMoveChecking] = useState(false);
-  const singleLessonMoveIssueRef = useRef(null);
-  const singleLessonMoveWritingRef = useRef(false);
-  const singleLessonMoveCheckingRef = useRef(false);
-  const singleLessonMoveAutoCheckRef = useRef("");
-  const singleLessonMoveActorRef = useRef("");
-  singleLessonMoveActorRef.current = authSession?.user?.id || "";
   const [paymentSavingId, setPaymentSavingId] = useState("");
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
   const [connectionRevalidationRequired, setConnectionRevalidationRequired] = useState(false);
@@ -6982,10 +5920,6 @@ export default function App() {
   const normalLessonMakeupPlanWritingRef = useRef(false);
   const normalLessonMakeupPlanCheckingRef = useRef(false);
   const normalLessonMakeupPlanAutoCheckRef = useRef("");
-  const normalLessonMakeupCompletionIssueRef = useRef(null);
-  const normalLessonMakeupCompletionWritingRef = useRef(false);
-  const normalLessonMakeupCompletionCheckingRef = useRef(false);
-  const normalLessonMakeupCompletionAutoCheckRef = useRef("");
   const connectionAutoRetryRef = useRef(false);
   const protectedDataLoadGenerationRef = useRef(0);
   const accessContextLoadSequenceRef = useRef(0);
@@ -7075,8 +6009,6 @@ export default function App() {
   const pendingSingleResults = pendingSingleLessonResults(singleLessons,singleLessonResultClock);
   const overdueSinglePayments = overdueSingleLessonPayments(singleLessons,singleLessonResultClock);
   const [weekOffset, setWeekOffset] = useState(0);
-  const [showCalendarAvailability, setShowCalendarAvailability] = useState(false);
-  useEffect(()=>{ if (mainTab!=="takvim") setShowCalendarAvailability(false); },[mainTab]);
   const [toast, setToast] = useState(null);
   const [mesajSt, setMesajSt] = useState(null);
   const [mesajInitialKey, setMesajInitialKey] = useState("");
@@ -7107,7 +6039,6 @@ export default function App() {
       setSingleLessonSheet(null);
       setShowAdd(false);
       setShowBranchCreate(false);
-      setShowCalendarAvailability(false);
       setShowStaffInvite(false);
       setStaffAssignmentEditingId("");
       pendingSingleLessonCreateRef.current = null;
@@ -7123,7 +6054,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const warnWhilePaymentIsWriting = event => {
-      if (!singleLessonMoveWritingRef.current && !extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !normalLessonMakeupCompletionWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
+      if (!extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -7439,8 +6370,6 @@ export default function App() {
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
 
   const runBranchScopedWrite = async task => {
-    // Do not let a legacy full-row writer race an unresolved single move.
-    if (singleLessonMoveIssueRef.current || singleLessonMoveWritingRef.current || readSingleLessonMoveIssue(singleLessonMoveActorRef.current)) throw new Error("SINGLE_LESSON_MOVE_PENDING");
     branchScopedWriteCountRef.current += 1;
     try {
       return await task();
@@ -7509,7 +6438,6 @@ export default function App() {
       setÖdemeKaydetModal(null);
       setShowAdd(false);
       setLoadedSources(current=>({ ...current, students:false }));
-      setShowCalendarAvailability(false);
       setProtectedDataLoadIssues(current=>({ ...current, students:true }));
       console.error("Veri yükleme hatası:", error);
       pop("Veriler yüklenemedi. Bağlantı veya Supabase yetkisini kontrol et.", 6000);
@@ -7807,45 +6735,6 @@ export default function App() {
     return true;
   };
 
-  const persistNormalLessonMakeupCompletionIssue = issue => {
-    const actorUserId = String(issue?.actorUserId || authSession?.user?.id || "");
-    if (!actorUserId) return false;
-    const current = normalLessonMakeupCompletionIssueRef.current;
-    if (issue?.operationId && current?.operationId && current.operationId !== issue.operationId) return false;
-    const stored = issue ? {
-      operationId:String(issue.operationId || ""),
-      actorUserId,
-      branchId:String(issue.branchId || currentBranch?.id || ""),
-      studentId:String(issue.studentId || ""),
-      studentName:String(issue.studentName || "Öğrenci"),
-      makeupRecordId:String(issue.makeupRecordId || ""),
-      actionKind:issue.actionKind === "counted" ? "counted" : "attended",
-      expectedRecordVersion:Number(issue.expectedRecordVersion) || 0,
-      expectedOperationKind:issue.expectedOperationKind === "corrected" ? "corrected" : "completed",
-      doneAt:String(issue.doneAt || ""),
-      requestSignature:String(issue.requestSignature || ""),
-      label:String(issue.label || "Telafi tamamlama"),
-      state:String(issue.state || "unknown"),
-      createdAt:issue.createdAt || new Date().toISOString(),
-      ...(issue.notFoundSince ? { notFoundSince:issue.notFoundSince } : {}),
-    } : null;
-    if (!writeNormalLessonMakeupCompletionIssue(actorUserId,stored,current?.operationId || "")) return false;
-    normalLessonMakeupCompletionIssueRef.current = stored;
-    setNormalLessonMakeupCompletionIssue(stored);
-    return true;
-  };
-
-  const clearNormalLessonMakeupCompletionIssue = operationId => {
-    const current = normalLessonMakeupCompletionIssueRef.current;
-    if (operationId && current?.operationId !== operationId) return false;
-    const actorUserId = String(authSession?.user?.id || current?.actorUserId || "");
-    if (!actorUserId || !writeNormalLessonMakeupCompletionIssue(actorUserId,null,operationId || current?.operationId || "")) return false;
-    normalLessonMakeupCompletionIssueRef.current = null;
-    setNormalLessonMakeupCompletionIssue(null);
-    normalLessonMakeupCompletionAutoCheckRef.current = "";
-    return true;
-  };
-
   const setSingleLessonRecordBusy = (lessonId, busy) => {
     if (!lessonId) return;
     const next = { ...singleLessonBusyIdsRef.current };
@@ -7898,13 +6787,11 @@ export default function App() {
   };
 
   const pendingBranchIds = () => [...new Set([
-    singleLessonMoveIssueRef.current?.branchId,
     packagePaymentIssueRef.current?.branchId,
     extraLessonPaymentIssueRef.current?.branchId,
     normalLessonEvaluationIssueRef.current?.branchId,
     normalLessonMakeupIssueRef.current?.branchId,
     normalLessonMakeupPlanIssueRef.current?.branchId,
-    normalLessonMakeupCompletionIssueRef.current?.branchId,
     singleLessonIssueRef.current?.kind === "operation" ? singleLessonIssueRef.current?.branchId : "",
     ...failedOps.map(operation=>operation.branchId || ""),
   ].filter(Boolean))];
@@ -7923,12 +6810,10 @@ export default function App() {
     const requiredBranches = pendingBranchIds();
     const currentBranchHasUnresolvedWrite = !!currentBranch?.id && requiredBranches.includes(currentBranch.id);
     const activeWrite = packagePaymentWritingRef.current
-      || singleLessonMoveWritingRef.current
       || extraLessonPaymentWritingRef.current
       || normalLessonEvaluationWritingRef.current
       || normalLessonMakeupWritingRef.current
       || normalLessonMakeupPlanWritingRef.current
-      || normalLessonMakeupCompletionWritingRef.current
       || singleLessonSavingRef.current
       || Object.keys(singleLessonBusyIdsRef.current).length > 0
       || branchScopedWriteCountRef.current > 0
@@ -7977,7 +6862,6 @@ export default function App() {
     setSingleLessonSheet(null);
     setShowAdd(false);
     setShowSecurityMenu(false);
-    setShowCalendarAvailability(false);
     setShowBranchMenu(false);
     setShowBranchCreate(false);
     setShowStaffInvite(false);
@@ -9225,7 +8109,6 @@ export default function App() {
     normalLessonEvaluationAutoCheckRef.current = "";
     normalLessonMakeupAutoCheckRef.current = "";
     normalLessonMakeupPlanAutoCheckRef.current = "";
-    normalLessonMakeupCompletionAutoCheckRef.current = "";
     const savedNormalLessonEvaluationIssue = actorUserId ? readNormalLessonEvaluationIssue(actorUserId) : null;
     normalLessonEvaluationIssueRef.current = savedNormalLessonEvaluationIssue;
     setNormalLessonEvaluationIssue(savedNormalLessonEvaluationIssue);
@@ -9235,9 +8118,6 @@ export default function App() {
     const savedNormalLessonMakeupPlanIssue = actorUserId ? readNormalLessonMakeupPlanIssue(actorUserId) : null;
     normalLessonMakeupPlanIssueRef.current = savedNormalLessonMakeupPlanIssue;
     setNormalLessonMakeupPlanIssue(savedNormalLessonMakeupPlanIssue);
-    const savedNormalLessonMakeupCompletionIssue = actorUserId ? readNormalLessonMakeupCompletionIssue(actorUserId) : null;
-    normalLessonMakeupCompletionIssueRef.current = savedNormalLessonMakeupCompletionIssue;
-    setNormalLessonMakeupCompletionIssue(savedNormalLessonMakeupCompletionIssue);
     setStaffInvitationIssue(actorUserId ? readStaffIssue(STAFF_INVITATION_ISSUE_KEY,actorUserId) : null);
     setStaffActivationIssue(actorUserId ? readStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,actorUserId) : null);
     setStaffAssignmentIssue(actorUserId ? readStaffIssue(STAFF_ASSIGNMENT_ISSUE_KEY,actorUserId) : null);
@@ -10118,10 +8998,6 @@ export default function App() {
       pop("Önce bekleyen telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
       return false;
     }
-    if (normalLessonMakeupCompletionWritingRef.current || normalLessonMakeupCompletionIssueRef.current) {
-      pop("Önce bekleyen telafi tamamlama sonucunu üstteki uyarıdan kesinleştirin.",9000);
-      return false;
-    }
     const intent = normalLessonEvaluationIntent(sourceStudent,lid,detail,actionOptions.correctionReason);
     if (!intent.lesson || !intent.evaluation.lessonFocus) {
       pop("Ders değerlendirme bilgileri eksik; kayıt gönderilmedi.",7000);
@@ -10333,10 +9209,6 @@ export default function App() {
       pop("Önce bekleyen telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
       return false;
     }
-    if (normalLessonMakeupCompletionWritingRef.current || normalLessonMakeupCompletionIssueRef.current) {
-      pop("Önce bekleyen telafi tamamlama sonucunu üstteki uyarıdan kesinleştirin.",9000);
-      return false;
-    }
     const intent = normalLessonMakeupIntent(sourceStudent,lid,actionKind,note,actionOptions);
     if (!intent.lesson) {
       pop("Ders kaydı bulunamadı; telafi hakkı gönderilmedi.",7000);
@@ -10490,7 +9362,7 @@ export default function App() {
       if (!exactEvidence) {
         persistNormalLessonMakeupPlanIssue({ ...issue, state:"conflict" });
         if (options.notify !== false) pop("Telafi planı kanıtı beklenen öğrenci, telafi hakkı veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.",9000);
-        return { ok:false, applied:false, conflict:true };
+        return { ok:false, applied:true, conflict:true };
       }
       const studentResult = await timedSingleLessonRequest(() => supabase
         .from("students")
@@ -10561,10 +9433,6 @@ export default function App() {
     }
     if (normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current) {
       pop("Önce devam eden telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
-      return false;
-    }
-    if (normalLessonMakeupCompletionWritingRef.current || normalLessonMakeupCompletionIssueRef.current) {
-      pop("Önce bekleyen telafi tamamlama sonucunu üstteki uyarıdan kesinleştirin.",9000);
       return false;
     }
     const intent = normalLessonMakeupPlanIntent(sourceStudent,tid,payload);
@@ -10652,291 +9520,18 @@ export default function App() {
       if (checked.applied && checked.student) {
         pop("Telafi planı Supabase'de doğrulandı ve ekran yenilendi.",7000);
         if (checked.currentMatches && checked.record) setTelafiPlanMessagePrompt({ student:checked.student, record:checked.record });
-      } else if (!checked.applied && !checked.conflict) pop(normalLessonMakeupPlanErrorText(result.error),9000);
-      return checked.applied === true && checked.conflict !== true;
+      } else if (!checked.applied) pop(normalLessonMakeupPlanErrorText(result.error),9000);
+      return checked.applied === true;
     } catch (error) {
       persistNormalLessonMakeupPlanIssue({ ...issue, state:"unknown" });
       const checked = await checkNormalLessonMakeupPlanOperation({ ...issue, state:"unknown" },{ notify:false });
       if (checked.applied && checked.student) {
         pop("Telafi planı Supabase'de doğrulandı ve ekran yenilendi.",7000);
         if (checked.currentMatches && checked.record) setTelafiPlanMessagePrompt({ student:checked.student, record:checked.record });
-      } else if (!checked.applied && !checked.conflict) pop(normalLessonMakeupPlanErrorText(error),9000);
-      return checked.applied === true && checked.conflict !== true;
+      } else if (!checked.applied) pop(normalLessonMakeupPlanErrorText(error),9000);
+      return checked.applied === true;
     } finally {
       normalLessonMakeupPlanWritingRef.current = false;
-    }
-  };
-
-  const checkNormalLessonMakeupCompletionOperation = async (issue=normalLessonMakeupCompletionIssueRef.current, options={}) => {
-    if (!issue?.operationId || normalLessonMakeupCompletionCheckingRef.current) return { ok:false };
-    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return { ok:false, foreignUser:true };
-    if (!browserOnline) {
-      if (options.notify !== false) pop("İnternet bağlantısı olmadan telafi sonucu kontrol edilemez. Uyarı ekranda kalacak.",8000);
-      return { ok:false, offline:true };
-    }
-    normalLessonMakeupCompletionCheckingRef.current = true;
-    setNormalLessonMakeupCompletionIssueChecking(true);
-    try {
-      const result = await timedSingleLessonRequest(() => supabase
-        .from("normal_lesson_makeup_completion_operations")
-        .select("operation_id,student_id,branch_id,makeup_record_id,operation_kind,action_kind,expected_record_version,resulting_record_version,request_payload,target_before,target_after,homework_source_kind,homework_source_id,homework_before,homework_after,actor_user_id,created_at")
-        .eq("operation_id",issue.operationId)
-        .maybeSingle());
-      if (result.error) {
-        persistNormalLessonMakeupCompletionIssue({ ...issue, state:"unknown" });
-        if (options.notify !== false) pop("Telafi sonucu henüz doğrulanamadı. Uyarı ekranda kalacak; işlemi tekrar göndermeyin.",9000);
-        return { ok:false, error:result.error };
-      }
-      if (!result.data) {
-        const createdAtMs = new Date(issue.createdAt || 0).getTime();
-        const waitedLongEnough = Number.isFinite(createdAtMs) && Date.now() - createdAtMs >= NORMAL_LESSON_MAKEUP_COMPLETION_ABSENCE_SETTLE_MS;
-        if (options.knownRejected !== true && !waitedLongEnough) {
-          persistNormalLessonMakeupCompletionIssue({ ...issue, state:"unknown", notFoundSince:issue.notFoundSince || new Date().toISOString() });
-          if (options.notify !== false) pop("Telafi tamamlama kanıtı henüz görünmüyor. Biraz sonra yeniden kontrol edin; işlemi tekrar göndermeyin.",9000);
-          return { ok:false, applied:false, uncertain:true };
-        }
-        if (currentBranch?.id === issue.branchId) await loadStudents(undefined,issue.branchId);
-        persistNormalLessonMakeupCompletionIssue({ ...issue, state:"not_applied" });
-        if (options.notify !== false) pop("Telafi tamamlama işlemi Supabase'de bulunamadı; kayıt oluşmadı.",7000);
-        return { ok:true, applied:false };
-      }
-      const row = result.data;
-      const targetAfter = row.target_after;
-      const requestEvaluation = row.request_payload?.evaluation || {};
-      const expectedHomeworkSourceKind = requestEvaluation.previousHomeworkSource || null;
-      const expectedHomeworkSourceId = requestEvaluation.previousHomeworkSourceId || null;
-      const evidenceIntent = {
-        record:row.target_before,
-        actionKind:row.action_kind,
-        doneAt:String(row.request_payload?.doneAt || ""),
-        doneNote:String(row.request_payload?.doneNote || ""),
-        evaluation:requestEvaluation,
-        expectedEvaluatedHomework:String(row.homework_before?.homework || ""),
-      };
-      const exactHomeworkEvidence = expectedHomeworkSourceKind
-        ? row.homework_source_kind === expectedHomeworkSourceKind
-          && row.homework_source_id === expectedHomeworkSourceId
-          && String(row.homework_before?.id || "") === expectedHomeworkSourceId
-          && String(row.homework_after?.id || "") === expectedHomeworkSourceId
-          && String(row.homework_after?.homework || "") === String(row.homework_before?.homework || "")
-          && String(row.homework_after?.homeworkStatus || "") === String(requestEvaluation.homeworkStatus || "")
-          && String(row.homework_after?.homeworkCheckNote || "") === ""
-          && !!row.homework_after?.homeworkCheckedAt
-          && String(row.homework_after?.homeworkCheckedInRef || "") === homeworkCheckRef("telafi",issue.makeupRecordId)
-        : row.homework_source_kind == null && row.homework_source_id == null && row.homework_before == null && row.homework_after == null;
-      const exactEvidence = row.operation_id === issue.operationId
-        && row.student_id === issue.studentId
-        && row.branch_id === issue.branchId
-        && row.makeup_record_id === issue.makeupRecordId
-        && row.operation_kind === issue.expectedOperationKind
-        && row.action_kind === issue.actionKind
-        && Number(row.expected_record_version) === Number(issue.expectedRecordVersion)
-        && Number(row.resulting_record_version) === Number(row.expected_record_version) + 1
-        && row.actor_user_id === issue.actorUserId
-        && evidenceIntent.doneAt === issue.doneAt
-        && normalLessonMakeupCompletionTargetMatches(targetAfter,evidenceIntent)
-        && exactHomeworkEvidence
-        && normalLessonMakeupCompletionIntentSignature(row.request_payload) === issue.requestSignature;
-      if (!exactEvidence) {
-        persistNormalLessonMakeupCompletionIssue({ ...issue, state:"conflict" });
-        if (options.notify !== false) pop("Telafi tamamlama kanıtı beklenen öğrenci, telafi hakkı veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.",9000);
-        return { ok:false, applied:false, conflict:true };
-      }
-      const studentResult = await timedSingleLessonRequest(() => supabase
-        .from("students")
-        .select("*")
-        .eq("id",issue.studentId)
-        .eq("branch_id",issue.branchId)
-        .single());
-      if (studentResult.error || !studentResult.data?.id) {
-        persistNormalLessonMakeupCompletionIssue({ ...issue, state:"applied_pending_refresh" });
-        if (options.notify !== false) pop("Telafi sonucu Supabase'e kaydedildi; güncel öğrenci kaydı henüz yüklenemedi. İşlemi tekrarlamayın.",9000);
-        return { ok:false, applied:true, refreshFailed:true };
-      }
-      const savedStudent = studentResult.data;
-      const savedVersion = Number(savedStudent.record_version);
-      const resultVersion = Number(row.resulting_record_version);
-      const currentRecord = (savedStudent.telafi_records || []).find(record=>String(record?.id || "") === issue.makeupRecordId) || null;
-      const currentMatches = !!currentRecord && JSON.stringify(canonicalJson(currentRecord)) === JSON.stringify(canonicalJson(targetAfter));
-      const authoritative = savedStudent.branch_id === issue.branchId
-        && savedVersion >= resultVersion
-        && (savedVersion > resultVersion || (savedStudent.last_write_id === issue.operationId && currentMatches));
-      if (!authoritative) {
-        persistNormalLessonMakeupCompletionIssue({ ...issue, state:"conflict" });
-        if (options.notify !== false) pop("Telafi sonucu bulundu fakat öğrenci kaydının güncel sürümü doğrulanamadı. İşlemi yeniden göndermeyin.",9000);
-        return { ok:false, applied:true, conflict:true };
-      }
-      if (currentBranch?.id !== issue.branchId) {
-        persistNormalLessonMakeupCompletionIssue({ ...issue, state:"applied_pending_refresh" });
-        if (options.notify !== false) pop("Telafi sonucu kaydedildi. Güncel kaydı görmek için işlemin ait olduğu şubeyi açın.",9000);
-        return { ok:false, applied:true, wrongBranch:true };
-      }
-      setStudents(previous=>previous.map(student=>student.id === savedStudent.id ? savedStudent : student));
-      setDetailSt(previous=>previous?.id === savedStudent.id ? savedStudent : previous);
-      const cleared = clearNormalLessonMakeupCompletionIssue(issue.operationId);
-      if (!cleared) {
-        normalLessonMakeupCompletionIssueRef.current = { ...issue, state:"applied_pending_refresh" };
-        setNormalLessonMakeupCompletionIssue({ ...issue, state:"applied_pending_refresh" });
-      }
-      if (options.notify !== false) pop("Telafi sonucu Supabase'de doğrulandı ve ekran yenilendi.",7000);
-      return { ok:true, applied:true, row, student:savedStudent, record:currentRecord, currentMatches };
-    } finally {
-      normalLessonMakeupCompletionCheckingRef.current = false;
-      setNormalLessonMakeupCompletionIssueChecking(false);
-    }
-  };
-
-  const handleNormalLessonMakeupCompletion = async (sid, tid, payload={}) => {
-    const sourceStudent = students.find(student=>student.id === sid);
-    const branchId = currentBranch?.id;
-    if (!requireProtectedSources(["students"],"Telafi tamamlama")) return false;
-    if (!browserOnline) {
-      pop("İnternet bağlantısı olmadan telafi sonucu kaydedilemez.",7000);
-      return false;
-    }
-    if (!sourceStudent?.id || !tid || !branchId || sourceStudent.branch_id !== branchId) {
-      pop("Öğrenci, telafi hakkı veya aktif şube güvenli biçimde doğrulanamadı; kayıt gönderilmedi.",8000);
-      return false;
-    }
-    if (normalLessonEvaluationWritingRef.current || normalLessonEvaluationIssueRef.current) {
-      pop("Önce bekleyen ders değerlendirmesi sonucunu üstteki uyarıdan kesinleştirin.",9000);
-      return false;
-    }
-    if (normalLessonMakeupWritingRef.current || normalLessonMakeupIssueRef.current) {
-      pop("Önce bekleyen telafi hakkı sonucunu üstteki uyarıdan kesinleştirin.",9000);
-      return false;
-    }
-    if (normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current) {
-      pop("Önce bekleyen telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
-      return false;
-    }
-    if (normalLessonMakeupCompletionWritingRef.current || normalLessonMakeupCompletionIssueRef.current) {
-      pop("Önce devam eden telafi tamamlama sonucunu üstteki uyarıdan kesinleştirin.",9000);
-      return false;
-    }
-    const requestedAction = payload.action || "attended";
-    if (!["attended","counted"].includes(requestedAction)) {
-      pop("Telafi sonucu türü doğrulanamadı; kayıt gönderilmedi.",7000);
-      return false;
-    }
-    const intent = normalLessonMakeupCompletionIntent(sourceStudent,tid,payload,payload.correctionReason);
-    if (intent.matchingRecordCount !== 1 || !intent.record) {
-      pop("Telafi hakkı güvenli biçimde eşleştirilemedi; sonuç gönderilmedi.",7000);
-      return false;
-    }
-    if (!telafiPlannedAt(intent.record) || intent.doneAt !== telafiPlannedAt(intent.record)) {
-      pop("Telafi planının kesin tarih ve saati doğrulanamadı; sonuç gönderilmedi.",7000);
-      return false;
-    }
-    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(intent.doneAt)) {
-      pop("Telafi planının tarih ve saat biçimi doğrulanamadı; sonuç gönderilmedi.",7000);
-      return false;
-    }
-    if (intent.expectedOperationKind === "corrected" && (intent.actionKind !== "attended" || String(intent.record.doneStatus || intent.record.done_status || "") !== "attended")) {
-      pop("Bu tamamlanmış telafi sonucu bu işlemle değiştirilemez.",7000);
-      return false;
-    }
-    if (intent.expectedOperationKind === "corrected" && !intent.correctionReason) {
-      pop("Daha önce tamamlanmış telafi verilerini değiştirmek için düzeltme nedeni zorunludur.",7000);
-      return false;
-    }
-    if (intent.expectedOperationKind === "completed" && intent.correctionReason) {
-      pop("Yeni telafi sonucu için düzeltme nedeni gönderilemez.",7000);
-      return false;
-    }
-    if (intent.actionKind === "attended") {
-      const lessonDuration = Number(intent.record.plannedDurationMinutes || intent.record.planned_duration_minutes || sourceStudent.lesson_duration || 45);
-      const sourcePairValid = (!!intent.evaluation.previousHomeworkSource) === (!!intent.evaluation.previousHomeworkSourceId);
-      if (!intent.evaluation.lessonFocus || !sourcePairValid
-        || (intent.evaluation.previousHomeworkSource && !["schedule","telafi"].includes(intent.evaluation.previousHomeworkSource))
-        || !Number.isInteger(intent.evaluation.activeMinutes) || intent.evaluation.activeMinutes < 0 || intent.evaluation.activeMinutes > lessonDuration
-        || !Number.isInteger(intent.evaluation.taskFocusMinutes) || intent.evaluation.taskFocusMinutes < 0 || intent.evaluation.taskFocusMinutes > lessonDuration
-        || !Number.isInteger(intent.evaluation.redirectionCount) || intent.evaluation.redirectionCount < 0
-        || (intent.evaluation.previousHomeworkSource && !["done","partial","not_done"].includes(intent.evaluation.homeworkStatus))) {
-        pop("Telafi değerlendirme bilgileri doğrulanamadı; kayıt gönderilmedi.",7000);
-        return false;
-      }
-    }
-    const operationId = uid();
-    const issue = {
-      operationId,
-      actorUserId:authSession?.user?.id || "",
-      branchId,
-      studentId:sid,
-      studentName:sourceStudent.name || "Öğrenci",
-      makeupRecordId:tid,
-      actionKind:intent.actionKind,
-      expectedRecordVersion:intent.expectedRecordVersion,
-      expectedOperationKind:intent.expectedOperationKind,
-      doneAt:intent.doneAt,
-      requestSignature:normalLessonMakeupCompletionIntentSignature(intent.requestPayload),
-      label:(sourceStudent.name || "Öğrenci")+" · "+fmtDate(intent.doneAt)+" "+timeFromISO(intent.doneAt),
-      state:"writing",
-      createdAt:new Date().toISOString(),
-    };
-    if (!persistNormalLessonMakeupCompletionIssue(issue)) {
-      pop("Telafi tamamlama işlem güvenliği tarayıcıda hazırlanamadı; kayıt gönderilmedi.",9000);
-      return false;
-    }
-    normalLessonMakeupCompletionWritingRef.current = true;
-    try {
-      const result = await runBranchScopedWrite(() => timedSingleLessonRequest(() => supabase.rpc("complete_normal_lesson_makeup",{
-        p_student_id:sid,
-        p_makeup_record_id:tid,
-        p_expected_record_version:intent.expectedRecordVersion,
-        p_action_kind:intent.actionKind,
-        p_done_at:intent.doneAt,
-        p_done_note:intent.doneNote,
-        p_evaluation:intent.evaluation,
-        p_correction_reason:intent.correctionReason,
-        p_operation_id:operationId,
-      }).single()));
-      if (!result.error && result.data?.operation_state === "applied") {
-        const savedStudent = result.data.student_record;
-        const completedRecord = (savedStudent?.telafi_records || []).find(record=>String(record?.id || "") === tid);
-        const exactResult = result.data.operation_kind === intent.expectedOperationKind
-          && result.data.action_kind === intent.actionKind
-          && savedStudent?.id === sid
-          && savedStudent?.branch_id === branchId
-          && Number(savedStudent?.record_version) === intent.expectedRecordVersion + 1
-          && savedStudent?.last_write_id === operationId
-          && normalLessonMakeupCompletionTargetMatches(completedRecord,intent)
-          && normalLessonMakeupCompletionHomeworkMatches(savedStudent,intent);
-        if (exactResult) {
-          setStudents(previous=>previous.map(student=>student.id === savedStudent.id ? savedStudent : student));
-          setDetailSt(previous=>previous?.id === savedStudent.id ? savedStudent : previous);
-          const cleared = clearNormalLessonMakeupCompletionIssue(operationId);
-          if (!cleared) {
-            normalLessonMakeupCompletionIssueRef.current = { ...issue, state:"applied_pending_refresh" };
-            setNormalLessonMakeupCompletionIssue({ ...issue, state:"applied_pending_refresh" });
-          }
-          pop(intent.expectedOperationKind === "corrected" ? "Telafi verileri düzeltildi" : "Telafi yapıldı");
-          if (intent.actionKind === "attended" && storedLessonScore(completedRecord) !== null) setLessonEvaluationPrompt({ student:savedStudent, record:completedRecord, type:"telafi" });
-          return true;
-        }
-      }
-      persistNormalLessonMakeupCompletionIssue({ ...issue, state:"unknown" });
-      if (normalLessonMakeupCompletionKnownRejection(result.error)) {
-        await checkNormalLessonMakeupCompletionOperation({ ...issue, state:"unknown" },{ notify:false, knownRejected:true });
-        pop(normalLessonMakeupCompletionErrorText(result.error),9000);
-        return false;
-      }
-      const checked = await checkNormalLessonMakeupCompletionOperation({ ...issue, state:"unknown" },{ notify:false });
-      if (checked.applied && checked.student) {
-        pop("Telafi sonucu Supabase'de doğrulandı ve ekran yenilendi.",7000);
-        if (intent.actionKind === "attended" && checked.record && storedLessonScore(checked.record) !== null) setLessonEvaluationPrompt({ student:checked.student, record:checked.record, type:"telafi" });
-      } else if (!checked.applied && !checked.conflict) pop(normalLessonMakeupCompletionErrorText(result.error),9000);
-      return checked.applied === true && checked.conflict !== true;
-    } catch (error) {
-      persistNormalLessonMakeupCompletionIssue({ ...issue, state:"unknown" });
-      const checked = await checkNormalLessonMakeupCompletionOperation({ ...issue, state:"unknown" },{ notify:false });
-      if (checked.applied && checked.student) {
-        pop("Telafi sonucu Supabase'de doğrulandı ve ekran yenilendi.",7000);
-        if (intent.actionKind === "attended" && checked.record && storedLessonScore(checked.record) !== null) setLessonEvaluationPrompt({ student:checked.student, record:checked.record, type:"telafi" });
-      } else if (!checked.applied && !checked.conflict) pop(normalLessonMakeupCompletionErrorText(error),9000);
-      return checked.applied === true && checked.conflict !== true;
-    } finally {
-      normalLessonMakeupCompletionWritingRef.current = false;
     }
   };
 
@@ -10953,10 +9548,6 @@ export default function App() {
     }
     if (normalLessonMakeupPlanIssueRef.current) {
       pop("Önce bekleyen telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
-      return;
-    }
-    if (normalLessonMakeupCompletionIssueRef.current) {
-      pop("Önce bekleyen telafi tamamlama sonucunu üstteki uyarıdan kesinleştirin.",9000);
       return;
     }
     const sourceStudent = students.find(student=>student.id===sid);
@@ -11029,17 +9620,6 @@ export default function App() {
     void checkNormalLessonMakeupPlanOperation(issue,{ notify:false });
   },[giris,browserOnline,accessContext,currentBranch?.id,normalLessonMakeupPlanIssue?.operationId,normalLessonMakeupPlanIssue?.state,authSession?.user?.id]);
 
-  useEffect(() => {
-    const issue = normalLessonMakeupCompletionIssue;
-    if (!giris || !browserOnline || !accessContext || !currentBranch?.id || !issue?.operationId) return;
-    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return;
-    if (issue.branchId !== currentBranch.id || ["not_applied","conflict"].includes(issue.state)) return;
-    if (normalLessonMakeupCompletionWritingRef.current || normalLessonMakeupCompletionCheckingRef.current) return;
-    if (normalLessonMakeupCompletionAutoCheckRef.current === issue.operationId) return;
-    normalLessonMakeupCompletionAutoCheckRef.current = issue.operationId;
-    void checkNormalLessonMakeupCompletionOperation(issue,{ notify:false });
-  },[giris,browserOnline,accessContext,currentBranch?.id,normalLessonMakeupCompletionIssue?.operationId,normalLessonMakeupCompletionIssue?.state,authSession?.user?.id]);
-
   const handleToggleFreeze = async (sid, frozen, resumeDate=null) => {
     const resumeStart = resumeDate ? new Date(resumeDate+"T12:00:00") : null;
     if (!frozen && resumeDate && (!/^\d{4}-\d{2}-\d{2}$/.test(resumeDate) || isNaN(resumeStart.getTime()) || midday(resumeStart) < midday())) {
@@ -11080,101 +9660,74 @@ export default function App() {
   const handleTelafiDone = async (sid, tid, payload = {}) => {
     const action = payload.action || "attended";
     if (action === "plan") return handleNormalLessonMakeupPlan(sid,tid,payload);
-    return handleNormalLessonMakeupCompletion(sid,tid,payload);
-  };
-
-  const persistSingleLessonMoveIssue = (issue, creating=false) => {
-    if (singleLessonMoveActorRef.current === issue.actorUserId && singleLessonMoveIssueRef.current?.operationId
-      && singleLessonMoveIssueRef.current.operationId !== issue.operationId) return false;
-    const saved = writeSingleLessonMoveIssue(issue.actorUserId,issue,creating ? "" : issue.operationId);
-    if (!saved && creating) return false;
-    if (singleLessonMoveActorRef.current === issue.actorUserId) {
-      if (!saved) {
-        try {
-          const newer = readSingleLessonMoveIssue(issue.actorUserId);
-          if (newer && newer.operationId !== issue.operationId) {
-            singleLessonMoveIssueRef.current = newer;
-            setSingleLessonMoveIssue(newer);
-            return false;
-          }
-        } catch { /* Keep unresolved evidence visible if storage is unavailable. */ }
-      }
-      singleLessonMoveIssueRef.current = issue;
-      setSingleLessonMoveIssue(issue);
+    if (normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current) {
+      pop("Önce bekleyen telafi planı sonucunu üstteki uyarıdan kesinleştirin.",9000);
+      return false;
     }
-    return saved;
-  };
-
-  const clearSingleLessonMoveIssue = issue => {
-    if (!issue || singleLessonMoveWritingRef.current || singleLessonMoveActorRef.current !== issue.actorUserId) return false;
-    try {
-      const stored = readSingleLessonMoveIssue(issue.actorUserId);
-      if (stored && !writeSingleLessonMoveIssue(issue.actorUserId,null,issue.operationId)) return false;
-    } catch { return false; }
-    singleLessonMoveIssueRef.current = null;
-    setSingleLessonMoveIssue(null);
-    singleLessonMoveAutoCheckRef.current = "";
+    const updated = students.map(s => {
+      if (s.id !== sid) return s;
+      const checkRef = homeworkCheckRef("telafi", tid);
+      const checkedAt = new Date().toISOString();
+      const schedule = (s.schedule || []).map(lesson => action === "attended" && payload.previousHomeworkSource === "schedule" && lesson.id === payload.previousHomeworkSourceId ? {
+        ...lesson,
+        homeworkStatus:payload.homeworkStatus,
+        homeworkCheckNote:"",
+        homeworkCheckedAt:checkedAt,
+        homeworkCheckedInRef:checkRef,
+      } : lesson);
+      const telafiRecords = (s.telafi_records || []).map(r => {
+        if (action === "attended" && payload.previousHomeworkSource === "telafi" && r.id === payload.previousHomeworkSourceId) {
+          return {
+            ...r,
+            homeworkStatus:payload.homeworkStatus,
+            homeworkCheckNote:"",
+            homeworkCheckedAt:checkedAt,
+            homeworkCheckedInRef:checkRef,
+          };
+        }
+        if (r.id !== tid) return r;
+        if (action === "counted") {
+          return {
+            ...r,
+            done:true,
+            doneStatus:"counted",
+            doneAt:payload.doneAt || telafiPlannedAt(r) || new Date().toISOString(),
+            doneNote:payload.doneNote || "",
+          };
+        }
+        const homeworkText = (payload.homework || "").trim();
+        const homeworkChanged = (r.homework || "") !== homeworkText;
+        return {
+          ...r,
+          done:true,
+          doneStatus:"attended",
+          doneAt:payload.doneAt || telafiPlannedAt(r) || new Date().toISOString(),
+          doneNote:payload.doneNote || "",
+          activeMinutes:payload.activeMinutes || 0,
+          taskFocusMinutes:payload.taskFocusMinutes || 0,
+          redirectionCount:payload.redirectionCount || 0,
+          lessonFocus:payload.lessonFocus || "",
+          lessonScore:payload.lessonScore,
+          lessonScoreBreakdown:payload.lessonScoreBreakdown || null,
+          evaluatedHomework:payload.evaluatedHomework || "",
+          evaluatedHomeworkStatus:payload.homeworkStatus || "",
+          homework:homeworkText,
+          homeworkStatus:homeworkText ? (homeworkChanged ? "pending" : (r.homeworkStatus || "pending")) : "",
+          homeworkCheckNote:homeworkText && !homeworkChanged ? (r.homeworkCheckNote || "") : "",
+          homeworkCheckedAt:homeworkText && !homeworkChanged ? (r.homeworkCheckedAt || null) : null,
+          homeworkCheckedInRef:homeworkText && !homeworkChanged ? (r.homeworkCheckedInRef || null) : null,
+        };
+      });
+      return { ...s, schedule, telafi_records:telafiRecords };
+    });
+    setStudents(updated);
+    const savedStudent = await saveStudent(updated.find(s=>s.id===sid));
+    pop("Telafi yapıldı");
+    if (action === "attended") {
+      const evaluatedRecord = (savedStudent.telafi_records || []).find(record => record.id === tid);
+      if (evaluatedRecord && storedLessonScore(evaluatedRecord) !== null) setLessonEvaluationPrompt({ student:savedStudent, record:evaluatedRecord, type:"telafi" });
+    }
     return true;
-  };
-
-  const checkSingleLessonMoveOperation = async (issue=singleLessonMoveIssueRef.current, options={}) => {
-    if (!issue?.operationId || !issue.requestPayload || singleLessonMoveCheckingRef.current
-      || singleLessonMoveIssueRef.current?.operationId !== issue.operationId
-      || issue.actorUserId !== singleLessonMoveActorRef.current || !giris || !browserOnline
-      || currentBranch?.id !== issue.branchId) return { ok:false };
-    const generation = protectedDataLoadGenerationRef.current;
-    const currentContext = () => generation === protectedDataLoadGenerationRef.current && issue.actorUserId === singleLessonMoveActorRef.current
-      && singleLessonMoveIssueRef.current?.operationId === issue.operationId;
-    singleLessonMoveCheckingRef.current = true;
-    setSingleLessonMoveChecking(true);
-    try {
-      const evidence = await timedSingleLessonRequest(() => supabase.from("single_lesson_move_operations")
-        .select("*").eq("operation_id",issue.operationId).eq("branch_id",issue.branchId).maybeSingle());
-      if (!currentContext()) return { ok:false, superseded:true };
-      if (evidence.error) {
-        persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
-        return { ok:false };
-      }
-      if (!evidence.data && options.knownRejected !== true) {
-        // A timed-out request can still be waiting for a server row lock.
-        // Absence, even after a delay, is not proof that it cannot commit later.
-        persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
-        return { ok:false, uncertain:true };
-      }
-      if (evidence.data && !singleLessonMoveEvidenceMatches(issue,evidence.data)) {
-        persistSingleLessonMoveIssue({ ...issue,state:"conflict" });
-        return { ok:false, conflict:true };
-      }
-      const request = issue.requestPayload;
-      const studentResult = await timedSingleLessonRequest(() => supabase.from("students").select("*")
-        .eq("id",request.studentId).eq("branch_id",issue.branchId).single());
-      if (!currentContext()) return { ok:false, superseded:true };
-      const savedStudent = studentResult.data;
-      if (studentResult.error || savedStudent?.id !== request.studentId || savedStudent.branch_id !== issue.branchId
-        || !Number.isInteger(savedStudent.record_version)
-        || Number(savedStudent.record_version) < Number(evidence.data?.resulting_record_version ?? request.expectedRecordVersion)) {
-        persistSingleLessonMoveIssue({ ...issue,state:evidence.data ? "applied_pending_refresh" : "unknown" });
-        return { ok:false, applied:!!evidence.data };
-      }
-      // Always use the current row, not the older audit snapshot/response.
-      setStudents(previous=>previous.map(student=>student.id === savedStudent.id && Number(student.record_version) <= Number(savedStudent.record_version) ? savedStudent : student));
-      setDetailSt(previous=>previous?.id === savedStudent.id && Number(previous.record_version) <= Number(savedStudent.record_version) ? savedStudent : previous);
-      if (!evidence.data) {
-        persistSingleLessonMoveIssue({ ...issue,state:"not_applied" });
-        return { ok:true, applied:false };
-      }
-      // Write handler keeps its lock until finally; clearing there is deferred.
-      if (singleLessonMoveWritingRef.current) persistSingleLessonMoveIssue({ ...issue,state:"verified" });
-      else if (!clearSingleLessonMoveIssue(issue)) persistSingleLessonMoveIssue({ ...issue,state:"applied_pending_refresh" });
-      if (options.notify !== false) pop("Ders taşıması Supabase'de doğrulandı ve ekran yenilendi.",7000);
-      return { ok:true, applied:true, student:savedStudent };
-    } catch {
-      if (currentContext()) persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
-      return { ok:false };
-    } finally {
-      singleLessonMoveCheckingRef.current = false;
-      setSingleLessonMoveChecking(false);
-    }
   };
 
   const handleShift = async (sid, fromLid, days) => {
@@ -11190,112 +9743,22 @@ export default function App() {
   };
 
   const handleMoveOneLesson = async (sid, lid, date, time) => {
-    if (!requireProtectedSources(["students"],"Ders taşıma") || !browserOnline || connectionRevalidationRequired) return false;
-    const actorUserId = authSession?.user?.id || "";
-    if (!actorUserId || !navigator.locks?.request) {
-      pop("Güvenli tek ders taşıma için güncel tarayıcı ve geçerli oturum gereklidir; kayıt gönderilmedi.",9000);
-      return false;
-    }
-    const generation = protectedDataLoadGenerationRef.current;
-    try {
-      return await navigator.locks.request("sonsuz-single-lesson-move:"+actorUserId,{ ifAvailable:true },async lock => {
-        if (!lock || singleLessonMoveWritingRef.current || singleLessonMoveCheckingRef.current) return false;
-        const savedIssue = readSingleLessonMoveIssue(actorUserId);
-        if (savedIssue || singleLessonMoveIssueRef.current) {
-          singleLessonMoveIssueRef.current = savedIssue || singleLessonMoveIssueRef.current;
-          setSingleLessonMoveIssue(singleLessonMoveIssueRef.current);
-          pop("Önce bekleyen tek ders taşıma sonucunu üstteki uyarıdan kesinleştirin.",9000);
-          return false;
-        }
-        const sourceStudent = students.find(student=>student.id === sid);
-        const branchId = currentBranch?.id;
-        const intent = singleLessonMoveIntent(sourceStudent,lid,date,time);
-        if (!intent || !branchId || sourceStudent.branch_id !== branchId || generation !== protectedDataLoadGenerationRef.current
-          || actorUserId !== singleLessonMoveActorRef.current) {
-          pop("Ders konumu doğrulanamadı. Yalnız bugün/gelecekteki planlı ders için farklı geçerli tarih ve saat seçin; kayıt gönderilmedi.",9000);
-          return false;
-        }
-        if (branchScopedWriteCountRef.current || packagePaymentWritingRef.current || packagePaymentIssueRef.current
-          || extraLessonPaymentWritingRef.current || extraLessonPaymentIssueRef.current
-          || normalLessonEvaluationWritingRef.current || normalLessonEvaluationIssueRef.current
-          || normalLessonMakeupWritingRef.current || normalLessonMakeupIssueRef.current
-          || normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current
-          || normalLessonMakeupCompletionWritingRef.current || normalLessonMakeupCompletionIssueRef.current
-          || failedOps.length) {
-          pop("Önce devam eden veya sonucu bekleyen öğrenci işlemini sonuçlandırın; taşıma gönderilmedi.",9000);
-          return false;
-        }
-        const operationId = uid();
-        if (!SINGLE_LESSON_MOVE_UUID.test(operationId)) return false;
-        const issue = { operationId,actorUserId,branchId,requestPayload:intent,state:"writing",createdAt:new Date().toISOString(),label:(sourceStudent.name || "Öğrenci")+" · "+date+" "+time };
-        if (!persistSingleLessonMoveIssue(issue,true)) {
-          pop("Taşıma niyeti tarayıcıda güvenli saklanamadı; kayıt gönderilmedi.",9000);
-          return false;
-        }
-        singleLessonMoveWritingRef.current = true;
-        branchScopedWriteCountRef.current += 1;
-        try {
-          const result = await timedSingleLessonRequest(() => supabase.rpc("move_single_normal_lesson",{
-            p_student_id:sid,p_lesson_id:lid,p_expected_record_version:intent.expectedRecordVersion,
-            p_expected_date:intent.expectedDate,p_expected_time:intent.expectedTime,
-            p_target_date:intent.targetDate,p_target_time:intent.targetTime,p_operation_id:operationId,
-          }).single());
-          if (generation !== protectedDataLoadGenerationRef.current || actorUserId !== singleLessonMoveActorRef.current) return false;
-          persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
-          const checked = await checkSingleLessonMoveOperation(issue,{ notify:false,knownRejected:singleLessonMoveKnownRejection(result.error) });
-          if (checked.ok && checked.applied) {
-            pop("Ders tarih ve saate taşındı");
-            return true;
-          }
-          pop(singleLessonMoveIssueMessage(singleLessonMoveIssueRef.current || issue),9000);
-          return false;
-        } catch {
-          persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
-          return false;
-        } finally {
-          singleLessonMoveWritingRef.current = false;
-          branchScopedWriteCountRef.current = Math.max(0,branchScopedWriteCountRef.current-1);
-          if (singleLessonMoveIssueRef.current?.operationId === operationId) {
-            if (singleLessonMoveIssueRef.current.state === "verified") clearSingleLessonMoveIssue(issue);
-            else {
-              if (singleLessonMoveIssueRef.current.state === "writing") persistSingleLessonMoveIssue({ ...issue,state:"unknown" });
-              if (generation === protectedDataLoadGenerationRef.current && actorUserId === singleLessonMoveActorRef.current) setDetailSt(null);
-            }
-          }
-        }
-      });
-    } catch {
-      pop("Tek ders taşıma güvenliği hazırlanamadı. Kayıt tekrar gönderilmedi.",9000);
-      return false;
-    }
+    const updated = students.map(s => {
+      if (s.id!==sid) return s;
+      return {
+        ...s,
+        schedule: (s.schedule||[]).map(l => {
+          if (l.id !== lid) return l;
+          const nextTime = time || lessonTime(s, l) || s.time || "10:00";
+          const moved = setTimeOnDate(new Date((date || dateKey(l.date)) + "T12:00:00"), nextTime);
+          return { ...l, date:moved.toISOString(), time:nextTime };
+        }).sort((a,b)=>new Date(a.date)-new Date(b.date))
+      };
+    });
+    setStudents(updated);
+    await saveStudent(updated.find(s=>s.id===sid));
+    pop("Ders tarih ve saate taşındı");
   };
-
-  useEffect(() => {
-    const actor = authSession?.user?.id || "";
-    singleLessonMoveAutoCheckRef.current = "";
-    const restore = () => {
-      let issue = null;
-      try { issue = readSingleLessonMoveIssue(actor); }
-      catch { issue = { actorUserId:actor,operationId:"invalid-local-evidence",state:"conflict" }; }
-      singleLessonMoveIssueRef.current = issue;
-      setSingleLessonMoveIssue(issue);
-    };
-    restore();
-    const changed = event => { if (event.key === SINGLE_LESSON_MOVE_ISSUE_PREFIX+actor || event.key === null) restore(); };
-    window.addEventListener("storage",changed);
-    return () => window.removeEventListener("storage",changed);
-  },[authSession?.user?.id]);
-
-  useEffect(() => {
-    const issue = singleLessonMoveIssue;
-    if (!browserOnline) singleLessonMoveAutoCheckRef.current = "";
-    if (!giris || !browserOnline || !accessContext || issue?.branchId !== currentBranch?.id
-      || issue?.actorUserId !== authSession?.user?.id || !issue?.operationId
-      || ["not_applied","conflict"].includes(issue.state) || singleLessonMoveWritingRef.current
-      || singleLessonMoveCheckingRef.current || singleLessonMoveAutoCheckRef.current === issue.operationId) return;
-    singleLessonMoveAutoCheckRef.current = issue.operationId;
-    void checkSingleLessonMoveOperation(issue,{ notify:false });
-  },[giris,browserOnline,accessContext,currentBranch?.id,singleLessonMoveIssue?.operationId,singleLessonMoveIssue?.state,authSession?.user?.id]);
 
   const handleDelete = async (sid) => {
     const source = students.find(student=>student.id===sid);
@@ -11690,10 +10153,10 @@ export default function App() {
     pop("Ödeme kaydı silindi");
   };
 
-  const handleDonemDegerlendirmeAc = (sid, periodKey="") => {
+  const handleDonemDegerlendirmeAc = (sid) => {
     const student = students.find(s => s.id === sid);
     if (!student) { pop("Öğrenci kaydı bulunamadı", 5000); return; }
-    const info = periodKey ? completedPeriodInfoByKey(student, periodKey) : lastCompletedPackageInfo(student);
+    const info = lastCompletedPackageInfo(student);
     if (!info || !packageSummaryKey(info)) { pop("Dönem kaydı oluşturulamadı", 5000); return; }
     const stats = packageEvaluationStats(student, info);
     if (!periodEvaluationInfo(student, info) && !stats?.newEvaluationEligible) { pop("Bu dönem v73 öncesi dersleri içerdiği için yeni değerlendirmeye alınmıyor", 6000); return; }
@@ -11761,9 +10224,9 @@ export default function App() {
     }
   };
 
-  const handlePaketOzetiAc = (sid, periodKey="") => {
+  const handlePaketOzetiAc = (sid) => {
     const student = students.find(s => s.id === sid);
-    const info = periodKey ? completedPeriodInfoByKey(student, periodKey) : lastCompletedPackageInfo(student);
+    const info = lastCompletedPackageInfo(student);
     const log = periodEvaluationInfo(student, info);
     if (!student || !info || !log) { pop("Önce dönem değerlendirmesini tamamlayın", 5000); return; }
     setPeriodSummaryPrompt({ student, info, log });
@@ -12238,8 +10701,6 @@ export default function App() {
   };
 
   const operationalStudents = students.filter(student=>!isStudentDeleted(student));
-  const pendingPeriodEvaluations = mainTab === "bugün" ? pendingPeriodEvaluationRows(operationalStudents) : [];
-  const sentPeriodSummaries = mainTab === "bugün" ? sentPeriodSummaryRows(operationalStudents) : [];
   const todayPayments = operationalStudents.filter(isÖdemeBekleyen);
   const raiseDueList = operationalStudents.filter(isRaiseDue);
   const filtered = operationalStudents.filter(s => {
@@ -12265,17 +10726,8 @@ export default function App() {
   const activeStaffBranches = organizationBranches.filter(branch=>branch.active !== false);
   const staffActivationByInvitation = new Map(staffActivations.map(operation=>[operation.invitation_id,operation]));
   const visibleNormalLessonEvaluationIssue = normalLessonEvaluationIssue && (!normalLessonEvaluationIssue.actorUserId || normalLessonEvaluationIssue.actorUserId === authSession?.user?.id) ? normalLessonEvaluationIssue : null;
-  const visibleSingleLessonMoveIssue = singleLessonMoveIssue?.actorUserId === authSession?.user?.id ? singleLessonMoveIssue : null;
-  const guardSingleLessonMoveInteraction = event => {
-    if (!visibleSingleLessonMoveIssue && !singleLessonMoveWritingRef.current) return;
-    if (event.target.closest?.("[data-single-lesson-move-control],.crm-nav-btn,.crm-mobile-nav,.crm-branch-switch,.crm-desktop-logout,[data-crm-security]")) return;
-    event.preventDefault();
-    event.stopPropagation();
-    pop("Önce tek ders taşıma sonucunu üstteki uyarıdan kesinleştirin.",7000);
-  };
   const visibleNormalLessonMakeupIssue = normalLessonMakeupIssue && (!normalLessonMakeupIssue.actorUserId || normalLessonMakeupIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupIssue : null;
   const visibleNormalLessonMakeupPlanIssue = normalLessonMakeupPlanIssue && (!normalLessonMakeupPlanIssue.actorUserId || normalLessonMakeupPlanIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupPlanIssue : null;
-  const visibleNormalLessonMakeupCompletionIssue = normalLessonMakeupCompletionIssue && (!normalLessonMakeupCompletionIssue.actorUserId || normalLessonMakeupCompletionIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupCompletionIssue : null;
   const visibleBranchLifecycleIssue = branchLifecycleIssue && (!branchLifecycleIssue.actorUserId || branchLifecycleIssue.actorUserId === authSession?.user?.id) ? branchLifecycleIssue : null;
   const visibleStaffInvitationIssue = staffInvitationIssue && (!staffInvitationIssue.actorUserId || staffInvitationIssue.actorUserId === authSession?.user?.id) ? staffInvitationIssue : null;
   const visibleStaffActivationIssue = staffActivationIssue && (!staffActivationIssue.actorUserId || staffActivationIssue.actorUserId === authSession?.user?.id) ? staffActivationIssue : null;
@@ -12564,7 +11016,7 @@ export default function App() {
   return (
     <>
     <style>{MIZAN_UI_CSS}</style>
-    <div className="crm-app" onClickCapture={guardSingleLessonMoveInteraction} onKeyDownCapture={event=>{ if (event.key === "Enter" || event.key === " ") guardSingleLessonMoveInteraction(event); }}>
+    <div className="crm-app">
       <aside className="crm-sidebar">
         <div className="crm-brand">
           <div className="crm-brand-mark">S</div>
@@ -12590,19 +11042,10 @@ export default function App() {
           <div className="crm-header-actions">
             {canManageBranches && mainTab!=="subeler" ? <button type="button" className="crm-owner-branches" title="Şubeleri yönet" onClick={()=>setMainTab("subeler")}>Şubeler</button> : null}
             {hasMultipleSelectableBranches ? <button type="button" className="crm-branch-switch" title="Aktif şubeyi değiştir" onClick={()=>setShowBranchMenu(true)}>⌄ {currentBranch.name}</button> : null}
-            <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="personel"?openStaffInvite():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):mainTab==="takvim"?setShowCalendarAvailability(true):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="personel"?"＋ Personel Davet Et":mainTab==="tekders"?"＋ Tek Ders Ekle":mainTab==="takvim"?"Uygun Saatler":"＋ Öğrenci ekle"}</button>
+            <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="personel"?openStaffInvite():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="personel"?"＋ Personel Davet Et":mainTab==="tekders"?"＋ Tek Ders Ekle":"＋ Öğrenci ekle"}</button>
           </div>
         </header>
         <section className="crm-page">
-        {visibleSingleLessonMoveIssue ? (
-          <div role="alert" data-single-lesson-move-control style={{ background:"#fff7ed",border:"1.5px solid #fdba74",borderRadius:14,padding:"12px 14px",marginBottom:14 }}>
-            <p style={{ margin:"0 0 5px",fontSize:13,fontWeight:850,color:"#9a3412" }}>Tek ders taşıma kontrolü</p>
-            <p style={{ margin:"0 0 8px",fontSize:12,color:"#9a3412",lineHeight:1.5 }}>{singleLessonMoveIssueMessage(visibleSingleLessonMoveIssue)}</p>
-            <p style={{ fontSize:11,color:"#9a3412" }}>{visibleSingleLessonMoveIssue.label}</p>
-            <button type="button" disabled={!browserOnline || singleLessonMoveChecking || singleLessonMoveWritingRef.current} onClick={()=>checkSingleLessonMoveOperation(visibleSingleLessonMoveIssue)} style={{ border:0,borderRadius:9,padding:"8px 11px",background:"#ea580c",color:"#fff",fontWeight:850 }}>{singleLessonMoveChecking ? "Kontrol Ediliyor…" : "Yeniden Kontrol Et"}</button>
-            {visibleSingleLessonMoveIssue.state === "not_applied" ? <button type="button" onClick={()=>clearSingleLessonMoveIssue(visibleSingleLessonMoveIssue)} style={{ marginLeft:8,border:"1px solid #fdba74",borderRadius:9,padding:"8px 11px",background:"#fff",color:"#9a3412",fontWeight:850 }}>Uyarıyı Gördüm</button> : null}
-          </div>
-        ) : null}
         {visibleNormalLessonEvaluationIssue ? (
           <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Ders değerlendirmesi kontrolü gerekli</p>
@@ -12637,18 +11080,6 @@ export default function App() {
               {visibleNormalLessonMakeupPlanIssue.state === "not_applied" ? <button type="button" onClick={()=>clearNormalLessonMakeupPlanIssue(visibleNormalLessonMakeupPlanIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
             </div>
             <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Yeniden kontrol yalnızca Supabase'den okur; telafi planını kendiliğinden tekrar göndermez.</p>
-          </div>
-        ) : null}
-        {visibleNormalLessonMakeupCompletionIssue ? (
-          <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
-            <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Telafi tamamlama kontrolü gerekli</p>
-            <p style={{ margin:"0 0 4px", fontSize:12, color:"#9a3412", fontWeight:650, lineHeight:1.5 }}>{normalLessonMakeupCompletionIssueMessage(visibleNormalLessonMakeupCompletionIssue)}</p>
-            {visibleNormalLessonMakeupCompletionIssue.label ? <p style={{ margin:"0 0 10px", fontSize:11, color:"#9a3412", fontWeight:800 }}>İşlem: {visibleNormalLessonMakeupCompletionIssue.label}</p> : null}
-            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-              <button type="button" onClick={()=>checkNormalLessonMakeupCompletionOperation(visibleNormalLessonMakeupCompletionIssue)} disabled={!browserOnline || normalLessonMakeupCompletionIssueChecking || normalLessonMakeupCompletionWritingRef.current} style={{ border:"none", borderRadius:9, padding:"8px 11px", background:"#ea580c", color:"#fff", fontSize:12, fontWeight:850, cursor:(!browserOnline || normalLessonMakeupCompletionIssueChecking || normalLessonMakeupCompletionWritingRef.current)?"wait":"pointer", opacity:(!browserOnline || normalLessonMakeupCompletionIssueChecking || normalLessonMakeupCompletionWritingRef.current)?0.65:1 }}>{normalLessonMakeupCompletionIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button>
-              {visibleNormalLessonMakeupCompletionIssue.state === "not_applied" ? <button type="button" onClick={()=>clearNormalLessonMakeupCompletionIssue(visibleNormalLessonMakeupCompletionIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
-            </div>
-            <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Yeniden kontrol yalnızca Supabase'den okur; telafi sonucunu kendiliğinden tekrar göndermez.</p>
           </div>
         ) : null}
         {visibleBranchLifecycleIssue ? (
@@ -12931,17 +11362,27 @@ export default function App() {
             <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
             <GecikenTekDersÖdemeleri lessons={overdueSinglePayments} now={singleLessonResultClock} busyIds={singleLessonBusyIds} onPayment={handleSingleLessonPayment} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <BekleyenTelafiler students={operationalStudents} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
-            <BekleyenDonemDegerlendirmeleri rows={pendingPeriodEvaluations} sentRows={sentPeriodSummaries} onStudentClick={setDetailSt} onEvaluate={handleDonemDegerlendirmeAc} onSummary={handlePaketOzetiAc} busyStudentId={summaryOpeningId} />
             {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
+                  const info = lastCompletedPackageInfo(s);
+                  const evaluationLog = periodEvaluationInfo(s, info);
+                  const evaluationStats = packageEvaluationStats(s, info);
+                  const newEvaluationEligible = !!evaluationLog || !!evaluationStats?.newEvaluationEligible;
+                  const sent = evaluationLog?.sentAt;
                   return (
                     <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
                       <div onClick={() => setDetailSt(s)} style={{ cursor:"pointer" }}>
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
-                        <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Ders hakkı tükendi · Yeni paket yükleyebilirsiniz.</p>
+                        <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Dönem tamamlandı{info?.donem ? " · "+info.donem : ""}</p>
+                        <p style={{ margin:"2px 0 0", fontSize:12, color:sent?"#059669":evaluationLog?"#7e22ce":"#c2410c", fontWeight:700 }}>
+                          {sent ? "Dönem özeti gönderildi · "+fmtMed(sent) : evaluationLog ? "Dönem puanı: "+fmtNumber(evaluationLog.evaluation.periodScore)+"/100 · Özet gönderilmedi" : newEvaluationEligible ? "Dönem değerlendirilmedi" : "v73 öncesi dönem · Yeni değerlendirmeye alınmaz"}
+                        </p>
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                        {evaluationLog
+                          ? <button disabled={summaryOpeningId===s.id} onClick={() => handlePaketOzetiAc(s.id)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönem Özetini Gönder</button>
+                          : newEvaluationEligible ? <button disabled={summaryOpeningId===s.id} onClick={() => handleDonemDegerlendirmeAc(s.id)} style={{ background:"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:summaryOpeningId===s.id?"wait":"pointer", opacity:summaryOpeningId===s.id ? .7 : 1 }}>Dönemi Değerlendir</button> : null}
                         <button onClick={() => setÖdemeSt(s)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Paket Yükle</button>
                       </div>
                     </div>
@@ -12950,7 +11391,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            {overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -12959,8 +11400,8 @@ export default function App() {
           </div>
         ) : null}
 
-        {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} availabilityOpen={showCalendarAvailability} onAvailabilityClose={()=>setShowCalendarAvailability(false)} /> : null}
-        {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} /> : null}
+        {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} /> : null}
+        {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} /> : null}
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
@@ -13054,19 +11495,17 @@ export default function App() {
             <span>{t.icon}</span>{t.label}
           </button>
         ))}
-        <button data-crm-security disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>
+        <button disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>
           <span>↪</span>Çıkış
         </button>
       </nav>
 
       {showSecurityMenu ? (
-        <div data-crm-security>
         <Sheet title="Hesap ve cihaz güvenliği" subtitle="Nasıl çıkış yapmak istediğinizi seçin" onClose={()=>{ if(!authBusy) setShowSecurityMenu(false); }}>
           <p style={{fontSize:13,color:"#666",lineHeight:1.6,margin:"0 0 16px"}}>Normal çıkışta bu tarayıcı 30 gün boyunca güvenilen cihaz olarak kalır. Bir sonraki girişte parolanız sorulur, doğrulama kodu sorulmaz.</p>
           <Btn bg="#5b42d6" onClick={()=>handleSecureLogout(false)}>Yalnızca Güvenli Çıkış</Btn>
           <Btn bg="#dc5d51" outline onClick={()=>handleSecureLogout(true)}>Çıkış Yap ve Bu Cihazı Unut</Btn>
         </Sheet>
-        </div>
       ) : null}
 
       {showStaffInvite ? (
@@ -13107,7 +11546,6 @@ export default function App() {
       ) : null}
 
       {showBranchMenu ? (
-        <div data-single-lesson-move-control>
         <Sheet title="Şube değiştir" subtitle={activeOrganization?.name || "Yetkili şubeler"} onClose={()=>setShowBranchMenu(false)}>
           <p style={{fontSize:12,color:"#6b6470",lineHeight:1.55,margin:"0 0 13px"}}>Yalnız hesabınıza atanmış aktif şubeler gösterilir. Yeni şube tamamen yüklenmeden eski şubenin verileri ekranda tutulmaz.</p>
           <div style={{display:"flex",flexDirection:"column",gap:9}}>
@@ -13120,7 +11558,6 @@ export default function App() {
             })}
           </div>
         </Sheet>
-        </div>
       ) : null}
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} saving={normalLessonEvaluationBusyId===actionModal.lessonId || normalLessonMakeupBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current || normalLessonMakeupWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
