@@ -1596,6 +1596,67 @@ function independentPeriodPackageIds(student) {
   return new Set((student.schedule||[]).filter(l=>l.packageBoundaryVersion != null).map(l=>l.packageId).filter(Boolean));
 }
 
+function periodLoadGroups(student) {
+  const schedule = student.schedule || [];
+  const idCounts = new Map();
+  schedule.forEach(l=>idCounts.set(l.id,(idCounts.get(l.id)||0)+1));
+  const result = [];
+  for (const packageId of independentPeriodPackageIds(student)) {
+    const lessons = schedule.filter(l=>l.packageId===packageId).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const first = lessons[0];
+    if (first?.packageBoundaryVersion!==2) continue;
+    const total = first.packageLessonCount, size = first.periodLessonCount;
+    if (typeof packageId!=="string" || !packageId.trim() || !PACKAGE_LOAD_OPTIONS.includes(total)
+      || !PACKAGE_LOAD_OPTIONS.includes(size) || total%size || lessons.length!==total
+      || lessons.some(l=>l.packageBoundaryVersion!==2 || l.packageLessonCount!==total || l.periodLessonCount!==size
+        || typeof l.id!=="string" || !l.id || idCounts.get(l.id)!==1 || isNaN(new Date(l.date).getTime())
+        || typeof l.periodId!=="string" || !l.periodId || !Number.isInteger(l.periodIndex) || l.periodIndex<0 || l.periodIndex>=total/size)) continue;
+    const periods = [], periodIds = new Set();
+    for (let index=0; index<total/size; index++) {
+      const group = lessons.filter(l=>l.periodIndex===index), id = group[0]?.periodId;
+      if (group.length!==size || periodIds.has(id) || group.some(l=>l.periodId!==id)) break;
+      periodIds.add(id);
+      const start = group[0].date, end = group[group.length-1].date;
+      periods.push({packageIndex:null,packageId,packageBoundaryVersion:2,periodId:id,periodIndex:index,
+        packageSize:size,expectedPackageSize:size,complete:true,lessonIds:group.map(l=>l.id),
+        start,end,startKey:dateKey(start),endKey:dateKey(end),donem:fmtShort(start)+" - "+fmtShort(end)});
+    }
+    if (periods.length!==total/size) continue;
+    const start = lessons[0].date, end = lessons[lessons.length-1].date;
+    result.push({periods,collection:{packageIndex:null,packageId,packageBoundaryVersion:2,
+      packageSize:total,expectedPackageSize:total,complete:true,lessonIds:lessons.map(l=>l.id),
+      start,end,startKey:dateKey(start),endKey:dateKey(end),donem:fmtShort(start)+" - "+fmtShort(end)}});
+  }
+  return result;
+}
+
+function periodLoadOptions(student) {
+  const size = getPreferredPackageLessonCount(student);
+  return PACKAGE_LOAD_OPTIONS.includes(size) ? PACKAGE_LOAD_OPTIONS.filter(count=>count%size===0) : [];
+}
+
+function readPeriodLoadIssue(actorUserId) {
+  if (!actorUserId) return null;
+  const invalid={actorUserId,operationId:"unreadable",kind:"invalid",branchId:"",params:{}};
+  try {
+    const raw=localStorage.getItem("sonsuz-crm-period-load-v185-"+actorUserId);
+    if(!raw) return null;
+    const issue=JSON.parse(raw);
+    return issue?.actorUserId===actorUserId && issue.operationId===issue.params?.p_operation_id
+      && issue.studentId===issue.params?.p_student_id && issue.branchId===issue.params?.p_branch_id
+      && ["load","undo"].includes(issue.kind) ? issue : invalid;
+  } catch { return invalid; }
+}
+
+function writePeriodLoadIssue(actorUserId, issue) {
+  if (!actorUserId) return false;
+  try {
+    const key = "sonsuz-crm-period-load-v185-"+actorUserId;
+    if (issue) localStorage.setItem(key,JSON.stringify(issue)); else localStorage.removeItem(key);
+    return issue ? localStorage.getItem(key)===JSON.stringify(issue) : localStorage.getItem(key)===null;
+  } catch { return false; }
+}
+
 function independentPeriodInfos(student) {
   const schedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const byPackage = new Map(), idCounts = new Map();
@@ -1622,7 +1683,7 @@ function independentPeriodInfos(student) {
       donem:fmtShort(first.date)+" - "+fmtShort(last.date),
     });
   }
-  return infos;
+  return [...infos, ...periodLoadGroups(student).flatMap(group=>group.periods)];
 }
 
 function customPackageInfos(student) {
@@ -1738,8 +1799,9 @@ function packageInfos(student) {
 }
 
 function payablePackageInfos(student) {
-  const infos = [...customPackageInfos(student), ...regularPackageInfos(student)];
-  return infos.some(info=>info.packageBoundaryVersion===1)
+  const infos = [...customPackageInfos(student), ...regularPackageInfos(student)].filter(info=>info.packageBoundaryVersion!==2);
+  infos.push(...periodLoadGroups(student).map(group=>group.collection));
+  return infos.some(info=>info.packageBoundaryVersion!=null)
     ? infos.sort((a,b)=>new Date(a.start)-new Date(b.start)) : infos;
 }
 
@@ -1762,7 +1824,7 @@ function nonExtraPaymentIndex(student, originalIndex) {
 
 function paymentPackageLessons(student, payment, index) {
   const schedule = [...(student.schedule||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  const packages = packageInfos(student).filter(info=>info.packageBoundaryVersion!==1);
+  const packages = packageInfos(student).filter(info=>info.packageBoundaryVersion==null);
   const inferredStudentCount = getPackageLessonCount(student);
   const storedPaymentCount = parseInt(payment.packageLessonCount);
   const effectiveCount = storedPaymentCount && !(storedPaymentCount === PAYMENT_PACK_SIZE && inferredStudentCount > PAYMENT_PACK_SIZE)
@@ -1824,6 +1886,10 @@ function currentOpenLessonPeriodIds(student) {
     .sort((a,b)=>new Date(a.date)-new Date(b.date));
   const firstUpcoming = schedule.find(lesson=>lesson.status === "upcoming");
   if (!firstUpcoming) return new Set();
+  if (firstUpcoming.packageBoundaryVersion===2) {
+    const period = periodLoadGroups(student).flatMap(group=>group.periods).find(info=>info.lessonIds.includes(firstUpcoming.id));
+    return new Set(period?.lessonIds || [firstUpcoming.id]);
+  }
 
   for (const payment of (student?.odemeler || [])) {
     if (!payment || payment.sadeceEkDers) continue;
@@ -1881,6 +1947,8 @@ function historicalLessonYearGroups(student, lessons) {
       if (!periodByLessonId.has(lesson.id)) periodByLessonId.set(lesson.id, periodKey);
     });
   };
+
+  periodLoadGroups(student).flatMap(group=>group.periods).forEach(info=>assignPeriod("period:"+info.periodId,packageEvaluationLessons(student,info)));
 
   (student?.odemeler || []).forEach((payment,index) => {
     if (!payment || payment.sadeceEkDers) return;
@@ -2107,7 +2175,7 @@ function ekDersTypeLabel(type) {
 function hasPaymentForPackage(student, info) {
   if (!info) return false;
   const payments = (student.odemeler || []).filter(o => !o.sadeceEkDers);
-  if (info.packageBoundaryVersion===1) {
+  if (info.packageBoundaryVersion===1 || info.packageBoundaryVersion===2) {
     return payments.some(o=>o.packageId===info.packageId || (
       Array.isArray(o.packageLessonIds) && o.packageLessonIds.length===info.lessonIds.length
       && new Set(o.packageLessonIds).size===info.lessonIds.length
@@ -2141,6 +2209,11 @@ function nextPayablePackageInfo(student) {
 function lastUndoablePackageInfo(student) {
   const sortedSchedule = [...(student.schedule || [])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const lastLesson = sortedSchedule[sortedSchedule.length - 1];
+  if (lastLesson?.packageBoundaryVersion===2) {
+    const info = periodLoadGroups(student).find(group=>group.collection.packageId===lastLesson.packageId)?.collection;
+    if (!info || hasPaymentForPackage(student,info)) return null;
+    return sortedSchedule.filter(l=>l.packageId===info.packageId).every(l=>l.status==="upcoming") ? info : null;
+  }
   if (lastLesson?.packageId) {
     const lessons = sortedSchedule.filter(l => l.packageId === lastLesson.packageId);
     if (lessons.length && lessons.every(l => l.status === "upcoming")) {
@@ -4227,7 +4300,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
           {undoablePackage ? (
             <div style={{ background:"#fff1f2", border:"1px solid #fecdd3", borderRadius:12, padding:"10px 12px" }}>
               <p style={{ margin:"0 0 8px", fontSize:12, color:"#be123c", fontWeight:700 }}>Geri alınacak dersler: {undoablePackagePreview(student, undoablePackage)}</p>
-              <Btn bg="#ef4444" onClick={() => { if(window.confirm("Son yüklenen paket geri alınsın mı?")) { onUndoLastPackage(student.id); onClose(); } }}>Son Paketi Geri Al</Btn>
+              <Btn bg="#ef4444" onClick={async() => { if(window.confirm("Son yüklenen paket geri alınsın mı?")) { if(await onUndoLastPackage(student.id)) onClose(); } }}>Son Paketi Geri Al</Btn>
             </div>
           ) : null}
           <div style={{ background:left?"#fff1f2":student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(left?"#fecdd3":student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
@@ -4245,7 +4318,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
       {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => onTelafiDone(student.id, id, payload)} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => onMoveOne(student.id, lid, date, time)} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} saving={paymentSavingId===student.id} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
-      {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={(sid, date, count) => { onRecharge(sid, date, count); setShowPaketYukle(false); onClose(); }} onMesajGonder={onMesaj} /> : null}
+      {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={async(sid, date, count, periodCount) => { const saved=await onRecharge(sid,date,count,periodCount); if(saved) {setShowPaketYukle(false);onClose();} return saved; }} onMesajGonder={onMesaj} /> : null}
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
       {showResumeProgram ? <ResumeProgramSheet student={student} onClose={() => setShowResumeProgram(false)} onResume={(startDate) => onToggleFreeze(student.id, false, startDate)} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
@@ -4763,25 +4836,32 @@ function TelafiPlanMesajSheet({ student, record, onClose, onSent }) {
 function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
   const ekDersler = unpaidEkDersler(student);
   const ekToplam = ekDersler.reduce((sum,e)=>sum+(e.fee||ekDersFee(student)),0);
-  const initialCount = PACKAGE_LOAD_OPTIONS.includes(getPreferredPackageLessonCount(student)) ? getPreferredPackageLessonCount(student) : PAYMENT_PACK_SIZE;
+  const options = periodLoadOptions(student);
+  const initialCount = options[0] || PAYMENT_PACK_SIZE;
+  const [saving,setSaving] = useState(false);
   const [paketDersSayisi, setPaketDersSayisi] = useState(initialCount);
   const paketTutar = (student.ucret || 0) * (paketDersSayisi / PAYMENT_PACK_SIZE);
   return (
-    <Sheet title="Paket Yükle" subtitle={student.name} onClose={onClose}>
+    <Sheet title="Paket Yükle" subtitle={student.name} onClose={()=>{if(!saving) onClose();}}>
       <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
-        <p style={{ margin:0, fontSize:13, color:"#166534" }}>{paketDersSayisi} yeni ders eklenecek.</p>
+        <p style={{ margin:0, fontSize:13, color:"#166534" }}>{options.length ? paketDersSayisi+" yeni ders eklenecek: "+paketDersSayisi/getPreferredPackageLessonCount(student)+" dönem × "+getPreferredPackageLessonCount(student)+" ders." : "Yeni dönem büyüklüğünü Öğrenciyi Düzenle ekranından 4, 8, 12 veya 16 ders olarak seçin."}</p>
         <p style={{ margin:"6px 0 0", fontSize:13, color:"#166534", fontWeight:700 }}>Paket: {paketTutar.toLocaleString("tr-TR")} TL</p>
         {ekDersler.length > 0 ? <p style={{ margin:"6px 0 0", fontSize:13, color:"#5b21b6", fontWeight:700 }}>{ekDersler.length} ödenmemiş ek ders: {ekToplam.toLocaleString("tr-TR")} TL</p> : null}
-        <p style={{ margin:"8px 0 0", fontSize:13, color:"#166534" }}>Ödeme uyarısı yeni periyodun ilk ders günü Bugünkü Ödemeler alanına düşer.</p>
+        <p style={{ margin:"8px 0 0", fontSize:13, color:"#166534" }}>Ödeme uyarısı yüklenen derslerin ilk ders günü Bugünkü Ödemeler alanına düşer.</p>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:12 }}>
-        {PACKAGE_LOAD_OPTIONS.map(count => (
-          <button key={count} onClick={() => setPaketDersSayisi(count)} style={{ background:paketDersSayisi===count?"#111":"#f3f4f6", color:paketDersSayisi===count?"#fff":"#374151", border:"none", borderRadius:10, padding:"10px 6px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>{count} Ders</button>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat("+options.length+",1fr)", gap:8, marginBottom:12 }}>
+        {options.map(count => (
+          <button key={count} disabled={saving} onClick={() => setPaketDersSayisi(count)} style={{ background:paketDersSayisi===count?"#111":"#f3f4f6", color:paketDersSayisi===count?"#fff":"#374151", border:"none", borderRadius:10, padding:"10px 6px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>{count} Ders</button>
         ))}
       </div>
-      <Btn bg="#111" onClick={() => { onÖdemeAl(student.id, new Date().toISOString().split("T")[0], paketDersSayisi); onClose(); }}>{paketDersSayisi} Derslik Paketi Yükle</Btn>
-      <Btn bg="#f97316" onClick={() => { onMesajGonder(student); onClose(); }}>Ödeme Hatırlatması Gönder</Btn>
-      <Btn bg="#6b7280" onClick={onClose} outline>İptal</Btn>
+      <Btn bg="#111" disabled={saving || !options.includes(paketDersSayisi)} onClick={async() => {
+        if(saving) return;
+        setSaving(true);
+        try { if(await onÖdemeAl(student.id,turkeyDateKey(),paketDersSayisi,getPreferredPackageLessonCount(student))) onClose(); }
+        finally { setSaving(false); }
+      }}>{saving ? "Yükleniyor…" : paketDersSayisi+" Derslik Paketi Yükle"}</Btn>
+      <Btn bg="#f97316" disabled={saving} onClick={() => { onMesajGonder(student); onClose(); }}>Ödeme Hatırlatması Gönder</Btn>
+      <Btn bg="#6b7280" disabled={saving} onClick={onClose} outline>İptal</Btn>
     </Sheet>
   );
 }
@@ -6954,6 +7034,11 @@ function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayme
 
 export default function App() {
   const preferredPeriodSchemaReadyRef = useRef(false);
+  const [periodLoadIssue,setPeriodLoadIssue] = useState(null);
+  const [periodLoadBusy,setPeriodLoadBusy] = useState(false);
+  const periodLoadIssueRef = useRef(null);
+  const periodLoadWritingRef = useRef(false);
+  const periodLoadContextRef = useRef({});
   const [giris, setGiris] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [authMode, setAuthMode] = useState(() => isPasswordSetupLink() ? "set-password" : "supabase");
@@ -7060,6 +7145,12 @@ export default function App() {
   const [accessContextError, setAccessContextError] = useState("");
   const [activeOrganization, setActiveOrganization] = useState(null);
   const [currentBranch, setCurrentBranch] = useState(null);
+  periodLoadContextRef.current = {actorUserId:authSession?.user?.id,branchId:currentBranch?.id};
+  useEffect(()=>{
+    const issue = readPeriodLoadIssue(authSession?.user?.id);
+    periodLoadIssueRef.current = issue;
+    setPeriodLoadIssue(issue);
+  },[authSession?.user?.id]);
   const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showBranchCreate, setShowBranchCreate] = useState(false);
   const [branchCreateName, setBranchCreateName] = useState("");
@@ -11370,26 +11461,83 @@ export default function App() {
     }
   };
 
-  const handleRecharge = async (sid, odemeDate, selectedLessonCount) => {
-    let lessonCount = PAYMENT_PACK_SIZE;
-    const updated = students.map(s => {
-      if (s.id!==sid) return s;
-      const last = [...s.schedule].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-      const from = last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
-      const parsedCount = parseInt(selectedLessonCount);
-      lessonCount = PACKAGE_LOAD_OPTIONS.includes(parsedCount) ? parsedCount : getPreferredPackageLessonCount(s);
-      const newLessons = buildScheduleSlots(getStudentSlots(s), lessonCount, from, getLessonDuration(s));
-      const periodLessons = preferredPeriodSchemaReadyRef.current
-        ? newLessons.map(l=>({...l,packageBoundaryVersion:1})) : newLessons;
-      const next = {...s, frozen:false, left_at:null, schedule:[...s.schedule, ...periodLessons]};
-      return (s.frozen || isStudentLeft(s)) ? withStatusEvent(next, "active") : next;
+  const performPeriodLoadOperation = async issue => {
+    const context = periodLoadContextRef.current;
+    if (!issue || issue.kind==="invalid" || periodLoadWritingRef.current || !browserOnline
+      || issue.actorUserId!==context.actorUserId || issue.branchId!==context.branchId) return false;
+    periodLoadWritingRef.current=true;
+    setPeriodLoadBusy(true);
+    try {
+      const result=await runBranchScopedWrite(()=>timedSingleLessonRequest(()=>supabase.rpc(issue.kind==="load" ? "load_student_periods" : "undo_student_period_load",issue.params).single()));
+      if (periodLoadContextRef.current.actorUserId!==issue.actorUserId || periodLoadContextRef.current.branchId!==issue.branchId) return false;
+      const saved=result.data?.student_record;
+      if (!result.error && saved?.id===issue.studentId && saved.branch_id===issue.branchId
+        && result.data.operation_id===issue.operationId && Number(saved.record_version)>=issue.params.p_expected_record_version+1) {
+        setStudents(prev=>prev.map(s=>s.id===saved.id && Number(s.record_version)<=Number(saved.record_version)?saved:s));
+        if(writePeriodLoadIssue(issue.actorUserId,null)) {periodLoadIssueRef.current=null;setPeriodLoadIssue(null);}
+        pop(issue.kind==="load" ? issue.count+" ders yüklendi" : "Son paket geri alındı");
+        return true;
+      }
+      if ((String(result.error?.message||"").startsWith("PERIOD_LOAD_") && !String(result.error.message).includes("OPERATION_CONFLICT")) || result.error?.code==="PGRST202") {
+        if(writePeriodLoadIssue(issue.actorUserId,null)) {periodLoadIssueRef.current=null;setPeriodLoadIssue(null);}
+        await loadStudents();
+        pop(result.error?.code==="PGRST202" ? "V185 paket yükleme SQL’i kurulmalı. Ders eklenmedi." : "Paket işlemi uygulanmadı: "+result.error.message,9000);
+        return false;
+      }
+      pop("Paket işleminin sonucu doğrulanamadı. Üstteki paket uyarısından aynı işlemi kontrol edin; yeni yükleme gönderilmedi.",9000);
+      return false;
+    } catch {
+      pop("Paket işleminin sonucu doğrulanamadı. Üstteki paket uyarısını kontrol edin.",9000);
+      return false;
+    } finally {periodLoadWritingRef.current=false;setPeriodLoadBusy(false);}
+  };
+
+  const createPeriodLoadOperation = async (student,kind,count,packageId=null) => {
+    if (!requireProtectedSources(["students"],"Paket işlemi") || !browserOnline || periodLoadWritingRef.current) return false;
+    const actorUserId=authSession?.user?.id,branchId=currentBranch?.id;
+    if (!actorUserId || !branchId || student?.branch_id!==branchId || !Number.isInteger(student.record_version)) return false;
+    if (readPeriodLoadIssue(actorUserId) || periodLoadIssueRef.current) {pop("Önce üstteki bekleyen paket işlemini kontrol edin.",8000);return false;}
+    const operationId=uid();
+    const params={p_student_id:student.id,p_branch_id:branchId,p_expected_record_version:student.record_version,p_operation_id:operationId};
+    if(kind==="load") {
+      if(!periodLoadOptions(student).includes(count)) {pop("Bu ders sayısı öğrencinin dönem büyüklüğüne uygun değil.",7000);return false;}
+      const last=[...(student.schedule||[])].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+      const from=last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
+      Object.assign(params,{p_total_count:count,p_period_count:getPreferredPackageLessonCount(student),
+        p_planned_lessons:buildScheduleSlots(getStudentSlots(student),count,from,getLessonDuration(student)).map(l=>({date:l.date,day:l.day,time:l.time,durationMinutes:l.durationMinutes}))});
+    } else params.p_package_id=packageId;
+    const issue={operationId,actorUserId,branchId,studentId:student.id,kind,count,params};
+    if(!writePeriodLoadIssue(actorUserId,issue)) {pop("Tarayıcı işlem güvenliği hazırlanamadı; paket işlemi gönderilmedi.",8000);return false;}
+    periodLoadIssueRef.current=issue;setPeriodLoadIssue(issue);
+    return performPeriodLoadOperation(issue);
+  };
+
+  const startPeriodLoadOperation = async (student,kind,count,packageId=null) => {
+    const actor=authSession?.user?.id;
+    if(!actor || !navigator.locks?.request) {pop("Paket işlem güvenliği için güncel bir tarayıcı gerekiyor.",8000);return false;}
+    return navigator.locks.request("sonsuz-period-load:"+actor,{ifAvailable:true},async lock=>{
+      if(!lock) {pop("Başka sekmede paket işlemi sürüyor.",7000);return false;}
+      return createPeriodLoadOperation(student,kind,count,packageId);
     });
-    setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
-    pop(lessonCount+" ders yüklendi");
+  };
+
+  const handleRecharge = async (sid, odemeDate, selectedLessonCount, expectedPeriodCount) => {
+    const student=students.find(s=>s.id===sid);
+    if(student && expectedPeriodCount!==undefined && Number(expectedPeriodCount)!==getPreferredPackageLessonCount(student)) {
+      pop("Yeni dönem tercihi değişmiş. Paket Yükle penceresini yeniden açın; ders eklenmedi.",8000);
+      return false;
+    }
+    return startPeriodLoadOperation(student,"load",Number(selectedLessonCount));
   };
 
   const handleUndoLastPackage = async (sid) => {
+    const student=students.find(s=>s.id===sid);
+    const latest=[...(student?.schedule||[])].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+    if(latest?.packageBoundaryVersion===2) {
+      const info=student && lastUndoablePackageInfo(student);
+      if(!info) {pop("Kullanılmış veya ödenmiş paket geri alınamaz.",7000);return false;}
+      return startPeriodLoadOperation(student,"undo",info.packageSize,info.packageId);
+    }
     let removed = 0;
     const updated = students.map(s => {
       if (s.id!==sid) return s;
@@ -11402,6 +11550,7 @@ export default function App() {
     setStudents(updated);
     await saveStudent(updated.find(s=>s.id===sid));
     pop(removed ? "Son paket geri alındı" : "Geri alınacak paket yok");
+    return removed>0;
   };
 
   const handleAdd = async (f) => {
@@ -12801,6 +12950,12 @@ export default function App() {
               {extraLessonPaymentIssue.state !== "not_applied" ? <button onClick={handleExtraLessonPaymentIssueCheck} disabled={!browserOnline || extraLessonPaymentIssueChecking} style={{ border:"none", borderRadius:8, padding:"7px 10px", background:"#c2410c", color:"#fff", fontSize:11, fontWeight:850, cursor:(!browserOnline || extraLessonPaymentIssueChecking)?"wait":"pointer", opacity:(!browserOnline || extraLessonPaymentIssueChecking)?.65:1 }}>{extraLessonPaymentIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button> : null}
               {extraLessonPaymentIssue.state === "not_applied" ? <button onClick={()=>clearExtraLessonPaymentIssue(extraLessonPaymentIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:8, padding:"7px 10px", background:"#fff", color:"#9a3412", fontSize:11, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
             </div>
+          </div>
+        ) : null}
+        {periodLoadIssue ? (
+          <div style={{...CARD,border:"1px solid #f59e0b",background:"#fffbeb",marginBottom:12}}>
+            <p style={{margin:"0 0 8px",fontSize:13}}>{periodLoadIssue.kind==="invalid" ? "Bekleyen paket işlem kaydı okunamadı. Yeni yükleme durduruldu; kayıt incelenmeli." : periodLoadIssue.branchId!==currentBranch?.id ? "Bekleyen paket işlemini kontrol etmek için işlemin yapıldığı şubeye geçin." : "Bekleyen paket işleminin sonucunu kontrol edin. Aynı işlem kimliği kullanılır; ikinci paket oluşmaz."}</p>
+            <Btn bg="#92400e" disabled={periodLoadBusy || periodLoadIssue.branchId!==currentBranch?.id} onClick={()=>performPeriodLoadOperation(periodLoadIssue)}>{periodLoadBusy ? "Kontrol ediliyor…" : "Paket İşlemini Kontrol Et"}</Btn>
           </div>
         ) : null}
         {packagePaymentIssue ? (
