@@ -3687,6 +3687,42 @@ function ShiftSheet({ lesson, student, onClose, onShift, onMoveOne }) {
   );
 }
 
+const STUDENT_GENDER_OPTIONS = [{ value:"female", label:"Kadın" }, { value:"male", label:"Erkek" }, { value:"unspecified", label:"Belirtilmedi" }];
+const GUARDIAN_GENDER_OPTIONS = [...STUDENT_GENDER_OPTIONS, { value:"no_guardian", label:"Veli yok" }];
+
+function validStudentGenderChanges(changes) {
+  if (!changes || typeof changes !== "object" || Array.isArray(changes)) return false;
+  const entries = Object.entries(changes);
+  return entries.length > 0 && entries.every(([key,value]) =>
+    (key === "student_gender" ? STUDENT_GENDER_OPTIONS : key === "guardian_gender" ? GUARDIAN_GENDER_OPTIONS : []).some(option => option.value === value));
+}
+
+function studentGenderEditIntent(form, initialForm, expectedRecordVersion) {
+  const changes = {};
+  for (const key of ["student_gender","guardian_gender"]) {
+    if (form[key] !== initialForm[key]) changes[key] = form[key];
+  }
+  if (!Object.keys(changes).length) return null;
+  const onlyGender = Object.keys(initialForm).filter(key => !["student_gender","guardian_gender"].includes(key))
+    .every(key => JSON.stringify(form[key]) === JSON.stringify(initialForm[key]));
+  return { changes, onlyGender, expectedRecordVersion };
+}
+
+function StudentGenderFields({ form, onChange, editing=false }) {
+  return <>
+    <label style={LBL} htmlFor="student-gender">Öğrencinin Cinsiyeti</label>
+    <select id="student-gender" style={INP} value={form.student_gender} onChange={event=>onChange("student_gender",event.target.value)}>
+      {!editing ? <option value="">Seçin</option> : null}
+      {STUDENT_GENDER_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
+    </select>
+    <label style={LBL} htmlFor="guardian-gender">Velinin Cinsiyeti</label>
+    <select id="guardian-gender" style={INP} value={form.guardian_gender} onChange={event=>onChange("guardian_gender",event.target.value)}>
+      {!editing ? <option value="">Seçin</option> : null}
+      {GUARDIAN_GENDER_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
+    </select>
+  </>;
+}
+
 function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
   const currentTeacherId = student.teacher_id || teachers.find(t => t.name === studentTeacherName(student))?.id || "";
   const [f, setF] = useState({
@@ -3695,6 +3731,8 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
     teacher_change_date: turkeyDateKey(),
     phone: student.phone || "",
     veli_adi: student.veli_adi || "",
+    student_gender: student.student_gender ?? "unspecified",
+    guardian_gender: student.guardian_gender ?? "unspecified",
     dogum_tarihi: student.dogum_tarihi || "",
     lesson_start_date: student.lesson_start_date || student.lessonStartDate || "",
     ucret: student.ucret || "",
@@ -3706,6 +3744,11 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
     preferredPackageLessonCount: getPreferredPackageLessonCount(student),
     lessonSlots: getStudentSlots(student),
   });
+  const [initialForm] = useState(f);
+  const [openedRecordVersion] = useState(student.record_version);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [saveError, setSaveError] = useState("");
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const setSlot = (i,k,v) => setF(p=>({
     ...p,
@@ -3714,7 +3757,8 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
   const addSlot = () => setF(p=>({...p, lessonSlots:[...p.lessonSlots, { day:"Pazartesi", time:"15:00" }]}));
   const removeSlot = (i) => setF(p=>({...p, lessonSlots:p.lessonSlots.filter((_,idx)=>idx!==i)}));
   return (
-    <Sheet title="Öğrenciyi Düzenle" subtitle={student.name} onClose={onClose}>
+    <Sheet title="Öğrenciyi Düzenle" subtitle={student.name} onClose={() => { if (!savingRef.current) onClose(); }}>
+      <fieldset disabled={saving} style={{ border:0, padding:0, margin:0, minWidth:0 }}>
       <label style={LBL}>Ad Soyad</label>
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} />
       <label style={LBL}>Öğretmen</label>
@@ -3728,6 +3772,7 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
       </> : null}
       <label style={LBL}>Veli Adı</label>
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
+      <StudentGenderFields form={f} onChange={s} editing />
       <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
       <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Derse Başlama Tarihi</label>
@@ -3762,9 +3807,21 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
       ))}
       <button onClick={addSlot} style={{ width:"100%", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", marginTop:2 }}>+ Ders günü ekle</button>
       <div style={{ marginTop:16 }}>
-        <Btn bg="#111" onClick={() => { if(f.name.trim() && f.teacher_id){ onDuzenle(student.id, f); onClose(); } }}>Kaydet</Btn>
+        {saveError ? <p role="alert" style={{ color:"#b91c1c", fontSize:12 }}>{saveError}</p> : null}
+        <Btn bg="#111" disabled={saving} onClick={async() => {
+          if (!f.name.trim() || !f.teacher_id || savingRef.current) return;
+          savingRef.current = true; setSaving(true); setSaveError("");
+          try {
+            const saved = await onDuzenle(student.id, f, studentGenderEditIntent(f,initialForm,openedRecordVersion));
+            if (saved) onClose();
+            else setSaveError("Kayıt doğrulanamadı. Bilgiler kaydedilmiş kabul edilmedi; güncel kaydı kontrol edin.");
+          } catch {
+            setSaveError("Kayıt doğrulanamadı. Güncel kaydı kontrol edin; işlem otomatik tekrarlanmadı.");
+          } finally { savingRef.current = false; setSaving(false); }
+        }}>{saving ? "Kaydediliyor..." : "Kaydet"}</Btn>
         <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
       </div>
+      </fieldset>
     </Sheet>
   );
 }
@@ -4360,8 +4417,10 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
 function AddSheet({ teachers, onClose, onAdd }) {
   const todayISO = turkeyDateKey();
   const firstTeacher = teachers.find(t => t.active);
-  const [f, setF] = useState({ name:"", teacher_id:firstTeacher?.id || "", phone:"", veli_adi:"", dogum_tarihi:"", lesson_start_date:todayISO, instrument:"Davul", lessonDuration:45, lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"", last_raise_date:"" });
+  const [f, setF] = useState({ name:"", teacher_id:firstTeacher?.id || "", phone:"", veli_adi:"", student_gender:"", guardian_gender:"", dogum_tarihi:"", lesson_start_date:todayISO, instrument:"Davul", lessonDuration:45, lessonSlots:[{ day:"Pazartesi", time:"15:00" }], count:4, firstDate:todayISO, ucret:"", last_raise_date:"" });
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [saveError, setSaveError] = useState("");
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const setSlot = (i,k,v) => setF(p=>({
     ...p,
@@ -4377,7 +4436,8 @@ function AddSheet({ teachers, onClose, onAdd }) {
     return buildScheduleSlots(f.lessonSlots, f.count, from, f.lessonDuration).map(l=>fmtShort(l.date)+" "+l.time).join(" - ");
   };
   return (
-    <Sheet title="Yeni Öğrenci" onClose={onClose}>
+    <Sheet title="Yeni Öğrenci" onClose={() => { if (!savingRef.current) onClose(); }}>
+      <fieldset disabled={saving} style={{ border:0, padding:0, margin:0, minWidth:0 }}>
       <label style={LBL}>Ad Soyad</label>
       <input style={INP} value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Öğrenci adı" />
       <label style={LBL}>Öğretmen</label>
@@ -4387,6 +4447,7 @@ function AddSheet({ teachers, onClose, onAdd }) {
       </select>
       <label style={LBL}>Veli Adı</label>
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
+      <StudentGenderFields form={f} onChange={s} />
       <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
       <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Derse Başlama Tarihi</label>
@@ -4420,7 +4481,18 @@ function AddSheet({ teachers, onClose, onAdd }) {
       <label style={LBL}>İlk Ders Tarihi</label>
       <input style={INP} type="date" value={f.firstDate} onChange={e=>s("firstDate",e.target.value)} />
       {f.name && previewDates() ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginTop:12, fontSize:12, color:"#166534" }}><strong>Planlanacak dersler:</strong><br />{previewDates()}</div> : null}
-      <div style={{ marginTop:16 }}><Btn bg="#111" onClick={async() => { if(!f.name.trim() || !f.teacher_id || !f.lesson_start_date || saving) return; setSaving(true); const saved=await onAdd(f); setSaving(false); if(saved) onClose(); }}>{saving?"Kaydediliyor...":"Kaydet"}</Btn></div>
+      {saveError ? <p role="alert" style={{ color:"#b91c1c", fontSize:12 }}>{saveError}</p> : null}
+      <div style={{ marginTop:16 }}><Btn bg="#111" disabled={saving} onClick={async() => {
+        if(!f.name.trim() || !f.teacher_id || !f.lesson_start_date || savingRef.current) return;
+        if (!validStudentGenderChanges({ student_gender:f.student_gender, guardian_gender:f.guardian_gender })) {
+          setSaveError("Öğrenci ve veli için seçim yapın. Bilgi yoksa Belirtilmedi, veli yoksa Veli yok seçebilirsiniz."); return;
+        }
+        savingRef.current = true; setSaving(true); setSaveError("");
+        try { const saved=await onAdd(f); if(saved) onClose(); else setSaveError("Öğrenci kaydı doğrulanamadı. Güncel kayıtları kontrol edin."); }
+        catch { setSaveError("Öğrenci kaydı doğrulanamadı. İşlem otomatik tekrarlanmadı."); }
+        finally { savingRef.current = false; setSaving(false); }
+      }}>{saving?"Kaydediliyor...":"Kaydet"}</Btn></div>
+      </fieldset>
     </Sheet>
   );
 }
@@ -10003,18 +10075,22 @@ export default function App() {
     };
   };
 
-  const saveStudent = async (student) => {
+  const saveStudent = async (student, genderChanges=null, genderOptions={}) => {
     if (!requireProtectedSources(["students"],"Öğrenci kaydı")) throw new Error("STUDENTS_NOT_LOADED");
+    if (genderChanges && !validStudentGenderChanges(genderChanges)) throw new Error("INVALID_STUDENT_GENDER");
     const branchId = currentBranch?.id;
     if (!branchId || (student.branch_id && student.branch_id !== branchId)) {
       pop("Aktif şube doğrulanamadı; öğrenci kaydı gönderilmedi.",8000);
       throw new Error("STUDENT_BRANCH_CONTEXT_MISMATCH");
     }
     return runBranchScopedWrite(async () => {
-      const currentVersion = typeof student.record_version === "number" ? student.record_version : 0;
+      const currentVersion = genderChanges ? (genderOptions.expectedRecordVersion ?? student.record_version ?? 0) : (typeof student.record_version === "number" ? student.record_version : 0);
+      if (genderChanges && (!Number.isInteger(currentVersion) || currentVersion < 0)) throw new Error("INVALID_STUDENT_RECORD_VERSION");
       const writeId = uid();
       const nextVersion = currentVersion + 1;
-      const payload = { ...studentPayload(student,nextVersion,writeId), branch_id:branchId };
+      const payload = genderOptions.onlyGender
+        ? { ...genderChanges, record_version:nextVersion, last_write_id:writeId, last_saved_at:new Date().toISOString() }
+        : { ...studentPayload(student,nextVersion,writeId), branch_id:branchId, ...(genderChanges || {}) };
       const isExisting = !!student.created_at || typeof student.record_version === "number";
       let data = null;
       let error = null;
@@ -10040,9 +10116,11 @@ export default function App() {
         error = result.error;
       }
 
-      if (error || !data?.id || data.branch_id !== branchId || data.last_write_id !== writeId || data.record_version !== nextVersion) {
+      if (error || !data?.id || data.branch_id !== branchId || data.last_write_id !== writeId || data.record_version !== nextVersion
+        || (genderChanges && (data.id !== student.id || Object.entries(genderChanges).some(([key,value]) => data[key] !== value)))) {
         console.error("Kayıt hatası:", error);
-        pop("Kayıt güvenli şekilde doğrulanamadı. Ekran veritabanından yenilendi.", 8000);
+        const missingGenderColumn = genderChanges && /student_gender|guardian_gender/.test(String(error?.message || "")) && ["42703","PGRST204"].includes(error?.code);
+        pop(missingGenderColumn ? "Cinsiyet alanları için v187 veritabanı kurulumu gerekiyor. Değişiklik kaydedilmedi." : "Kayıt güvenli şekilde doğrulanamadı. Ekran veritabanından yenilendi.", 8000);
         await loadStudents(undefined,branchId);
         throw new Error("Veritabanı kaydı doğrulanamadı");
       }
@@ -11616,6 +11694,8 @@ export default function App() {
 
   const handleAdd = async (f) => {
     if (!requireProtectedSources(["students","teachers"],"Öğrenci ekleme")) return null;
+    const genderChanges = { student_gender:f.student_gender, guardian_gender:f.guardian_gender };
+    if (!validStudentGenderChanges(genderChanges)) { pop("Öğrenci ve veli cinsiyeti için seçim yapın; bilgi yoksa Belirtilmedi seçebilirsiniz.",6000); return null; }
     const from = new Date((f.firstDate||turkeyDateKey())+"T12:00:00");
     const slots = normalizeSlots(f.lessonSlots);
     const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
@@ -11630,7 +11710,7 @@ export default function App() {
     };
     setStudents(p=>[...p, newStudent]);
     try {
-      const saved = await saveStudent(newStudent);
+      const saved = await saveStudent(newStudent,genderChanges);
       pop("Öğrenci eklendi");
       setWelcomeStudentId(saved.id);
       return saved;
@@ -12058,9 +12138,22 @@ export default function App() {
     pop("Dönem özeti WhatsApp'ta hazırlandı");
   };
 
-  const handleDuzenle = async (sid, f) => {
+  const handleDuzenle = async (sid, f, genderIntent=null) => {
     if (!requireProtectedSources(["students","teachers"],"Öğrenci düzenleme")) return false;
     const sourceStudent = students.find(s=>s.id===sid);
+    if (genderIntent) {
+      if (!validStudentGenderChanges(genderIntent.changes) || !Number.isInteger(genderIntent.expectedRecordVersion)) { pop("Cinsiyet değişikliği doğrulanamadı; kayıt gönderilmedi.",6000); return false; }
+      if (!sourceStudent || sourceStudent.record_version !== genderIntent.expectedRecordVersion) {
+        pop("Öğrenci kaydı bu pencere açıldıktan sonra değişti. Güncel kaydı yeniden açın; değişiklik gönderilmedi.",8000);
+        await loadStudents(); return false;
+      }
+      if (genderIntent.onlyGender) {
+        try {
+          await saveStudent(sourceStudent,genderIntent.changes,genderIntent);
+          pop("Bilgiler güncellendi"); return true;
+        } catch { return false; }
+      }
+    }
     if (!preferredPeriodSchemaReadyRef.current && sourceStudent
       && PACKAGE_LOAD_OPTIONS.includes(parseInt(f.preferredPackageLessonCount))
       && parseInt(f.preferredPackageLessonCount)!==getPreferredPackageLessonCount(sourceStudent)) {
@@ -12147,8 +12240,9 @@ export default function App() {
       };
     });
     setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
+    await saveStudent(updated.find(s=>s.id===sid),genderIntent?.changes || null,genderIntent || {});
     pop("Bilgiler güncellendi");
+    return true;
   };
 
   const handleZamYap = async (sid, fee, date) => {
