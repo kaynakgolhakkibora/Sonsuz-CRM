@@ -3723,7 +3723,78 @@ function StudentGenderFields({ form, onChange, editing=false }) {
   </>;
 }
 
-function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
+function programSlots(slots) {
+  return normalizeSlots(slots).map(slot=>({ day:({Sali:"Salı",Carsamba:"Çarşamba",Persembe:"Perşembe"})[slot.day] || slot.day,time:slot.time }))
+    .sort((a,b)=>((slotDayIndex(a.day)+6)%7)-((slotDayIndex(b.day)+6)%7) || a.time.localeCompare(b.time));
+}
+
+function programJSON(value) {
+  if (Array.isArray(value)) return "["+value.map(programJSON).join(",")+"]";
+  if (value && typeof value==="object") return "{"+Object.keys(value).sort().map(key=>JSON.stringify(key)+":"+programJSON(value[key])).join(",")+"}";
+  return JSON.stringify(value);
+}
+
+function readProgramChangeIssue(actor) {
+  if (!actor) return null;
+  const raw=localStorage.getItem("sonsuz_crm_program_change_v189:"+actor);
+  if (!raw) return null;
+  const issue=JSON.parse(raw);
+  if (issue.actorUserId!==actor || !SINGLE_LESSON_MOVE_UUID.test(issue.operationId || "") || !issue.params || issue.params.p_operation_id!==issue.operationId) throw new Error("PROGRAM_LOCAL_EVIDENCE_INVALID");
+  return issue;
+}
+
+function programChangeRequest(params) {
+  return {studentId:params.p_student_id,branchId:params.p_branch_id,expectedRecordVersion:params.p_expected_record_version,
+    slots:params.p_slots,profileChanges:params.p_profile_changes,previewSignature:params.p_preview_signature};
+}
+
+function programTimeline(student,record) {
+  if (!student.program_operation_id) return {operations:[],sourceKeys:[]};
+  if (!record || record.studentId!==student.id || record.branchId!==student.branch_id || record.recordVersion!==student.record_version
+    || record.programOperationId!==student.program_operation_id || !Array.isArray(record.operations) || !record.operations.length || record.operations.length>128) return null;
+  const sourceKeys=[];let version=-1;
+  for (const op of record.operations) {
+    if (!SINGLE_LESSON_MOVE_UUID.test(op.operationId || "") || op.studentId!==student.id || op.branchId!==student.branch_id
+      || !Number.isInteger(op.resultingRecordVersion) || op.resultingRecordVersion<=version || !isValidLocalDateInput(op.effectiveOn)
+      || !Array.isArray(op.previousSlots) || !op.previousSlots.length || !Array.isArray(op.nextSlots) || !op.nextSlots.length || !Array.isArray(op.changes)) return null;
+    version=op.resultingRecordVersion;
+    for(const change of op.changes) {
+      const before=change.before,after=change.after,source=singleLessonMovePosition(before?.date),target=singleLessonMovePosition(after?.date);
+      if(!source || !target || !before.id || before.id!==after.id || before.status!=="upcoming" || after.status!=="upcoming") return null;
+      const stable=lesson=>Object.fromEntries(Object.entries(lesson).filter(([key])=>!["date","day","time","durationMinutes"].includes(key)));
+      if(programJSON(stable(before))!==programJSON(stable(after))) return null;
+      sourceKeys.push(source.localDate+"|"+source.time);
+    }
+  }
+  const last=record.operations[record.operations.length-1];
+  if(last.operationId!==student.program_operation_id || last.effectiveOn!==student.program_effective_on
+    || programJSON(programSlots(last.nextSlots))!==programJSON(programSlots(getStudentSlots(student)))) return null;
+  return {operations:record.operations,sourceKeys};
+}
+
+function programSlotsOnDate(student,timeline,date) {
+  if(!timeline?.operations.length) return getStudentSlots(student);
+  const key=turkeyDateKey(date);let slots=timeline.operations[0].previousSlots;
+  for(const op of timeline.operations) if(key>=op.effectiveOn) slots=op.nextSlots;
+  return slots;
+}
+
+async function readProgramTimelines(client,students,scope,isCurrent=()=>true) {
+  if(!scope?.actorUserId || !scope?.branchId) throw new Error("PROGRAM_READ_SCOPE_REQUIRED");
+  const records=[];
+  for(let index=0;index<students.length;index+=40) {
+    const batch=students.slice(index,index+40);
+    if(!isCurrent() || batch.some(s=>s.branch_id!==scope.branchId)) throw new Error("PROGRAM_READ_SCOPE_CHANGED");
+    const result=await timedSingleLessonRequest(()=>client.rpc("read_student_program_timeline",{p_branch_id:scope.branchId,p_student_ids:batch.map(s=>s.id)}));
+    if(!isCurrent()) return null;
+    if(result.error || !Array.isArray(result.data) || result.data.length!==batch.length || new Set(result.data.map(r=>r.studentId)).size!==batch.length
+      || batch.some(s=>!programTimeline(s,result.data.find(r=>r.studentId===s.id)))) throw new Error("PROGRAM_TIMELINE_UNVERIFIED");
+    records.push(...result.data);
+  }
+  return records;
+}
+
+function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram }) {
   const currentTeacherId = student.teacher_id || teachers.find(t => t.name === studentTeacherName(student))?.id || "";
   const [f, setF] = useState({
     name: student.name,
@@ -3749,6 +3820,14 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState("");
+  const [preview,setPreview]=useState(null);
+  const [previewing,setPreviewing]=useState(false);
+  const formKey=programJSON(f);
+  const formKeyRef=useRef(formKey);
+  formKeyRef.current=formKey;
+  const previewSequence=useRef(0);
+  const slotsChanged=programJSON(programSlots(f.lessonSlots))!==programJSON(programSlots(getStudentSlots(student)));
+  useEffect(()=>{setPreview(null);previewSequence.current+=1;return ()=>{previewSequence.current+=1;};},[formKey]);
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const setSlot = (i,k,v) => setF(p=>({
     ...p,
@@ -3808,11 +3887,29 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle }) {
       <button onClick={addSlot} style={{ width:"100%", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", marginTop:2 }}>+ Ders günü ekle</button>
       <div style={{ marginTop:16 }}>
         {saveError ? <p role="alert" style={{ color:"#b91c1c", fontSize:12 }}>{saveError}</p> : null}
-        <Btn bg="#111" disabled={saving} onClick={async() => {
+        {slotsChanged ? <>
+          <Btn bg="#2563eb" disabled={previewing || saving} onClick={async()=>{
+            if(!onPreviewProgram) {setSaveError("Program kontrolü kullanılamıyor; kayıt gönderilmedi.");return;}
+            const sequence=++previewSequence.current,key=formKey;
+            setPreviewing(true);setSaveError("");
+            try {
+              const result=await onPreviewProgram(student.id,f,openedRecordVersion);
+              if(sequence===previewSequence.current && formKeyRef.current===key) {setPreview(result ? {key,result} : null);if(!result)setSaveError("Program doğrulanamadı. Güncel kaydı kontrol edin.");}
+            } catch {if(sequence===previewSequence.current)setSaveError("Program doğrulanamadı; kayıt gönderilmedi.");}
+            finally {setPreviewing(false);}
+          }}>{previewing ? "Kontrol Ediliyor…" : "Programı Kontrol Et"}</Btn>
+          {preview?.key===formKey ? <div data-program-preview style={{padding:12,background:"#eff6ff",borderRadius:10,fontSize:12,marginBottom:12}}>
+            <p style={{fontWeight:800}}>Yeni program başlangıcı: {fmtShort(preview.result.plan.effectiveOn+"T12:00:00+03:00")}</p>
+            <p>{preview.result.plan.changes.length} planlı ders değişecek. İşlenmiş dersler korunacak.</p>
+            {preview.result.plan.preserved.map(({lesson})=><p key={lesson.id}>Korunacak randevu: {fmtShort(lesson.date)} · {timeFromISO(lesson.date)}</p>)}
+            {preview.result.plan.changes.map(({before,after})=><p key={before.id}>{fmtShort(before.date)} {timeFromISO(before.date)} → {fmtShort(after.date)} {timeFromISO(after.date)}</p>)}
+          </div> : <p style={{fontSize:12,color:"#64748b"}}>Yeni programı ve korunacak randevuları kaydetmeden önce kontrol edin.</p>}
+        </> : null}
+        <Btn bg="#111" disabled={saving || previewing || (slotsChanged && preview?.key!==formKey)} onClick={async() => {
           if (!f.name.trim() || !f.teacher_id || savingRef.current) return;
           savingRef.current = true; setSaving(true); setSaveError("");
           try {
-            const saved = await onDuzenle(student.id, f, studentGenderEditIntent(f,initialForm,openedRecordVersion));
+            const saved = await onDuzenle(student.id, f, studentGenderEditIntent(f,initialForm,openedRecordVersion),{expectedRecordVersion:openedRecordVersion,programPreview:slotsChanged ? preview?.result : null});
             if (saved) onClose();
             else setSaveError("Kayıt doğrulanamadı. Bilgiler kaydedilmiş kabul edilmedi; güncel kaydı kontrol edin.");
           } catch {
@@ -4014,7 +4111,7 @@ function studentLinkedSingleLessons(singleLessons, studentId) {
     .sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at));
 }
 
-function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onPreviewProgram, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -4408,7 +4505,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
       {showResumeProgram ? <ResumeProgramSheet student={student} onClose={() => setShowResumeProgram(false)} onResume={(startDate) => onToggleFreeze(student.id, false, startDate)} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
       {ekDersOdemeSel ? <EkDersOdemeSheet student={student} extra={ekDersOdemeSel} onClose={()=>setEkDersOdemeSel(null)} onConfirm={onEkDersOdeme} /> : null}
-      {showDuzenle ? <DuzenleSheet student={student} teachers={teachers} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} /> : null}
+      {showDuzenle ? <DuzenleSheet student={student} teachers={teachers} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} onPreviewProgram={onPreviewProgram} /> : null}
       {showPieceAdd ? <PieceAddSheet student={student} onClose={()=>setShowPieceAdd(false)} onSave={piece=>onPieceAdd(student.id,piece)} /> : null}
     </>
   );
@@ -5046,6 +5143,24 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   },[moveReadKey,moveReadRetry]);
   const verifiedMoveSources = moveReadResult?.key===moveReadKey && moveReadResult.state==="ready" ? moveReadResult.sources : [];
   const moveReadState = moveRequests.length ? (moveReadResult?.key===moveReadKey ? moveReadResult.state : "loading") : "";
+  const programStudents=students.filter(s=>s.program_operation_id && !s.frozen && !isStudentLeft(s));
+  const programReadKey=JSON.stringify([calendarMoveReadScope,programStudents.map(s=>[s.id,s.branch_id,s.record_version,s.program_operation_id])]);
+  const programReadKeyRef=useRef(programReadKey);
+  programReadKeyRef.current=programReadKey;
+  const [programReadResult,setProgramReadResult]=useState(null);
+  const [programReadRetry,setProgramReadRetry]=useState(0);
+  useEffect(()=>{
+    let cancelled=false;
+    const isCurrent=()=>!cancelled && programReadKeyRef.current===programReadKey;
+    if(!programStudents.length){setProgramReadResult(null);return ()=>{cancelled=true;};}
+    setProgramReadResult({key:programReadKey,state:"loading",records:[]});
+    readProgramTimelines(supabase,programStudents,calendarMoveReadScope,isCurrent)
+      .then(records=>{if(isCurrent() && records)setProgramReadResult({key:programReadKey,state:"ready",records});})
+      .catch(()=>{if(isCurrent())setProgramReadResult({key:programReadKey,state:"error",records:[]});});
+    return ()=>{cancelled=true;};
+  },[programReadKey,programReadRetry]);
+  const programReadState=programStudents.length ? (programReadResult?.key===programReadKey ? programReadResult.state : "loading") : "";
+  const programRecords=programReadResult?.key===programReadKey && programReadResult.state==="ready" ? programReadResult.records : [];
   const now = new Date();
   const dow = now.getDay();
   const start = new Date(now);
@@ -5064,6 +5179,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   // Read-only observation: uses the existing source filters, never changes calendar items.
   const availabilityIntervals = [];
   let availabilityInvalid = false;
+  if(programReadState && programReadState!=="ready") availabilityInvalid=true;
   const observeAvailability = (date,time,duration,kind) => {
     if (!availabilityOpen || kind==="telafi-slot") return;
     const interval = calendarAvailabilityInterval(date,time,duration);
@@ -5094,6 +5210,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     const statedStart = student.lesson_start_date || student.lessonStartDate;
     const programStart = statedStart ? midday(new Date(statedStart+(/^\d{4}-\d{2}-\d{2}$/.test(statedStart)?"T12:00:00":""))) : (earliestScheduleWeek || todayMid);
     const actualKeys = new Set();
+    const timeline=programTimeline(student,programRecords.find(record=>record.studentId===student.id));
     const lessonIdCounts = new Map();
     schedule.forEach(lesson=>lessonIdCounts.set(lesson.id,(lessonIdCounts.get(lesson.id) || 0)+1));
     const movedSourceKeys = new Set(schedule.flatMap(lesson => {
@@ -5121,7 +5238,9 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       });
     });
 
-    getStudentSlots(student).forEach((slot,slotIndex) => {
+    const visibleProgramSlots=timeline ? days.flatMap(day=>programSlotsOnDate(student,timeline,day)
+      .filter(slot=>slotDayIndex(slot.day)===day.getDay()).map(slot=>({...slot,date:day}))) : [];
+    visibleProgramSlots.forEach((slot,slotIndex) => {
       if (teacherName && studentTeacherName(student) !== teacherName) return;
       const targetDay = slotDayIndex(slot.day);
       const dayIndex = days.findIndex(day=>day.getDay()===targetDay);
@@ -5130,6 +5249,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       if (slotDate < midday(programStart) || slotDate < todayMid) return;
       if (actualKeys.has(dayIndex+"|"+slot.time)) return;
       if (movedSourceKeys.has(turkeyDateKey(slotDate)+"|"+slot.time)) return;
+      if (timeline.sourceKeys.includes(turkeyDateKey(slotDate)+"|"+slot.time)) return;
       observeAvailability(slotDate,slot.time,getLessonDuration(student),packageEnded?"package-ended":"normal");
       addItem({
         key:"slot-"+student.id+"-"+slotIndex+"-"+localDateKey(slotDate),
@@ -5261,6 +5381,10 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       {["loading","error"].includes(moveReadState) ? <div role="status" style={{ marginBottom:10, padding:"8px 12px", borderRadius:8, background:moveReadState==="error"?"#fff7ed":"#f8fafc", color:moveReadState==="error"?"#9a3412":"#64748b", fontSize:12 }}>
         {moveReadState==="error" ? <>Taşınan derslerin eski program kartları doğrulanamadı; takvimde fazladan kart olabilir. <button onClick={()=>setMoveReadRetry(value=>value+1)} style={{ background:"none", border:"none", color:"inherit", textDecoration:"underline", cursor:"pointer", fontFamily:"inherit" }}>Yalnız takvimi yeniden kontrol et</button></> : moveReadState==="loading" ? "Taşınan derslerin takvim konumları kontrol ediliyor…" : null}
       </div> : null}
+      {["loading","error"].includes(programReadState) ? <div role="status" style={{padding:10,marginBottom:10,background:"#fff7ed",fontSize:12,color:"#9a3412"}}>
+        {programReadState==="loading" ? "Program başlangıçları kontrol ediliyor…" : "Program başlangıçları doğrulanamadı. Kayıtlı dersler gösteriliyor; uygun saatler henüz doğrulanmış değil."}
+        {programReadState==="error" ? <button onClick={()=>setProgramReadRetry(value=>value+1)}>Yalnız takvimi yeniden kontrol et</button> : null}
+      </div> : null}
       <div className="week-calendar-v66">
         <div className="week-calendar-v66-grid">
           <div style={{ gridColumn:1, gridRow:1, background:"#fbfaf9", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", zIndex:2 }} />
@@ -5291,7 +5415,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
           </div>)}
         </div>
       </div>
-      {availabilityOpen ? <CalendarAvailabilitySheet key={JSON.stringify([calendarMoveReadScope,offset])} days={days} intervals={availabilityIntervals} invalid={availabilityInvalid} moveReadState={moveReadState} onRetry={()=>setMoveReadRetry(value=>value+1)} onClose={onAvailabilityClose} recipients={calendarAvailabilityRecipients(students,calendarMoveReadScope?.branchId)} /> : null}
+      {availabilityOpen ? <CalendarAvailabilitySheet key={JSON.stringify([calendarMoveReadScope,offset])} days={days} intervals={availabilityIntervals} invalid={availabilityInvalid} moveReadState={programReadState && programReadState!=="ready" ? programReadState : moveReadState} onRetry={()=>{setMoveReadRetry(value=>value+1);setProgramReadRetry(value=>value+1);}} onClose={onAvailabilityClose} recipients={calendarAvailabilityRecipients(students,calendarMoveReadScope?.branchId)} /> : null}
     </div>
   );
 }
@@ -7216,6 +7340,13 @@ export default function App() {
   const [normalLessonMakeupPlanIssueChecking, setNormalLessonMakeupPlanIssueChecking] = useState(false);
   const [normalLessonMakeupCompletionIssue, setNormalLessonMakeupCompletionIssue] = useState(null);
   const [normalLessonMakeupCompletionIssueChecking, setNormalLessonMakeupCompletionIssueChecking] = useState(false);
+  const [programChangeIssue,setProgramChangeIssue]=useState(null);
+  const [programChangeChecking,setProgramChangeChecking]=useState(false);
+  const programChangeIssueRef=useRef(null);
+  const programChangeWritingRef=useRef(false);
+  const programChangeCheckingRef=useRef(false);
+  const programChangeActorRef=useRef("");
+  programChangeActorRef.current=authSession?.user?.id || "";
   const [singleLessonMoveIssue, setSingleLessonMoveIssue] = useState(null);
   const [singleLessonMoveChecking, setSingleLessonMoveChecking] = useState(false);
   const singleLessonMoveIssueRef = useRef(null);
@@ -7399,7 +7530,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const warnWhilePaymentIsWriting = event => {
-      if (!singleLessonMoveWritingRef.current && !extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !normalLessonMakeupCompletionWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
+      if (!programChangeWritingRef.current && !singleLessonMoveWritingRef.current && !extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !normalLessonMakeupCompletionWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -7715,6 +7846,7 @@ export default function App() {
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
 
   const runBranchScopedWrite = async task => {
+    if(programChangeIssueRef.current || programChangeWritingRef.current || readProgramChangeIssue(programChangeActorRef.current)) throw new Error("PROGRAM_CHANGE_PENDING");
     // Do not let a legacy full-row writer race an unresolved single move.
     if (singleLessonMoveIssueRef.current || singleLessonMoveWritingRef.current || readSingleLessonMoveIssue(singleLessonMoveActorRef.current)) throw new Error("SINGLE_LESSON_MOVE_PENDING");
     branchScopedWriteCountRef.current += 1;
@@ -7755,6 +7887,9 @@ export default function App() {
   })[source] || "gerekli kayıtlar";
 
   const requireProtectedSources = (sources, actionLabel="Bu işlem") => {
+    if(programChangeIssueRef.current || programChangeWritingRef.current || readProgramChangeIssue(programChangeActorRef.current)) {
+      pop("Önce bekleyen program değişikliğinin sonucunu üstteki uyarıdan kontrol edin.",8000);return false;
+    }
     const missing = sources.filter(source=>!loadedSources[source]);
     if (!missing.length) return true;
     pop(actionLabel+", "+missing.map(protectedSourceLabel).join(" ve ")+" Supabase'den doğrulanmadan yapılamaz. Üstteki Yeniden Kontrol Et düğmesini kullanın.",8000);
@@ -8176,6 +8311,7 @@ export default function App() {
   };
 
   const pendingBranchIds = () => [...new Set([
+    programChangeIssueRef.current?.branchId,
     singleLessonMoveIssueRef.current?.branchId,
     packagePaymentIssueRef.current?.branchId,
     extraLessonPaymentIssueRef.current?.branchId,
@@ -8200,7 +8336,8 @@ export default function App() {
       : "";
     const requiredBranches = pendingBranchIds();
     const currentBranchHasUnresolvedWrite = !!currentBranch?.id && requiredBranches.includes(currentBranch.id);
-    const activeWrite = packagePaymentWritingRef.current
+    const activeWrite = programChangeWritingRef.current
+      || packagePaymentWritingRef.current
       || singleLessonMoveWritingRef.current
       || extraLessonPaymentWritingRef.current
       || normalLessonEvaluationWritingRef.current
@@ -10072,6 +10209,7 @@ export default function App() {
       record_version: recordVersion,
       last_write_id: writeId,
       last_saved_at: new Date().toISOString(),
+      ...(Object.prototype.hasOwnProperty.call(student,"program_operation_id") ? {program_operation_id:student.program_operation_id} : {}),
     };
   };
 
@@ -10089,7 +10227,7 @@ export default function App() {
       const writeId = uid();
       const nextVersion = currentVersion + 1;
       const payload = genderOptions.onlyGender
-        ? { ...genderChanges, record_version:nextVersion, last_write_id:writeId, last_saved_at:new Date().toISOString() }
+        ? { ...genderChanges, record_version:nextVersion, last_write_id:writeId, last_saved_at:new Date().toISOString(), ...(Object.prototype.hasOwnProperty.call(student,"program_operation_id") ? {program_operation_id:student.program_operation_id} : {}) }
         : { ...studentPayload(student,nextVersion,writeId), branch_id:branchId, ...(genderChanges || {}) };
       const isExisting = !!student.created_at || typeof student.record_version === "number";
       let data = null;
@@ -11503,7 +11641,7 @@ export default function App() {
           pop("Ders konumu doğrulanamadı. Yalnız bugün/gelecekteki planlı ders için farklı geçerli tarih ve saat seçin; kayıt gönderilmedi.",9000);
           return false;
         }
-        if (branchScopedWriteCountRef.current || packagePaymentWritingRef.current || packagePaymentIssueRef.current
+        if (programChangeIssueRef.current || programChangeWritingRef.current || branchScopedWriteCountRef.current || packagePaymentWritingRef.current || packagePaymentIssueRef.current
           || extraLessonPaymentWritingRef.current || extraLessonPaymentIssueRef.current
           || normalLessonEvaluationWritingRef.current || normalLessonEvaluationIssueRef.current
           || normalLessonMakeupWritingRef.current || normalLessonMakeupIssueRef.current
@@ -11641,7 +11779,12 @@ export default function App() {
     if(kind==="load") {
       if(!periodLoadOptions(student).includes(count)) {pop("Bu ders sayısı öğrencinin dönem büyüklüğüne uygun değil.",7000);return false;}
       const last=[...(student.schedule||[])].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-      const from=last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
+      let from=last ? new Date(new Date(last.date).getTime()+86400000) : new Date();
+      if(student.program_effective_on) {
+        if(!isValidLocalDateInput(student.program_effective_on)) {pop("Program başlangıcı doğrulanamadı; paket yüklenmedi.",8000);return false;}
+        const effective=new Date(student.program_effective_on+"T00:00:00+03:00");
+        if(from<effective) from=effective;
+      }
       Object.assign(params,{p_total_count:count,p_period_count:getPreferredPackageLessonCount(student),
         p_planned_lessons:buildScheduleSlots(getStudentSlots(student),count,from,getLessonDuration(student)).map(l=>({date:l.date,day:l.day,time:l.time,durationMinutes:l.durationMinutes}))});
     } else params.p_package_id=packageId;
@@ -12138,9 +12281,125 @@ export default function App() {
     pop("Dönem özeti WhatsApp'ta hazırlandı");
   };
 
-  const handleDuzenle = async (sid, f, genderIntent=null) => {
+  const previewProgramChange = async (sid,f,expectedRecordVersion) => {
+    if(!requireProtectedSources(["students","teachers"],"Program kontrolü") || !browserOnline || connectionRevalidationRequired) return null;
+    const source=students.find(s=>s.id===sid),branchId=currentBranch?.id,actor=programChangeActorRef.current,generation=protectedDataLoadGenerationRef.current;
+    if(!source || source.branch_id!==branchId || source.record_version!==expectedRecordVersion) {pop("Öğrenci kaydı değişti. Düzenleme penceresini güncel kayıttan yeniden açın.",8000);return null;}
+    const result=await timedSingleLessonRequest(()=>supabase.rpc("preview_student_program_change",{p_student_id:sid,p_branch_id:branchId,p_expected_record_version:expectedRecordVersion,p_slots:programSlots(f.lessonSlots),p_duration:parseInt(f.lessonDuration)||45}));
+    if(actor!==programChangeActorRef.current || generation!==protectedDataLoadGenerationRef.current) return null;
+    if(result.error || result.data?.studentId!==sid || result.data.branchId!==branchId || result.data.expectedRecordVersion!==expectedRecordVersion
+      || !/^[0-9a-f]{64}$/.test(result.data.signature || "") || !Array.isArray(result.data.plan?.changes) || !Array.isArray(result.data.plan?.preserved)) {
+      pop("Program kontrolü tamamlanamadı. "+(result.error?.message || "Güncel kaydı yeniden açın; V189 veritabanı temeli gerekli olabilir."),10000);return null;
+    }
+    return result.data;
+  };
+
+  const rememberProgramChange = issue => {
+    const actor=issue.actorUserId,key="sonsuz_crm_program_change_v189:"+actor;
+    try {
+      const previous=readProgramChangeIssue(actor);
+      if(previous && previous.operationId!==issue.operationId) return false;
+      localStorage.setItem(key,JSON.stringify(issue));
+      if(programJSON(readProgramChangeIssue(actor))!==programJSON(issue)) return false;
+      if(actor===programChangeActorRef.current){programChangeIssueRef.current=issue;setProgramChangeIssue(issue);}
+      return true;
+    } catch {return false;}
+  };
+
+  const clearProgramChange = issue => {
+    if(!issue || programChangeWritingRef.current) return false;
+    try {
+      const previous=readProgramChangeIssue(issue.actorUserId);
+      if(previous?.operationId!==issue.operationId) return false;
+      localStorage.removeItem("sonsuz_crm_program_change_v189:"+issue.actorUserId);
+      if(readProgramChangeIssue(issue.actorUserId)) return false;
+      if(issue.actorUserId===programChangeActorRef.current && programChangeIssueRef.current?.operationId===issue.operationId) {programChangeIssueRef.current=null;setProgramChangeIssue(null);}
+      return true;
+    } catch {return false;}
+  };
+
+  const checkProgramChange = async (issue=programChangeIssueRef.current) => {
+    if(!issue?.params || issue.actorUserId!==programChangeActorRef.current || issue.branchId!==currentBranch?.id || !browserOnline || programChangeCheckingRef.current) return false;
+    const generation=protectedDataLoadGenerationRef.current;
+    const isCurrent=()=>issue.actorUserId===programChangeActorRef.current && generation===protectedDataLoadGenerationRef.current && programChangeIssueRef.current?.operationId===issue.operationId;
+    programChangeCheckingRef.current=true;setProgramChangeChecking(true);
+    try {
+      const evidence=await timedSingleLessonRequest(()=>supabase.from("student_program_changes").select("*").eq("operation_id",issue.operationId).eq("branch_id",issue.branchId).maybeSingle());
+      if(!isCurrent() || evidence.error) return false;
+      const fresh=await timedSingleLessonRequest(()=>supabase.from("students").select("*").eq("id",issue.params.p_student_id).eq("branch_id",issue.branchId).single());
+      if(!isCurrent() || fresh.error || fresh.data?.id!==issue.params.p_student_id || fresh.data.branch_id!==issue.branchId) return false;
+      if(!evidence.data) {
+        if(issue.knownRejected) {setStudents(current=>current.map(s=>s.id===fresh.data.id?fresh.data:s));return clearProgramChange(issue);}
+        rememberProgramChange({...issue,state:"unknown"});return false;
+      }
+      const event=evidence.data;
+      if(event.operation_id!==issue.operationId || event.actor_user_id!==issue.actorUserId || event.student_id!==fresh.data.id
+        || event.branch_id!==issue.branchId || event.resulting_record_version!==issue.params.p_expected_record_version+1
+        || programJSON(event.request_payload)!==programJSON(programChangeRequest(issue.params)) || fresh.data.record_version<event.resulting_record_version) {
+        rememberProgramChange({...issue,state:"conflict"});return false;
+      }
+      setStudents(current=>current.map(s=>s.id===fresh.data.id?fresh.data:s));
+      if(programChangeWritingRef.current){rememberProgramChange({...issue,state:"verified"});return true;}
+      const cleared=clearProgramChange(issue);if(cleared)pop("Program değişikliği veritabanından doğrulandı");return cleared;
+    } catch {if(isCurrent())rememberProgramChange({...issue,state:"unknown"});return false;}
+    finally {programChangeCheckingRef.current=false;setProgramChangeChecking(false);}
+  };
+
+  const performProgramChange = async (student,profile,slots,preview) => {
+    const actor=programChangeActorRef.current,branchId=currentBranch?.id,generation=protectedDataLoadGenerationRef.current;
+    if(!actor || !navigator.locks?.request || !browserOnline || connectionRevalidationRequired || student.branch_id!==branchId) {pop("Güvenli program değişikliği için geçerli oturum, bağlantı ve güncel tarayıcı gerekiyor.",8000);return false;}
+    return navigator.locks.request("sonsuz-program-change:"+actor,{ifAvailable:true},async lock=>{
+      if(!lock || programChangeWritingRef.current || programChangeCheckingRef.current || readProgramChangeIssue(actor) || programChangeIssueRef.current
+        || branchScopedWriteCountRef.current || failedOps.length || singleLessonMoveWritingRef.current || singleLessonMoveIssueRef.current || readSingleLessonMoveIssue(actor)
+        || packagePaymentWritingRef.current || packagePaymentIssueRef.current || extraLessonPaymentWritingRef.current || extraLessonPaymentIssueRef.current
+        || normalLessonEvaluationWritingRef.current || normalLessonEvaluationIssueRef.current || normalLessonMakeupWritingRef.current || normalLessonMakeupIssueRef.current
+        || normalLessonMakeupPlanWritingRef.current || normalLessonMakeupPlanIssueRef.current || normalLessonMakeupCompletionWritingRef.current || normalLessonMakeupCompletionIssueRef.current
+        || periodLoadWritingRef.current || periodLoadIssueRef.current || readPeriodLoadIssue(actor)) {pop("Önce devam eden veya sonucu bekleyen öğrenci işlemini sonuçlandırın.",9000);return false;}
+      if(actor!==programChangeActorRef.current || generation!==protectedDataLoadGenerationRef.current || preview?.expectedRecordVersion!==student.record_version
+        || preview.studentId!==student.id || preview.branchId!==branchId || programJSON(preview.plan.nextSlots)!==programJSON(slots)) return false;
+      const operationId=uid();
+      const params={p_student_id:student.id,p_branch_id:branchId,p_expected_record_version:student.record_version,p_slots:slots,p_profile_changes:profile,p_preview_signature:preview.signature,p_operation_id:operationId};
+      const issue={operationId,actorUserId:actor,branchId,params,state:"writing",createdAt:new Date().toISOString(),label:student.name};
+      if(!rememberProgramChange(issue)){pop("İşlem niyeti güvenli saklanamadı; kayıt gönderilmedi.",9000);return false;}
+      programChangeWritingRef.current=true;branchScopedWriteCountRef.current+=1;
+      try {
+        const result=await timedSingleLessonRequest(()=>supabase.rpc("change_student_program",params).single());
+        if(actor!==programChangeActorRef.current || generation!==protectedDataLoadGenerationRef.current) return false;
+        const knownRejected=!!result.error && !result.timedOut && ["22023","22007","42501","40001","P0001","P0002","23502","23503","23505","23514","22P02","22001","57014"].includes(result.error.code);
+        const pending={...issue,state:"unknown",knownRejected};rememberProgramChange(pending);
+        const verified=await checkProgramChange(pending);
+        if(verified && programChangeIssueRef.current?.state==="verified") {pop("Program ve bilgiler güncellendi");return true;}
+        if(knownRejected) pop("Program kaydedilmedi. "+result.error.message+" Güncel kaydı yeniden açın.",10000);
+        else pop("Program sonucu henüz doğrulanamadı. Üstteki uyarıdan yalnız kontrol edin; işlem tekrar gönderilmedi.",10000);
+        return false;
+      } catch {rememberProgramChange({...issue,state:"unknown"});return false;}
+      finally {
+        programChangeWritingRef.current=false;branchScopedWriteCountRef.current=Math.max(0,branchScopedWriteCountRef.current-1);
+        const pending=programChangeIssueRef.current;
+        if(pending?.operationId===operationId && pending.state==="verified") clearProgramChange(pending);
+        else if(pending?.operationId===operationId && pending.knownRejected) await checkProgramChange(pending);
+        else if(actor===programChangeActorRef.current && generation===protectedDataLoadGenerationRef.current) setDetailSt(null);
+      }
+    });
+  };
+
+  useEffect(()=>{
+    const actor=authSession?.user?.id || "";
+    const restore=()=>{
+      let issue=null;try{issue=readProgramChangeIssue(actor);}catch{issue={actorUserId:actor,state:"conflict",operationId:"invalid-local-evidence"};}
+      programChangeIssueRef.current=issue;setProgramChangeIssue(issue);
+    };
+    restore();window.addEventListener("storage",restore);return ()=>window.removeEventListener("storage",restore);
+  },[authSession?.user?.id]);
+
+  const handleDuzenle = async (sid, f, genderIntent=null, editOptions={}) => {
     if (!requireProtectedSources(["students","teachers"],"Öğrenci düzenleme")) return false;
     const sourceStudent = students.find(s=>s.id===sid);
+    const expected=editOptions.expectedRecordVersion ?? genderIntent?.expectedRecordVersion;
+    if(!sourceStudent || !Number.isInteger(expected) || sourceStudent.record_version!==expected) {
+      pop("Öğrenci kaydı bu pencere açıldıktan sonra değişti. Güncel kaydı yeniden açın; değişiklik gönderilmedi.",8000);
+      await loadStudents();return false;
+    }
     if (genderIntent) {
       if (!validStudentGenderChanges(genderIntent.changes) || !Number.isInteger(genderIntent.expectedRecordVersion)) { pop("Cinsiyet değişikliği doğrulanamadı; kayıt gönderilmedi.",6000); return false; }
       if (!sourceStudent || sourceStudent.record_version !== genderIntent.expectedRecordVersion) {
@@ -12160,53 +12419,16 @@ export default function App() {
       pop("Yeni paket tercihi için v183 veritabanı temeli kurulmalı. Değişiklik kaydedilmedi.",8000);
       return false;
     }
-    const slots = normalizeSlots(f.lessonSlots, f.day, f.time);
+    const slots = programSlots(normalizeSlots(f.lessonSlots, f.day, f.time));
     const duration = parseInt(f.lessonDuration)||45;
     const selectedTeacher = teachers.find(t => t.id === f.teacher_id);
     if (!selectedTeacher) { pop("Geçerli bir öğretmen seçin", 5000); return; }
     const updated = students.map(s => {
       if (s.id!==sid) return s;
       const schedule = s.schedule || [];
-      const upcomingLessons = schedule.filter(l=>l.status==="upcoming");
-      const fixedLessons = schedule.filter(l=>l.status!=="upcoming");
-      const slotsChanged = !sameSlots(getStudentSlots(s), slots);
-      const daysChanged = !sameSlotDays(getStudentSlots(s), slots);
-      const upcomingNeedsSync = !upcomingScheduleMatchesSlots(upcomingLessons, slots);
-      let nextSchedule = schedule.map(l=>l.status==="upcoming" ? {...l, durationMinutes:duration} : l);
-
-      if (slotsChanged && !daysChanged && upcomingLessons.length) {
-        const cleanSlots = normalizeSlots(slots);
-        const byDay = {};
-        cleanSlots.forEach(slot => { byDay[slotDayIndex(slot.day)] = slot; });
-        nextSchedule = schedule.map(l => {
-          if (l.status !== "upcoming") return l;
-          const slot = byDay[new Date(l.date).getDay()] || cleanSlots[0];
-          const nextDate = setTimeOnDate(l.date, slot.time);
-          return { ...l, date:nextDate.toISOString(), day:slot.day, time:slot.time, durationMinutes:duration };
-        }).sort((a,b)=>new Date(a.date)-new Date(b.date));
-      } else if ((slotsChanged || upcomingNeedsSync) && upcomingLessons.length) {
-        const lastFixed = [...fixedLessons].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-        const firstUpcoming = [...upcomingLessons].sort((a,b)=>new Date(a.date)-new Date(b.date))[0];
-        const from = lastFixed?.date
-          ? new Date(new Date(lastFixed.date).getTime()+86400000)
-          : (firstUpcoming?.date ? new Date(firstUpcoming.date) : new Date());
-        if (lastFixed?.date) from.setHours(12,0,0,0);
-        else from.setHours(0,0,0,0);
-        const plannedDates = buildScheduleSlots(slots, upcomingLessons.length, from, duration);
-        const upcomingSorted = [...upcomingLessons].sort((a,b)=>new Date(a.date)-new Date(b.date));
-        const movedUpcoming = upcomingSorted.map((lesson, i) => {
-          const planned = plannedDates[i];
-          if (!planned) return { ...lesson, durationMinutes:duration };
-          return {
-            ...lesson,
-            date:planned.date,
-            day:planned.day,
-            time:planned.time,
-            durationMinutes:duration,
-          };
-        });
-        nextSchedule = [...fixedLessons, ...movedUpcoming].sort((a,b)=>new Date(a.date)-new Date(b.date));
-      }
+      const slotsChanged=programJSON(programSlots(getStudentSlots(s)))!==programJSON(slots);
+      const durationChanged=getLessonDuration(s)!==duration;
+      const nextSchedule=!slotsChanged && durationChanged ? schedule.map(l=>l.status==="upcoming" ? {...l,durationMinutes:duration} : l) : schedule;
 
       return {
         ...s,
@@ -12239,8 +12461,17 @@ export default function App() {
         schedule: nextSchedule
       };
     });
-    setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid),genderIntent?.changes || null,genderIntent || {});
+    const edited=updated.find(s=>s.id===sid);
+    if(programJSON(programSlots(getStudentSlots(sourceStudent)))!==programJSON(slots)) {
+      const keys=["name","phone","veli_adi","dogum_tarihi","lesson_start_date","teacher_id","teacher_name","teacher_history","ucret","last_raise_date","instrument","preferred_package_lesson_count","lesson_duration"];
+      const profile={...Object.fromEntries(keys.map(key=>[key,edited[key]])),...(genderIntent?.changes || {})};
+      return performProgramChange(sourceStudent,profile,slots,editOptions.programPreview);
+    }
+    // Preserve raw slot order/aliases on profile-only writes; canonical comparison
+    // must not introduce a program change merely by serializing the same slots.
+    edited.lessonSlots=getStudentSlots(sourceStudent);edited.lesson_slots=sourceStudent.lesson_slots || getStudentSlots(sourceStudent);
+    edited.day=sourceStudent.day;edited.time=sourceStudent.time;
+    await saveStudent(edited,genderIntent?.changes || null,genderIntent || {});
     pop("Bilgiler güncellendi");
     return true;
   };
@@ -12641,8 +12872,13 @@ export default function App() {
   const activeStaffBranches = organizationBranches.filter(branch=>branch.active !== false);
   const staffActivationByInvitation = new Map(staffActivations.map(operation=>[operation.invitation_id,operation]));
   const visibleNormalLessonEvaluationIssue = normalLessonEvaluationIssue && (!normalLessonEvaluationIssue.actorUserId || normalLessonEvaluationIssue.actorUserId === authSession?.user?.id) ? normalLessonEvaluationIssue : null;
+  const visibleProgramChangeIssue=programChangeIssue?.actorUserId===authSession?.user?.id ? programChangeIssue : null;
   const visibleSingleLessonMoveIssue = singleLessonMoveIssue?.actorUserId === authSession?.user?.id ? singleLessonMoveIssue : null;
   const guardSingleLessonMoveInteraction = event => {
+    if(visibleProgramChangeIssue || programChangeWritingRef.current) {
+      if(event.target.closest?.("[data-program-change-control],.crm-nav-btn,.crm-mobile-nav,.crm-branch-switch,.crm-desktop-logout,[data-crm-security]")) return;
+      event.preventDefault();event.stopPropagation();pop("Önce program değişikliği sonucunu üstteki uyarıdan kontrol edin.",7000);return;
+    }
     if (!visibleSingleLessonMoveIssue && !singleLessonMoveWritingRef.current) return;
     if (event.target.closest?.("[data-single-lesson-move-control],.crm-nav-btn,.crm-mobile-nav,.crm-branch-switch,.crm-desktop-logout,[data-crm-security]")) return;
     event.preventDefault();
@@ -12970,6 +13206,12 @@ export default function App() {
           </div>
         </header>
         <section className="crm-page">
+        {visibleProgramChangeIssue ? <div data-program-change-control role="alert" style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:14,padding:14,marginBottom:14}}>
+          <p style={{fontWeight:850}}>Program değişikliği kontrolü</p>
+          <p style={{fontSize:12}}>İşlem sonucu henüz doğrulanmadı. Yeniden Kontrol Et yalnız kayıtları okur; program değişikliğini tekrar göndermez.</p>
+          <p style={{fontSize:12}}>{visibleProgramChangeIssue.label}</p>
+          <button disabled={!browserOnline || programChangeChecking || programChangeWritingRef.current} onClick={()=>checkProgramChange(visibleProgramChangeIssue)}>{programChangeChecking ? "Kontrol Ediliyor…" : "Yeniden Kontrol Et"}</button>
+        </div> : null}
         {visibleSingleLessonMoveIssue ? (
           <div role="alert" data-single-lesson-move-control style={{ background:"#fff7ed",border:"1.5px solid #fdba74",borderRadius:14,padding:"12px 14px",marginBottom:14 }}>
             <p style={{ margin:"0 0 5px",fontSize:13,fontWeight:850,color:"#9a3412" }}>Tek ders taşıma kontrolü</p>
@@ -13507,7 +13749,7 @@ export default function App() {
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} saving={normalLessonEvaluationBusyId===actionModal.lessonId || normalLessonMakeupBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current || normalLessonMakeupWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onPreviewProgram={previewProgramChange} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
