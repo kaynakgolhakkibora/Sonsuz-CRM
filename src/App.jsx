@@ -5723,19 +5723,20 @@ function calendarProgramModel(students,branchId) {
       reserved[dayIndex].set(slot.time,Math.max(reserved[dayIndex].get(slot.time) || 0,minutes+duration));
     }
   }
+  const starts=[...new Set([
+    ...Array.from({length:14},(_,index)=>{
+      const minutes=600+index*45;
+      return String(Math.floor(minutes/60)).padStart(2,"0")+":"+String(minutes%60).padStart(2,"0");
+    }),
+    ...reserved.flatMap(day=>[...day.keys()]),
+  ])].sort();
   return {days:dayNames.map((dayName,dayIndex)=>{
-    const starts=calendarAvailabilityStarts(dayIndex);
     return {
       dayName,
       options:starts.map(time=>{
         const [hour,minute]=time.split(":").map(Number),start=dayIndex*1440+hour*60+minute;
-        return {time,busy:intervals.some(item=>item.start<start+45 && item.end>start)};
+        return {time,busy:intervals.some(item=>item.start<=start && item.end>start)};
       }),
-      otherReserved:[...reserved[dayIndex]].filter(([time])=>!starts.includes(time))
-        .sort(([a],[b])=>a.localeCompare(b)).map(([time,end])=>({
-          time,
-          endTime:String(Math.floor(end%1440/60)).padStart(2,"0")+":"+String(end%60).padStart(2,"0")+(end>=1440?" (ertesi gün)":""),
-        })),
     };
   })};
 }
@@ -5767,23 +5768,16 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
       .crm-program-header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;}
       .crm-program-brand{margin:0 0 8px;font-size:11px;font-weight:800;letter-spacing:1.5px;color:#6a46c9;}
       .crm-program-title{margin:0;font-size:27px;line-height:1.2;}
-      .crm-program-subtitle{margin:10px 0 0;font-size:13px;line-height:1.6;color:#716b7e;}
       .crm-program-close{flex-shrink:0;border:0;border-radius:10px;background:#f3f0f8;color:#514563;width:36px;height:36px;font-size:23px;cursor:pointer;}
-      .crm-program-legend{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:20px 0 14px;font-size:12px;color:#716b7e;}
-      .crm-program-legend strong{font-weight:750;}
-      .crm-program-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;}
+      .crm-program-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;margin-top:20px;}
       .crm-program-table th,.crm-program-table td{border:1px solid #d8dce4;padding:12px 7px;text-align:center;vertical-align:middle;}
-      .crm-program-table thead th{background:#354850;color:#fff;font-weight:800;padding:15px 5px;}
-      .crm-program-day{background:#edf0f3;color:#354850;font-weight:800;overflow-wrap:anywhere;}
-      .crm-program-option{display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:center;border-radius:7px;padding:10px 2px;font-variant-numeric:tabular-nums;}
+      .crm-program-day{width:106px;background:#edf0f3;color:#354850;font-weight:800;overflow-wrap:anywhere;}
+      .crm-program-options{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;}
+      .crm-program-option{display:flex;align-items:center;justify-content:center;border-radius:7px;padding:12px 2px;font-variant-numeric:tabular-nums;}
       .crm-program-option strong{font-size:15px;line-height:1.2;}
-      .crm-program-option small{font-size:10px;line-height:1.2;font-weight:700;}
       .crm-program-free{background:#e4f5ed;color:#217653;}
       .crm-program-busy{background:#f3f0f2;color:#74656d;}
       .crm-program-busy strong{text-decoration:line-through;text-decoration-thickness:2px;}
-      .crm-program-other-row td{text-align:left;background:#fbfafc;font-size:12px;line-height:1.8;padding:9px 14px;color:#716b7e;}
-      .crm-program-other-time{display:inline-block;margin:3px 0 3px 9px;padding:3px 9px;background:#f3f0f2;color:#74656d;border-radius:6px;font-weight:700;font-variant-numeric:tabular-nums;}
-      .crm-program-note{margin:16px 0 0;font-size:11px;line-height:1.8;color:#817a8f;}
       .crm-program-warning{margin:24px 0 0;padding:18px;background:#fff7ed;color:#9a3412;border-radius:12px;font-size:13px;line-height:1.7;}
       @media(max-width:760px){
         .crm-program-backdrop{padding:10px;}
@@ -5791,24 +5785,18 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
         .crm-program-title{font-size:23px;}
         .crm-program-table,.crm-program-table tbody{display:block;}
         .crm-program-table thead{display:none;}
-        .crm-program-table tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #d8dce4;border-radius:10px;overflow:hidden;margin-top:12px;}
+        .crm-program-table tr{display:block;border:1px solid #d8dce4;border-radius:10px;overflow:hidden;margin-top:12px;}
         .crm-program-table th,.crm-program-table td{display:block;border:0;padding:6px;min-width:0;}
-        .crm-program-table .crm-program-day{grid-column:1/-1;text-align:left;padding:12px;font-size:13px;}
-        .crm-program-table .crm-program-other-row{display:block;margin-top:0;border-top:0;border-radius:0 0 10px 10px;}
-        .crm-program-other-row td{padding:9px 12px;}
+        .crm-program-table .crm-program-day{width:auto;text-align:left;padding:12px;font-size:13px;}
+        .crm-program-options{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}
         .crm-program-option{padding:10px 2px;}
       }
     `}</style>
     <div ref={dialogRef} className="crm-program-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-program-title">
-      <div className="crm-program-header"><div><p className="crm-program-brand">SONSUZ SANAT{branchName?" · "+branchName:""}</p><h2 id="crm-program-title" className="crm-program-title">Ders Programı</h2><p className="crm-program-subtitle">Öğrencilerin kayıtlı kalıcı gün ve saatleri. Takvimde seçilen haftadan bağımsızdır.</p></div><button type="button" className="crm-program-close" onClick={onClose} aria-label="Ders programını kapat">×</button></div>
-      {model ? <>
-        <div className="crm-program-legend"><strong style={{color:"#217653"}}>Yeşil: Boş</strong><strong>Üzeri çizili: Dolu</strong><span>Henüz başlamamış, dondurulmuş ve paketi bitmiş öğrencilerin yerleri korunur.</span></div>
-        <table className="crm-program-table" aria-label="Kalıcı ders programı"><thead><tr><th scope="col">Gün</th>{Array.from({length:7},(_,index)=><th scope="col" key={index}>{index+1}. Saat</th>)}</tr></thead>{model.days.map(day=><tbody key={day.dayName}>
-          <tr><th scope="row" className="crm-program-day">{day.dayName}</th>{day.options.map(option=><td key={option.time}><span className={"crm-program-option "+(option.busy?"crm-program-busy":"crm-program-free")} aria-label={day.dayName+" "+option.time+" "+(option.busy?"Dolu":"Boş")}><strong>{option.time}</strong><small>{option.busy?"Dolu":"Boş"}</small></span></td>)}</tr>
-          {day.otherReserved.length ? <tr className="crm-program-other-row"><td colSpan={8}>{day.dayName} · Diğer ayrılmış saatler:{day.otherReserved.map(slot=><span className="crm-program-other-time" key={slot.time}>{slot.time}–{slot.endTime} · Dolu</span>)}</td></tr> : null}
-        </tbody>)}</table>
-        <p className="crm-program-note">Saat kutuları 45 dakikalık başlangıç seçenekleridir; kayıtlı ders süresiyle çakışan seçenekler dolu gösterilir. Tek derslik taşımalar, deneme dersleri, Tek Ders, Ek Ders ve telafi randevuları bu düzenli tabloyu değiştirmez. Kalıcı gün/saat değişikliği tabloya yansır. Belirli bir haftanın fiilî boşlukları için Uygun Saatler'i kullanın.</p>
-      </> : <div className="crm-program-warning" role="status">Kayıtlı program bilgileri doğrulanamadı. Yanlış boş saat göstermemek için tablo kapalı. Pencereyi kapatıp öğrenci verilerini yeniden yükleyin.</div>}
+      <div className="crm-program-header"><div><p className="crm-program-brand">SONSUZ SANAT{branchName?" · "+branchName:""}</p><h2 id="crm-program-title" className="crm-program-title">Ders Programı</h2></div><button type="button" className="crm-program-close" onClick={onClose} aria-label="Ders programını kapat">×</button></div>
+      {model ? <table className="crm-program-table" aria-label="Kalıcı ders programı"><tbody>{model.days.map(day=><tr key={day.dayName}>
+        <th scope="row" className="crm-program-day">{day.dayName}</th><td><div className="crm-program-options">{day.options.map(option=><span key={option.time} className={"crm-program-option "+(option.busy?"crm-program-busy":"crm-program-free")} aria-label={day.dayName+" "+option.time+" "+(option.busy?"Dolu":"Boş")}><strong>{option.time}</strong></span>)}</div></td>
+      </tr>)}</tbody></table> : <div className="crm-program-warning" role="status">Program görüntülenemedi.</div>}
     </div>
   </div>;
 }
