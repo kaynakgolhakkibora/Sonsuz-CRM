@@ -5723,19 +5723,13 @@ function calendarProgramModel(students,branchId) {
       reserved[dayIndex].set(slot.time,Math.max(reserved[dayIndex].get(slot.time) || 0,minutes+duration));
     }
   }
-  const starts=[...new Set([
-    ...Array.from({length:14},(_,index)=>{
-      const minutes=600+index*45;
-      return String(Math.floor(minutes/60)).padStart(2,"0")+":"+String(minutes%60).padStart(2,"0");
-    }),
-    ...reserved.flatMap(day=>[...day.keys()]),
-  ])].sort();
   return {days:dayNames.map((dayName,dayIndex)=>{
+    const starts=calendarAvailabilityStarts(dayIndex);
     return {
       dayName,
       options:starts.map(time=>{
         const [hour,minute]=time.split(":").map(Number),start=dayIndex*1440+hour*60+minute;
-        return {time,busy:intervals.some(item=>item.start<=start && item.end>start)};
+        return {time,busy:intervals.some(item=>item.start<start+45 && item.end>start)};
       }),
     };
   })};
