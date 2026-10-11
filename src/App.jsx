@@ -6510,6 +6510,161 @@ function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, o
   );
 }
 
+const WEEKLY_REPORT_START = "2026-10-12";
+const WEEKLY_REPORT_LIMIT = 1040;
+function weeklyShiftDate(day, count) {
+  if (!isValidLocalDateInput(day)) return "";
+  const date = new Date(day+"T00:00:00Z");
+  date.setUTCDate(date.getUTCDate()+count);
+  return date.toISOString().slice(0,10);
+}
+function weeklyWeekStart(reference = new Date()) {
+  const day = turkeyDateKey(reference);
+  if (!day) return "";
+  return weeklyShiftDate(day,-((new Date(day+"T00:00:00Z").getUTCDay()+6)%7));
+}
+function weeklyReportLabel(start) {
+  const formatter = new Intl.DateTimeFormat("tr-TR",{ timeZone:"UTC",day:"numeric",month:"long",year:"numeric" });
+  return formatter.format(new Date(start+"T00:00:00Z"))+" – "+formatter.format(new Date(weeklyShiftDate(start,6)+"T00:00:00Z"));
+}
+function weeklyDataValid(data, branchId, weekStart, evidence=false) {
+  if (!data || data.schemaVersion!==1 || data.branchId!==branchId || data.weekStart!==weekStart
+    || !isValidLocalDateInput(weekStart) || weekStart<WEEKLY_REPORT_START || weeklyWeekStart(weekStart+"T12:00:00Z")!==weekStart
+    || data.weekEnd!==weeklyShiftDate(weekStart,6) || typeof data.branchName!=="string" || !data.branchName.trim()
+    || typeof data.asOf!=="string" || !Number.isFinite(new Date(data.asOf).getTime())) return false;
+  const fields={ trialCompletedCount:"completedTrials",newStudentCount:"newStudents",leftCount:"leftStudents",trialPendingCount:"pendingTrials" };
+  return Object.entries(fields).every(([key,source])=>Number.isSafeInteger(data[key]) && data[key]>=0
+    && (!evidence || (Array.isArray(data.sourceIds?.[source]) && data.sourceIds[source].length===data[key]
+      && new Set(data.sourceIds[source]).size===data[key] && data.sourceIds[source].every(id=>typeof id==="string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))));
+}
+function weeklyReportFromRow(row, branchId, weekStart=row?.week_start) {
+  const validId=value=>typeof value==="string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  if (!row || !validId(row.id) || !validId(row.generated_by) || row.branch_id!==branchId || row.week_start!==weekStart
+    || !weeklyDataValid(row.report_data,branchId,weekStart,true)
+    || typeof row.generated_at!=="string" || !Number.isFinite(new Date(row.generated_at).getTime())
+    || turkeyDateKey(row.generated_at)<=row.report_data.weekEnd
+    || new Date(row.report_data.asOf).getTime()!==new Date(row.generated_at).getTime()
+    || (!!row.downloaded_at !== !!row.downloaded_by) || (row.downloaded_by && !validId(row.downloaded_by))
+    || (row.downloaded_at && (!Number.isFinite(new Date(row.downloaded_at).getTime()) || new Date(row.downloaded_at)<new Date(row.generated_at)))) {
+    throw new Error("Haftalık rapor kaydı doğrulanamadı; sayı tahmin edilmedi.");
+  }
+  return { ...row.report_data,id:row.id,generatedAt:row.generated_at,generatedBy:row.generated_by,downloadedAt:row.downloaded_at || null,label:weeklyReportLabel(weekStart) };
+}
+function weeklyMissingWeeks(reports, currentWeek) {
+  if (!isValidLocalDateInput(currentWeek) || weeklyWeekStart(currentWeek+"T12:00:00Z")!==currentWeek) throw new Error("Hafta sınırı doğrulanamadı.");
+  const existing=new Set(reports.map(report=>report.weekStart)),missing=[];let iterations=0;
+  for(let day=WEEKLY_REPORT_START;day && day<currentWeek;day=weeklyShiftDate(day,7)) {
+    if (++iterations>WEEKLY_REPORT_LIMIT) throw new Error("Haftalık rapor arşiv sınırı için yetkili kontrol gerekiyor.");
+    if (!existing.has(day)) missing.push(day);
+  }
+  return missing;
+}
+function weeklyIntentKey(actorId,branchId) { return "sonsuz-weekly-v195:"+actorId+":"+branchId; }
+function readWeeklyReportIntent(actorId,branchId) {
+  try {
+    const raw=localStorage.getItem(weeklyIntentKey(actorId,branchId));
+    if (!raw) return null;
+    const intent=JSON.parse(raw);
+    return intent?.actorId===actorId && intent?.branchId===branchId && isValidLocalDateInput(intent.weekStart)
+      && intent.weekStart>=WEEKLY_REPORT_START && weeklyWeekStart(intent.weekStart+"T12:00:00Z")===intent.weekStart
+      ? intent : { invalid:true };
+  } catch { return { invalid:true }; }
+}
+function storeWeeklyReportIntent(actorId,branchId,weekStart) {
+  try {
+    if (readWeeklyReportIntent(actorId,branchId)) return false;
+    const intent={actorId,branchId,weekStart};
+    localStorage.setItem(weeklyIntentKey(actorId,branchId),JSON.stringify(intent));
+    return JSON.stringify(readWeeklyReportIntent(actorId,branchId))===JSON.stringify(intent);
+  } catch { return false; }
+}
+function clearWeeklyReportIntent(actorId,branchId,weekStart) {
+  try {
+    if (readWeeklyReportIntent(actorId,branchId)?.weekStart===weekStart) localStorage.removeItem(weeklyIntentKey(actorId,branchId));
+  } catch { /* Evidence stays recoverable; never claim storage success. */ }
+}
+function weeklyReportCanvas(report) {
+  const canvas=document.createElement("canvas");canvas.width=1240;canvas.height=1754;
+  const ctx=canvas.getContext("2d");if (!ctx) throw new Error("PDF oluşturulamadı.");
+  ctx.fillStyle="#f8fafc";ctx.fillRect(0,0,1240,1754);
+  ctx.fillStyle="#111827";ctx.font="bold 42px Arial";ctx.fillText("Haftalık Yönetim Raporu",90,125);
+  ctx.font="26px Arial";let branchLabel=report.branchName;
+  while(ctx.measureText(branchLabel).width>1060 && branchLabel.length>1)branchLabel=branchLabel.slice(0,-1);
+  if(branchLabel!==report.branchName)branchLabel=branchLabel.slice(0,-1)+"…";
+  ctx.fillText(branchLabel,90,182);
+  ctx.fillStyle="#64748b";ctx.font="24px Arial";ctx.fillText(report.label,90,230);
+  const rows=[["Yapılan Deneme Dersi",report.trialCompletedCount],["Yeni Kayıt",report.newStudentCount],["Ayrılan Öğrenci",report.leftCount]];
+  rows.forEach(([label,count],i)=>{
+    const y=300+i*240;ctx.fillStyle="#fff";ctx.fillRect(90,y,1060,210);
+    ctx.fillStyle="#64748b";ctx.font="bold 27px Arial";ctx.fillText(label,125,y+60);
+    ctx.fillStyle="#6d28d9";ctx.font="bold 78px Arial";ctx.fillText(String(count),125,y+157);
+  });
+  ctx.fillStyle="#334155";ctx.font="24px Arial";
+  ctx.font="22px Arial";ctx.fillText("Yeni kayıt, CRM’ye kaydedildiği tarihe göre sayılır.",90,1150);
+  ctx.fillText("Dondurma ve arşivleme, ayrılma sayısına dahil değildir.",90,1190);
+  ctx.fillStyle="#64748b";ctx.font="20px Arial";
+  const generated=new Intl.DateTimeFormat("tr-TR",{timeZone:"Europe/Istanbul",dateStyle:"medium",timeStyle:"short"}).format(new Date(report.generatedAt));
+  ctx.fillText("Oluşturulma: "+generated+" · İstanbul saati",90,1550);
+  ctx.fillText("Oluşturulma anındaki CRM kayıtları esas alınmıştır.",90,1600);
+  ctx.fillText("Arşivlenen rapor sonradan kendiliğinden yeniden hesaplanmaz.",90,1640);
+  return canvas;
+}
+async function downloadWeeklyReportPdf(report) {
+  const canvas=weeklyReportCanvas(report);
+  const blob=await new Promise((resolve,reject)=>canvas.toBlob(value=>value?resolve(value):reject(new Error("PDF oluşturulamadı.")),"image/jpeg",0.98));
+  const bytes=jpegImagePdfBytes(new Uint8Array(await blob.arrayBuffer()),canvas.width,canvas.height);
+  const url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+  const link=document.createElement("a");link.href=url;link.download="Sonsuz-Sanat-Haftalik-Rapor-"+report.weekStart+".pdf";
+  document.body.appendChild(link);try { link.click(); } finally { link.remove();setTimeout(()=>URL.revokeObjectURL(url),1500); }
+}
+function WeeklyReportMetrics({data}) {
+  return <><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:10}}>
+    <MiniMetric label="Yapılan Deneme" value={data.trialCompletedCount} tone="info" />
+    <MiniMetric label="Yeni Kayıt" value={data.newStudentCount} tone="special" />
+    <MiniMetric label="Ayrılan" value={data.leftCount} tone="danger" />
+  </div></>;
+}
+function WeeklyReportPreviewSheet({report,onClose,onDownload,busy}) {
+  return <Sheet title="Haftalık Rapor" subtitle={report.branchName+" · "+report.label} onClose={onClose}>
+    <WeeklyReportMetrics data={report} />
+    <p style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>Yeni kayıt, CRM’ye kaydedildiği tarihe göre sayılır. Dondurma ve arşivleme ayrılma değildir. Rapor oluşturulma anındaki kayıtlara dayanır; arşivlendikten sonra kendiliğinden değişmez.</p>
+    <Btn bg="#6d28d9" onClick={()=>onDownload(report)} disabled={busy}>{busy?"PDF hazırlanıyor...":"PDF İndir"}</Btn>
+    <Btn bg="#111" outline onClick={onClose}>Kapat</Btn>
+  </Sheet>;
+}
+function WeeklyReportNotice({error,loading,onCheck}) {
+  return error?<div role="alert" style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:12,padding:12,marginBottom:14}}>
+    <p style={{margin:"0 0 8px",fontSize:12,color:"#92400e",lineHeight:1.5}}>{error}</p>
+    <button onClick={onCheck} disabled={loading} style={{border:"none",borderRadius:8,padding:"7px 10px",fontWeight:800,color:"#92400e",background:"#fef3c7",cursor:"pointer"}}>{loading?"Kontrol ediliyor...":"Yeniden Kontrol Et"}</button>
+  </div>:null;
+}
+function PendingWeeklyReports({reports,onDownload,busyId,error,loading,onCheck}) {
+  const [preview,setPreview]=useState(null);
+  return <><WeeklyReportNotice error={error} loading={loading} onCheck={onCheck} />
+    {reports.length?<AçılırBugünBölümü title={"Haftalık Rapor ("+reports.length+")"} color="#6d28d9" style={{background:"#faf5ff",border:"1.5px solid #d8b4fe",borderRadius:14,padding:"12px 16px",marginBottom:14}}>
+      {reports.map(report=><div key={report.id} style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",gap:8,padding:"10px 0"}}>
+        <div><p style={{margin:0,fontWeight:800,fontSize:13}}>{report.label}</p><p style={{margin:"4px 0 0",fontSize:12,color:"#7e22ce"}}>{report.trialCompletedCount} deneme · {report.newStudentCount} yeni kayıt · {report.leftCount} ayrılan</p></div>
+        <div style={{display:"flex",gap:6}}><button onClick={()=>setPreview(report)} style={{border:0,borderRadius:8,padding:"7px 10px",fontWeight:800,color:"#5b21b6",background:"#ede9fe"}}>Önizle</button><button disabled={!!busyId} onClick={()=>onDownload(report)} style={{border:0,borderRadius:8,padding:"7px 10px",fontWeight:800,color:"#fff",background:"#6d28d9"}}>{busyId===report.id?"Hazırlanıyor...":"PDF İndir"}</button></div>
+      </div>)}
+    </AçılırBugünBölümü>:null}
+    {preview?<WeeklyReportPreviewSheet report={preview} onClose={()=>setPreview(null)} onDownload={onDownload} busy={!!busyId} />:null}
+  </>;
+}
+function WeeklyReportsSection({current,reports,onDownload,busyId,error,loading,onCheck}) {
+  const [preview,setPreview]=useState(null),[open,setOpen]=useState(false);
+  return <div style={{...SECTION,padding:"15px 16px"}}>
+    <p style={{margin:"0 0 5px",fontSize:15,fontWeight:850,color:"#111"}}>Bu Hafta</p>
+    {current?<><p style={{fontSize:12,color:"#64748b",margin:"0 0 12px"}}>{weeklyReportLabel(current.weekStart)} · Henüz kapanmadı</p><WeeklyReportMetrics data={current} /></>:<p style={{fontSize:12,color:"#64748b"}}>{loading?"Haftalık veriler yükleniyor...":"Haftalık sayılar henüz doğrulanamadı."}</p>}
+    <WeeklyReportNotice error={error} loading={loading} onCheck={onCheck} />
+    <button aria-expanded={open} onClick={()=>setOpen(value=>!value)} style={{width:"100%",textAlign:"left",border:0,background:"#f3f4f6",borderRadius:10,padding:11,fontWeight:800,color:"#374151"}}>Haftalık Raporlar ({reports.length}) {open?"▴":"▾"}</button>
+    {open?<div style={{maxHeight:420,overflowY:"auto",marginTop:10}}>{reports.length?reports.map(report=><div key={report.id} style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f1f5f9"}}>
+      <div style={{minWidth:0}}><p style={{margin:0,fontSize:12,fontWeight:800}}>{report.label}</p><p style={{margin:"3px 0 0",fontSize:11,color:"#64748b"}}>{report.trialCompletedCount} deneme · {report.newStudentCount} yeni · {report.leftCount} ayrılan</p><p style={{margin:"3px 0 0",fontSize:11,color:report.downloadedAt?"#059669":"#c2410c"}}>{report.downloadedAt?"PDF indirme kaydı var":"İndirme bekliyor"}</p></div>
+      <div style={{display:"flex",gap:6}}><button onClick={()=>setPreview(report)} style={{border:0,borderRadius:8,padding:"6px 8px",fontSize:11,fontWeight:800}}>Görüntüle</button><button disabled={!!busyId} onClick={()=>onDownload(report)} style={{border:0,borderRadius:8,padding:"6px 8px",fontSize:11,fontWeight:800,background:"#6d28d9",color:"#fff"}}>{busyId===report.id?"Hazırlanıyor...":"PDF"}</button></div>
+    </div>):<p style={{fontSize:12,color:"#64748b"}}>İlk rapor 12–18 Ekim 2026 haftası kapandıktan sonra oluşacak.</p>}</div>:null}
+    {preview?<WeeklyReportPreviewSheet report={preview} onClose={()=>setPreview(null)} onDownload={onDownload} busy={!!busyId} />:null}
+  </div>;
+}
+
 function previousCalendarMonth(reference = new Date()) {
   return new Date(reference.getFullYear(), reference.getMonth()-1, 1);
 }
@@ -7705,6 +7860,22 @@ export default function App() {
     setTrialAppointmentOpeningId("");
     setTrialAppointmentPrompt(null);
   },[trialAppointmentScopeKey,trialAppointmentReady]);
+  // V195: isolated weekly report state and scope.
+  const [weeklyReportClock,setWeeklyReportClock]=useState(()=>new Date());
+  const [weeklyReportState,setWeeklyReportState]=useState({scopeKey:"",reports:[],current:null,error:"",loading:false});
+  const [weeklyDownloadingId,setWeeklyDownloadingId]=useState("");
+  const weeklyReportSequenceRef=useRef(0),weeklyReportReadingRef=useRef(0),weeklyReportQueuedRef=useRef(false),weeklyReportDownloadRef=useRef(false);
+  const weeklyCurrentWeek=weeklyWeekStart(weeklyReportClock);
+  const weeklyReportReady=!!(giris && authSession?.user?.id && activeOrganization?.id && currentBranch?.id
+    && loadedSources.students && loadedSources.teachers && loadedSources.expenses && singleLessonsLoaded
+    && browserOnline && !connectionRevalidationRequired && !accessContextLoading && !loading);
+  const weeklyReportScopeKey=JSON.stringify([authSession?.user?.id || "",activeOrganization?.id || "",currentBranch?.id || "",protectedDataLoadGenerationRef.current,weeklyCurrentWeek]);
+  const weeklyReportScopeRef=useRef(null);
+  weeklyReportScopeRef.current={key:weeklyReportScopeKey,ready:weeklyReportReady,actorId:authSession?.user?.id,branchId:currentBranch?.id,weekStart:weeklyCurrentWeek};
+  const weeklyVisibleState=weeklyReportState.scopeKey===weeklyReportScopeKey && weeklyReportReady?weeklyReportState:{reports:[],current:null,error:"",loading:false};
+  const pendingWeeklyReports=weeklyVisibleState.reports.filter(report=>!report.downloadedAt);
+  // End V195 weekly state.
+
   const [mesajSt, setMesajSt] = useState(null);
   const [mesajInitialKey, setMesajInitialKey] = useState("");
   const [summaryOpeningId, setSummaryOpeningId] = useState(null);
@@ -10436,6 +10607,115 @@ export default function App() {
       setDownloadingReportId(null);
     }
   };
+
+  // V195: report reads/writes are independent of monthly and business writers.
+  const weeklyReportScopeMatches = scope => weeklyReportScopeRef.current?.ready && weeklyReportScopeRef.current.key===scope.key;
+  const readWeeklyReportRow = async (scope,weekStart) => {
+    const result=await timedSingleLessonRequest(()=>supabase.from("weekly_reports").select("*").eq("branch_id",scope.branchId).eq("week_start",weekStart).maybeSingle());
+    if(result.error) throw new Error("Haftalık rapor kanıtı okunamadı. Yeniden kontrol edin.");
+    return result.data?weeklyReportFromRow(result.data,scope.branchId,weekStart):null;
+  };
+  const loadWeeklyReports = async ({createMissing=false}={}) => {
+    const scope={...weeklyReportScopeRef.current};
+    if(!scope.ready) return;
+    if(weeklyReportReadingRef.current) { weeklyReportQueuedRef.current=true;return; }
+    const sequence=++weeklyReportSequenceRef.current;weeklyReportReadingRef.current=sequence;
+    const active=()=>weeklyReportScopeMatches(scope) && weeklyReportSequenceRef.current===sequence;
+    const update=patch=>{if(active())setWeeklyReportState(value=>({...value,scopeKey:scope.key,...patch}));};
+    update({loading:true,error:""});
+    try {
+      const rows=[];
+      for(let offset=0;offset<=WEEKLY_REPORT_LIMIT;offset+=100) {
+        const result=await timedSingleLessonRequest(()=>supabase.from("weekly_reports").select("*").eq("branch_id",scope.branchId).order("week_start",{ascending:false}).range(offset,offset+99));
+        if(!active())return;
+        if(result.error || !Array.isArray(result.data)) throw new Error("Haftalık rapor arşivi okunamadı. Yeni haftalık rapor SQL kurulumunu ve erişimi kontrol edin.");
+        rows.push(...result.data);
+        if(rows.length>WEEKLY_REPORT_LIMIT)throw new Error("Haftalık arşiv sınırı için yetkili kontrol gerekiyor; eksik liste kullanılmadı.");
+        if(result.data.length<100)break;
+      }
+      let reports=rows.map(row=>weeklyReportFromRow(row,scope.branchId));
+      if(new Set(reports.map(row=>row.weekStart)).size!==reports.length)throw new Error("Haftalık arşivde tekrarlı hafta bulundu; kayıtlar tahminle birleştirilmedi.");
+      update({reports});
+      const live=await timedSingleLessonRequest(()=>supabase.rpc("get_weekly_activity",{p_branch_id:scope.branchId}));
+      if(!active())return;
+      if(live.error || !weeklyDataValid(live.data,scope.branchId,scope.weekStart))throw new Error("Bu haftanın sayıları doğrulanamadı. Eksik veya bozuk kaynaklar sıfır sayılmadı; verileri ve rapor kurulumunu kontrol edin.");
+      update({current:live.data});
+      const intent=readWeeklyReportIntent(scope.actorId,scope.branchId);
+      if(intent?.invalid)throw new Error("Bu şubedeki haftalık rapor işlem kaydı okunamadı. Yeni üretim durduruldu; yetkili kontrol gerekiyor.");
+      if(intent) {
+        const receipt=reports.find(report=>report.weekStart===intent.weekStart) || await readWeeklyReportRow(scope,intent.weekStart);
+        if(!active())return;
+        if(!receipt)throw new Error("Haftalık rapor işleminin sonucu henüz doğrulanamadı. Yeni yazım yapılmadı; Yeniden Kontrol Et yalnız kayıt kanıtını okur.");
+        clearWeeklyReportIntent(scope.actorId,scope.branchId,intent.weekStart);
+        if(readWeeklyReportIntent(scope.actorId,scope.branchId))throw new Error("Rapor doğrulandı; yerel işlem kaydı temizlenemedi. Yeni üretim durduruldu.");
+        if(!reports.some(report=>report.id===receipt.id))reports.push(receipt);
+      }
+      if(createMissing)for(const weekStart of weeklyMissingWeeks(reports,scope.weekStart)) {
+        if(!active())return;
+        if(!storeWeeklyReportIntent(scope.actorId,scope.branchId,weekStart))throw new Error("Rapor işlem kimliği tarayıcıda korunamadı; rapor yazımı gönderilmedi.");
+        const result=await runBranchScopedWrite(()=>timedSingleLessonRequest(()=>supabase.rpc("ensure_weekly_report",{p_branch_id:scope.branchId,p_week_start:weekStart})));
+        if(!active())return;
+        let receipt=null;
+        if(!result.error)receipt=weeklyReportFromRow(result.data,scope.branchId,weekStart);
+        else {
+          receipt=await readWeeklyReportRow(scope,weekStart);
+          if(!active())return;
+          if(!receipt) {
+            if(["22023","42501","PGRST202","42883"].includes(result.error.code))clearWeeklyReportIntent(scope.actorId,scope.branchId,weekStart);
+            throw new Error("Haftalık rapor yazımı doğrulanamadı. Uyarı korunuyor; Yeniden Kontrol Et yalnız okuma yapar.");
+          }
+        }
+        clearWeeklyReportIntent(scope.actorId,scope.branchId,weekStart);
+        if(readWeeklyReportIntent(scope.actorId,scope.branchId))throw new Error("Rapor doğrulandı; yerel işlem kaydı temizlenemedi. Yeni üretim durduruldu.");
+        reports=[receipt,...reports].sort((a,b)=>b.weekStart.localeCompare(a.weekStart));update({reports});
+      }
+      if(!createMissing && weeklyMissingWeeks(reports,scope.weekStart).length) {
+        update({error:"Kapanmış haftanın raporu henüz arşivde doğrulanmadı. Bu kontrol yalnız okuma yaptı; raporlar tahminle oluşturulmadı."});
+      }
+    } catch(error) { update({current:null,error:error?.message || "Haftalık rapor kontrol edilemedi."}); }
+    finally {
+      update({loading:false});
+      if(weeklyReportReadingRef.current===sequence) {
+        weeklyReportReadingRef.current=0;
+        if(weeklyReportQueuedRef.current && weeklyReportScopeMatches(scope)) {weeklyReportQueuedRef.current=false;void loadWeeklyReports();}
+      }
+    }
+  };
+  const handleWeeklyReportDownload = async report => {
+    const scope={...weeklyReportScopeRef.current};
+    if(!scope.ready || weeklyReportDownloadRef.current || report?.branchId!==scope.branchId || !report?.id)return;
+    weeklyReportDownloadRef.current=true;setWeeklyDownloadingId(report.id);
+    try {
+      const verified=await readWeeklyReportRow(scope,report.weekStart);
+      if(!weeklyReportScopeMatches(scope))return;
+      if(!verified || verified.id!==report.id)throw new Error("Seçilen haftalık rapor doğrulanamadı.");
+      await downloadWeeklyReportPdf(verified);
+      if(!weeklyReportScopeMatches(scope))return;
+      if(!verified.downloadedAt) {
+        const result=await runBranchScopedWrite(()=>timedSingleLessonRequest(()=>supabase.rpc("mark_weekly_report_downloaded",{p_report_id:verified.id})));
+        if(!weeklyReportScopeMatches(scope))return;
+        const saved=result.error?await readWeeklyReportRow(scope,verified.weekStart):weeklyReportFromRow(result.data,scope.branchId,verified.weekStart);
+        if(!weeklyReportScopeMatches(scope))return;
+        if(!saved?.downloadedAt || saved.id!==verified.id)throw new Error("PDF hazırlandı; indirme kaydı doğrulanamadığı için haftalık uyarı korunuyor.");
+        setWeeklyReportState(value=>value.scopeKey===scope.key?{...value,reports:value.reports.map(item=>item.id===saved.id?saved:item)}:value);
+      }
+      if(weeklyReportScopeMatches(scope))pop("Haftalık rapor PDF indirme isteği hazırlandı");
+    } catch(error) {
+      if(weeklyReportScopeMatches(scope))setWeeklyReportState(value=>({...value,scopeKey:scope.key,error:error?.message || "Haftalık PDF oluşturulamadı."}));
+    } finally {weeklyReportDownloadRef.current=false;setWeeklyDownloadingId("");}
+  };
+  useEffect(()=>{
+    const refresh=()=>setWeeklyReportClock(new Date());
+    const timer=window.setInterval(refresh,60000);window.addEventListener("focus",refresh);
+    return()=>{window.clearInterval(timer);window.removeEventListener("focus",refresh);};
+  },[]);
+  useEffect(()=>{
+    weeklyReportSequenceRef.current++;weeklyReportReadingRef.current=0;weeklyReportQueuedRef.current=false;
+    setWeeklyReportState({scopeKey:weeklyReportScopeKey,reports:[],current:null,error:"",loading:weeklyReportReady});
+    if(weeklyReportReady)void loadWeeklyReports({createMissing:true});
+  },[weeklyReportScopeKey,weeklyReportReady]);
+  useEffect(()=>{if(weeklyReportReady)void loadWeeklyReports();},[students,singleLessons]);
+  // End V195 weekly report handlers.
 
   const studentPayload = (student, recordVersion, writeId) => {
     const slots = getStudentSlots(student);
@@ -13179,7 +13459,7 @@ export default function App() {
     tekders:{ eyebrow:"BAĞIMSIZ DERS YÖNETİMİ", title:"Tek Ders", subtitle:"Kayıtlı öğrenciler ve misafirler için paket dışı tek dersleri yönet." },
     takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
     gelir:{ eyebrow:"Finansal Görünüm", title:"Finans", subtitle:"Tahsilat, gider ve net kârını aylık olarak takip et." },
-    ozet:{ eyebrow:"AYLIK YÖNETİM", title:"Kurum özeti", subtitle:"Ders, gelir, kayıt, öğrenci durumu ve öğretmen dağılımını ay ay izle." },
+    ozet:{ eyebrow:"YÖNETİM ÖZETİ", title:"Kurum özeti", subtitle:"Haftalık kayıt hareketlerini ve aylık kurum raporlarını izle." },
     subeler:{ eyebrow:"KURUM YÖNETİMİ", title:"Şubeler", subtitle:"Kurum şubelerini güvenli biçimde oluştur ve aktiflik durumlarını yönet." },
     personel:{ eyebrow:"ERİŞİM YÖNETİMİ", title:"Personel", subtitle:"Yönetici ve öğretmenleri davet et; güncel şube erişimlerini güvenle yönet." },
   }[mainTab];
@@ -13790,6 +14070,7 @@ export default function App() {
         ) : null}
         {mainTab === "bugün" ? (
           <div>
+            {weeklyReportReady?<PendingWeeklyReports key={weeklyReportScopeKey+":"+weeklyReportReady} reports={pendingWeeklyReports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}
             <PendingMonthlyReports reports={pendingMonthlyReports} onDownload={handleMonthlyReportDownload} downloadingId={downloadingReportId} />
             {(() => {
               const bugün = new Date();
@@ -13840,7 +14121,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            {pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && pendingWeeklyReports.length===0 && !weeklyVisibleState.error && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -13855,7 +14136,7 @@ export default function App() {
         {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} onTrialAppointment={lesson=>openTrialAppointment(lesson)} trialAppointmentOpeningId={trialAppointmentOpeningId} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
-        {mainTab === "ozet" ? <AylikOzet students={students} teachers={teachers} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /> : null}
+        {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /></> : null}
         {mainTab === "liste" ? (
           <div>
             {telafiWarnList.length > 0 ? (
