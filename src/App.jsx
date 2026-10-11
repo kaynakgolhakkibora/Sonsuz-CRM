@@ -1919,10 +1919,22 @@ function currentOpenLessonPeriodIds(student) {
     return new Set(period?.lessonIds || [firstUpcoming.id]);
   }
 
-  for (const payment of (student?.odemeler || [])) {
-    if (!payment || payment.sadeceEkDers) continue;
+  const payments = (student?.odemeler || []).filter(payment=>payment && !payment.sadeceEkDers);
+  // A saved date range must not shadow another period's explicit lesson identity.
+  for (const payment of payments) {
     const storedIds = Array.isArray(payment.packageLessonIds) ? payment.packageLessonIds.filter(Boolean) : [];
     if (storedIds.includes(firstUpcoming.id)) return new Set(storedIds);
+  }
+  for (const payment of payments) {
+    if (payment.packageId && firstUpcoming.packageId === payment.packageId) {
+      return new Set(schedule.filter(lesson=>lesson.packageId === payment.packageId).map(lesson=>lesson.id));
+    }
+  }
+  if (firstUpcoming.packageId) {
+    return new Set(schedule.filter(lesson=>lesson.packageId === firstUpcoming.packageId).map(lesson=>lesson.id));
+  }
+
+  for (const payment of payments) {
     if (payment.packageStart && payment.packageEnd) {
       const startKey = dateKey(payment.packageStart);
       const endKey = dateKey(payment.packageEnd);
@@ -1934,13 +1946,6 @@ function currentOpenLessonPeriodIds(student) {
         }).map(lesson=>lesson.id));
       }
     }
-    if (payment.packageId && firstUpcoming.packageId === payment.packageId) {
-      return new Set(schedule.filter(lesson=>lesson.packageId === payment.packageId).map(lesson=>lesson.id));
-    }
-  }
-
-  if (firstUpcoming.packageId) {
-    return new Set(schedule.filter(lesson=>lesson.packageId === firstUpcoming.packageId).map(lesson=>lesson.id));
   }
   return new Set([firstUpcoming.id]);
 }
@@ -1963,13 +1968,13 @@ function historicalLessonYearGroups(student, lessons) {
   const schedule = student?.schedule || [];
   const periodByLessonId = new Map();
   const periodMeta = new Map();
-  const assignPeriod = (periodKey, periodLessons, storedStart="", storedEnd="") => {
+  const assignPeriod = (periodKey, periodLessons, storedStart="", storedEnd="", useLinkedDates=false) => {
     const valid = (periodLessons || []).filter(lesson => lesson?.id && lesson?.date);
     if (!valid.length) return;
     const ordered = [...valid].sort((a,b)=>new Date(a.date)-new Date(b.date));
     periodMeta.set(periodKey, {
-      start:storedStart || dateKey(ordered[0].date),
-      end:storedEnd || dateKey(ordered[ordered.length-1].date),
+      start:useLinkedDates && !isNaN(new Date(ordered[0].date).getTime()) ? dateKey(ordered[0].date) : (storedStart || dateKey(ordered[0].date)),
+      end:useLinkedDates && !isNaN(new Date(ordered[ordered.length-1].date).getTime()) ? dateKey(ordered[ordered.length-1].date) : (storedEnd || dateKey(ordered[ordered.length-1].date)),
     });
     ordered.forEach(lesson => {
       if (!periodByLessonId.has(lesson.id)) periodByLessonId.set(lesson.id, periodKey);
@@ -1995,7 +2000,7 @@ function historicalLessonYearGroups(student, lessons) {
     } else if (payment.packageId) {
       periodLessons = schedule.filter(lesson => lesson.packageId === payment.packageId);
     }
-    assignPeriod("payment:"+index, periodLessons, payment.packageStart || "", payment.packageEnd || "");
+    assignPeriod("payment:"+index, periodLessons, payment.packageStart || "", payment.packageEnd || "", storedIds.length > 0);
   });
 
   const packageGroups = new Map();
