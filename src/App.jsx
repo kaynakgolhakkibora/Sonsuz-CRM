@@ -13,9 +13,106 @@ const INITIAL_AUTH_LINK_TYPE = typeof window === "undefined"
 if (typeof window !== "undefined" && ["invite", "recovery"].includes(INITIAL_AUTH_LINK_TYPE)) {
   sessionStorage.setItem(CRM_PASSWORD_SETUP_PENDING_KEY, "ok");
 }
-const SUPABASE_AUTH_STORAGE = typeof window === "undefined" ? undefined : window.sessionStorage;
+const SUPABASE_AUTH_STORAGE_KEY = `sb-${new URL(SUPABASE_URL).hostname.split(".")[0]}-auth-token`;
+const CRM_KEEP_SESSION_KEY = "sonsuz_crm_keep_session_v1";
+const CRM_AUTH_EPOCH_KEY = "sonsuz_crm_auth_epoch_v1";
+const CRM_TAB_AUTH_EPOCH_KEY = "sonsuz_crm_tab_auth_epoch_v1";
+const CRM_AUTH_STORAGE_KEYS = [SUPABASE_AUTH_STORAGE_KEY, SUPABASE_AUTH_STORAGE_KEY + "-code-verifier", SUPABASE_AUTH_STORAGE_KEY + "-user", CRM_PASSWORD_SETUP_PENDING_KEY];
+
+// One SDK client, one selected token store. The shared epoch contains no credentials.
+// A closed/restored tab or delayed refresh cannot write after a completed logout.
+function createCrmAuthStorage() {
+  if (typeof window === "undefined") return undefined;
+  let persistent = false;
+  let epoch = "initial";
+  let unavailable = false;
+  try {
+    persistent = localStorage.getItem(CRM_KEEP_SESSION_KEY) === "true";
+    epoch = localStorage.getItem(CRM_AUTH_EPOCH_KEY) || "initial";
+    const tabEpoch = sessionStorage.getItem(CRM_TAB_AUTH_EPOCH_KEY);
+    if (!persistent && tabEpoch !== epoch && !(tabEpoch === null && epoch === "initial")) {
+      CRM_AUTH_STORAGE_KEYS.forEach(key => sessionStorage.removeItem(key));
+    }
+    sessionStorage.setItem(CRM_TAB_AUTH_EPOCH_KEY, epoch);
+    // Inactive copies are never a fallback source.
+    CRM_AUTH_STORAGE_KEYS.forEach(key => (persistent ? sessionStorage : localStorage).removeItem(key));
+    const selected = persistent ? localStorage : sessionStorage;
+    if (!selected.getItem(SUPABASE_AUTH_STORAGE_KEY)) selected.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
+    if (["invite", "recovery"].includes(INITIAL_AUTH_LINK_TYPE)) selected.setItem(CRM_PASSWORD_SETUP_PENDING_KEY, "ok");
+  } catch { unavailable = true; }
+  const current = () => {
+    try { return !unavailable && (localStorage.getItem(CRM_AUTH_EPOCH_KEY) || "initial") === epoch; }
+    catch { return false; }
+  };
+  const store = () => persistent ? localStorage : sessionStorage;
+  const clearTab = () => {
+    [...CRM_AUTH_STORAGE_KEYS, CRM_AUTH_KEY, CRM_AUTH_METHOD_KEY].forEach(key => sessionStorage.removeItem(key));
+  };
+  return {
+    get persistent() { return persistent; },
+    get epoch() { return epoch; },
+    getItem(key) { return current() ? store().getItem(key) : null; },
+    setItem(key, value) {
+      if (unavailable) throw new Error("AUTH_STORAGE_UNAVAILABLE");
+      if (current()) store().setItem(key, value);
+    },
+    removeItem(key) {
+      if (!current()) return;
+      store().removeItem(key);
+      if (key === SUPABASE_AUTH_STORAGE_KEY) store().removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
+    },
+    matches(session, expectedEpoch = epoch) {
+      if (expectedEpoch !== epoch || !current()) return false;
+      try {
+        const saved = JSON.parse(store().getItem(SUPABASE_AUTH_STORAGE_KEY) || "null");
+        return !!session?.user?.id && saved?.user?.id === session.user.id && saved?.access_token === session.access_token;
+      } catch { return false; }
+    },
+    prepareLogin(keepSession) {
+      if (unavailable) throw new Error("AUTH_STORAGE_UNAVAILABLE");
+      const nextPersistent = keepSession === true;
+      const sharedPersistent = localStorage.getItem(CRM_KEEP_SESSION_KEY) === "true";
+      // Changing modes invalidates old tab copies before a new login is started.
+      if (!current() || sharedPersistent !== nextPersistent) {
+        epoch = crypto.randomUUID();
+        localStorage.setItem(CRM_AUTH_EPOCH_KEY, epoch);
+      }
+      clearTab();
+      CRM_AUTH_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
+      localStorage.setItem(CRM_AUTH_EPOCH_KEY, epoch);
+      localStorage.setItem(CRM_KEEP_SESSION_KEY, String(nextPersistent));
+      sessionStorage.setItem(CRM_TAB_AUTH_EPOCH_KEY, epoch);
+      // Check the selected browser store before sending a password.
+      const target = nextPersistent ? localStorage : sessionStorage;
+      target.setItem(CRM_TAB_AUTH_EPOCH_KEY, epoch);
+      if (nextPersistent) target.removeItem(CRM_TAB_AUTH_EPOCH_KEY);
+      persistent = nextPersistent;
+    },
+    completeLogout(forgetDevice = false) {
+      CRM_AUTH_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
+      clearTab();
+      epoch = crypto.randomUUID();
+      localStorage.setItem(CRM_AUTH_EPOCH_KEY, epoch);
+      sessionStorage.setItem(CRM_TAB_AUTH_EPOCH_KEY, epoch);
+      if (forgetDevice) {
+        localStorage.setItem(CRM_KEEP_SESSION_KEY, "false");
+        persistent = false;
+      }
+    },
+    clearTab,
+    isCurrent:current,
+  };
+}
+function authSessionIdentity(session) {
+  if (!session?.user?.id || !session?.access_token) return "";
+  try {
+    const payload = JSON.parse(atob(session.access_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return session.user.id + ":" + (payload.session_id || session.access_token);
+  } catch { return ""; }
+}
+const SUPABASE_AUTH_STORAGE = createCrmAuthStorage();
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth:{ persistSession:true, ...(SUPABASE_AUTH_STORAGE ? { storage:SUPABASE_AUTH_STORAGE } : {}) },
+  auth:{ persistSession:true, storageKey:SUPABASE_AUTH_STORAGE_KEY, ...(SUPABASE_AUTH_STORAGE ? { storage:SUPABASE_AUTH_STORAGE } : {}) },
 });
 const FAILED_OPS_KEY = "sonsuz_crm_failed_operations_v1";
 const SINGLE_LESSON_ISSUE_KEY = "sonsuz_crm_single_lesson_issue_v1";
@@ -56,9 +153,9 @@ function authHashParams() {
 }
 
 function isPasswordSetupLink() {
-  const type = authHashParams().get("type") || INITIAL_AUTH_LINK_TYPE;
+  const type = authHashParams().get("type") || "";
   if (type === "invite" || type === "recovery") return true;
-  return typeof window !== "undefined" && sessionStorage.getItem(CRM_PASSWORD_SETUP_PENDING_KEY) === "ok";
+  return typeof window !== "undefined" && (sessionStorage.getItem(CRM_PASSWORD_SETUP_PENDING_KEY) === "ok" || SUPABASE_AUTH_STORAGE?.getItem(CRM_PASSWORD_SETUP_PENDING_KEY) === "ok");
 }
 
 function authErrorMessage(error) {
@@ -92,7 +189,8 @@ async function activeStaffProfile(userId) {
     .select("role,active")
     .eq("user_id", userId)
     .maybeSingle();
-  if (error || !data?.active || !["admin", "teacher"].includes(data.role)) return null;
+  if (error) throw new Error("STAFF_VERIFICATION_UNAVAILABLE");
+  if (!data?.active || !["admin", "teacher"].includes(data.role)) return null;
   return data;
 }
 
@@ -7664,6 +7762,8 @@ export default function App() {
   const [mfaCode, setMfaCode] = useState("");
   const [mfaEnrollment, setMfaEnrollment] = useState(null);
   const [rememberDevice, setRememberDevice] = useState(true);
+  const [keepSession, setKeepSession] = useState(() => SUPABASE_AUTH_STORAGE?.persistent === true);
+  const authorizedAuthSessionRef = useRef("");
   const [showSecurityMenu, setShowSecurityMenu] = useState(false);
   const [authError, setAuthError] = useState(() => {
     const params = authHashParams();
@@ -7937,58 +8037,94 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const initializeAuth = async () => {
+      const epoch = SUPABASE_AUTH_STORAGE?.epoch;
       const { data, error } = await supabase.auth.getSession();
-      if (!active) return;
+      if (!active || epoch !== SUPABASE_AUTH_STORAGE?.epoch) return;
       const session = data?.session || null;
+      if (error) throw error;
+      if (session && SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.matches(session, epoch)) return;
+      if (session) {
+        // A saved token is not authorization. Verify the user with Auth first.
+        const { data:userData, error:userError } = await supabase.auth.getUser(session.access_token);
+        if (!active || epoch !== SUPABASE_AUTH_STORAGE?.epoch) return;
+        if (userError || userData?.user?.id !== session.user?.id) {
+          if (userError?.status === 401 || userError?.status === 403) {
+            SUPABASE_AUTH_STORAGE?.completeLogout();
+            resetSignedOutView();
+          }
+          throw userError || new Error("AUTH_USER_NOT_VERIFIED");
+        }
+      }
       setAuthSession(session);
-      if (error) setAuthError(authErrorMessage(error));
-
       if (session && isPasswordSetupLink()) {
         setAuthMode("set-password");
         setGiris(false);
       } else if (session) {
         await routeStaffMfa(session);
-      } else if (!session) {
+      } else {
         sessionStorage.removeItem(CRM_AUTH_KEY);
         sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
         setGiris(false);
       }
       if (active) setAuthReady(true);
     };
-
-    initializeAuth().catch(error => {
+    const restore = () => initializeAuth().catch(() => {
       if (!active) return;
-      setAuthError(authErrorMessage(error));
+      setGiris(false);
+      setAuthError("Oturum doğrulanamadı. Bağlantınızı kontrol edip sayfayı yenileyin veya yeniden giriş yapın.");
       setAuthReady(true);
     });
-
+    restore();
+    const syncLogout = event => {
+      const removedSession = event?.key === SUPABASE_AUTH_STORAGE_KEY && SUPABASE_AUTH_STORAGE?.persistent && !SUPABASE_AUTH_STORAGE.getItem(SUPABASE_AUTH_STORAGE_KEY);
+      if (!active || (SUPABASE_AUTH_STORAGE?.isCurrent() && !removedSession)) return;
+      SUPABASE_AUTH_STORAGE?.clearTab();
+      resetSignedOutView();
+      setKeepSession(localStorage.getItem(CRM_KEEP_SESSION_KEY) === "true");
+      setAuthReady(true);
+    };
+    window.addEventListener("storage", syncLogout);
+    window.addEventListener("pageshow", syncLogout);
+    window.addEventListener("focus", syncLogout);
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return;
+      // Broadcast notifications must match this tab's own selected SDK store.
+      if (session && SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.matches(session)) return;
+      if (event === "SIGNED_OUT") {
+        if (SUPABASE_AUTH_STORAGE?.getItem(SUPABASE_AUTH_STORAGE_KEY)) return;
+        SUPABASE_AUTH_STORAGE?.clearTab();
+        resetSignedOutView();
+        setAuthReady(true);
+        return;
+      }
       setAuthSession(session || null);
       if (event === "PASSWORD_RECOVERY") {
         sessionStorage.setItem(CRM_PASSWORD_SETUP_PENDING_KEY, "ok");
+        SUPABASE_AUTH_STORAGE?.setItem(CRM_PASSWORD_SETUP_PENDING_KEY, "ok");
         sessionStorage.removeItem(CRM_AUTH_KEY);
         sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
         setAuthMode("set-password");
         setGiris(false);
         setAuthError("");
         setAuthReady(true);
-      } else if (event === "SIGNED_OUT") {
-        sessionStorage.removeItem(CRM_AUTH_KEY);
-        sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
-        sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
-        setAuthMode("supabase");
-        setGiris(false);
-        setAuthReady(true);
+      } else if (session && authorizedAuthSessionRef.current && authorizedAuthSessionRef.current !== authSessionIdentity(session)) {
+        resetSignedOutView();
+        // Never call SDK async methods inside its locked event callback.
+        setTimeout(restore, 0);
       }
     });
     return () => {
       active = false;
       data.subscription.unsubscribe();
+      window.removeEventListener("storage", syncLogout);
+      window.removeEventListener("pageshow", syncLogout);
+      window.removeEventListener("focus", syncLogout);
     };
   }, []);
 
   const authorizeStaffSession = async (session, trustedDevice = false) => {
+    const epoch = SUPABASE_AUTH_STORAGE?.epoch;
+    if (SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.matches(session, epoch)) return false;
     const { data:assurance, error:assuranceError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
     if (!trustedDevice && (assuranceError || assurance?.currentLevel !== "aal2")) {
       setGiris(false);
@@ -7996,12 +8132,14 @@ export default function App() {
       return false;
     }
     const profile = await activeStaffProfile(session?.user?.id);
+    if (SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.matches(session, epoch)) return false;
     if (!profile) {
       await supabase.auth.signOut();
       setAuthSession(null);
       setAuthError("Bu hesabın aktif CRM yönetici veya öğretmen yetkisi yok.");
       return false;
     }
+    authorizedAuthSessionRef.current = authSessionIdentity(session);
     sessionStorage.setItem(CRM_AUTH_KEY, "ok");
     sessionStorage.setItem(CRM_AUTH_METHOD_KEY, "supabase");
     setAuthSession(session);
@@ -8010,7 +8148,10 @@ export default function App() {
   };
 
   const routeStaffMfa = async session => {
+    const epoch = SUPABASE_AUTH_STORAGE?.epoch;
+    if (SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.matches(session, epoch)) return false;
     const profile = await activeStaffProfile(session?.user?.id);
+    if (SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.matches(session, epoch)) return false;
     if (!profile) {
       await supabase.auth.signOut();
       setAuthSession(null);
@@ -8028,6 +8169,7 @@ export default function App() {
     if (assurance?.currentLevel === "aal2") return authorizeStaffSession(session);
 
     const { data:factors, error:factorsError } = await supabase.auth.mfa.listFactors();
+    if (SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.matches(session, epoch)) return false;
     if (factorsError) {
       setAuthError(authErrorMessage(factorsError));
       return false;
@@ -8036,6 +8178,7 @@ export default function App() {
     const trustedResult = verifiedTotp?.id
       ? await trustedDeviceRequest(session, "check")
       : { trusted:false, unavailable:false };
+    if (SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.matches(session, epoch)) return false;
     if (trustedResult.trusted) return authorizeStaffSession(session, true);
 
     setMfaCode("");
@@ -8064,13 +8207,20 @@ export default function App() {
     setAuthBusy(true);
     setAuthError("");
     setAuthNotice("");
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email:authEmail.trim(),
-      password:authPassword,
-    });
-    if (error || !data?.session) setAuthError(authErrorMessage(error));
-    else await routeStaffMfa(data.session);
-    setAuthBusy(false);
+    try {
+      SUPABASE_AUTH_STORAGE?.prepareLogin(keepSession);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email:authEmail.trim(),
+        password:authPassword,
+      });
+      if (error || !data?.session) setAuthError(authErrorMessage(error));
+      else await routeStaffMfa(data.session);
+    } catch {
+      setGiris(false);
+      setAuthError("Giriş tamamlanamadı. Bağlantıyı ve bu tarayıcının depolama iznini kontrol edip tekrar deneyin.");
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const handlePasswordRecovery = async () => {
@@ -8103,39 +8253,54 @@ export default function App() {
       setAuthError("Parolalar birbiriyle aynı değil.");
       return;
     }
-    setAuthBusy(true);
-    setAuthError("");
-    const { data, error } = await supabase.auth.updateUser({ password:authPassword });
-    if (error || !data?.user) {
-      setAuthError(authErrorMessage(error));
+    try {
+      setAuthBusy(true);
+      setAuthError("");
+      const { data, error } = await supabase.auth.updateUser({ password:authPassword });
+      if (error || !data?.user) {
+        setAuthError(authErrorMessage(error));
+        setAuthBusy(false);
+        return;
+      }
+      const { data:sessionData } = await supabase.auth.getSession();
+      const session = sessionData?.session;
+      if (session && typeof window !== "undefined") {
+        sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
+        SUPABASE_AUTH_STORAGE?.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+      }
+      if (session) await routeStaffMfa(session);
       setAuthBusy(false);
-      return;
+    } catch {
+      setGiris(false);
+      setAuthError("Doğrulama tamamlanamadı. Bağlantıyı ve tarayıcı depolamasını kontrol edip tekrar deneyin.");
+    } finally {
+      setAuthBusy(false);
     }
-    const { data:sessionData } = await supabase.auth.getSession();
-    const session = sessionData?.session;
-    if (session && typeof window !== "undefined") {
-      sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
-      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
-    }
-    if (session) await routeStaffMfa(session);
-    setAuthBusy(false);
   };
 
   const handleMfaEnrollmentStart = async () => {
     if (authBusy || !authSession?.user) return;
-    setAuthBusy(true);
-    setAuthError("");
-    const { data, error } = await supabase.auth.mfa.enroll({
-      factorType:"totp",
-      friendlyName:"Sonsuz CRM",
-    });
-    if (error || !data?.id || !data?.totp?.qr_code) setAuthError(authErrorMessage(error));
-    else {
-      setMfaFactorId(data.id);
-      setMfaEnrollment({ id:data.id, qrCode:data.totp.qr_code, secret:data.totp.secret || "" });
-      setMfaCode("");
+    try {
+      setAuthBusy(true);
+      setAuthError("");
+      const { data, error } = await supabase.auth.mfa.enroll({
+        factorType:"totp",
+        friendlyName:"Sonsuz CRM",
+      });
+      if (error || !data?.id || !data?.totp?.qr_code) setAuthError(authErrorMessage(error));
+      else {
+        setMfaFactorId(data.id);
+        setMfaEnrollment({ id:data.id, qrCode:data.totp.qr_code, secret:data.totp.secret || "" });
+        setMfaCode("");
+      }
+      setAuthBusy(false);
+    } catch {
+      setGiris(false);
+      setAuthError("Doğrulama tamamlanamadı. Bağlantıyı ve tarayıcı depolamasını kontrol edip tekrar deneyin.");
+    } finally {
+      setAuthBusy(false);
     }
-    setAuthBusy(false);
   };
 
   const handleMfaVerify = async () => {
@@ -8145,59 +8310,85 @@ export default function App() {
       setAuthError("Doğrulama uygulamasındaki 6 haneli kodu girin.");
       return;
     }
-    setAuthBusy(true);
-    setAuthError("");
-    setAuthNotice("");
-    const { data:verifiedSession, error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code:mfaCode });
-    if (error || !verifiedSession?.access_token || !verifiedSession?.refresh_token) {
-      setAuthError("Kod doğrulanamadı. Uygulamadaki güncel kodu tekrar girin.");
+    try {
+      setAuthBusy(true);
+      setAuthError("");
+      setAuthNotice("");
+      const { data:verifiedSession, error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code:mfaCode });
+      if (error || !verifiedSession?.access_token || !verifiedSession?.refresh_token) {
+        setAuthError("Kod doğrulanamadı. Uygulamadaki güncel kodu tekrar girin.");
+        setAuthBusy(false);
+        return;
+      }
+      const { data:sessionData, error:sessionError } = await supabase.auth.setSession({
+        access_token:verifiedSession.access_token,
+        refresh_token:verifiedSession.refresh_token,
+      });
+      if (sessionError || !sessionData?.session) {
+        setAuthError("Doğrulanmış oturum bu tarayıcıya kaydedilemedi. Tekrar deneyin.");
+        setAuthBusy(false);
+        return;
+      }
+      let deviceNotice = "";
+      if (rememberDevice) {
+        const trustResult = await trustedDeviceRequest(sessionData.session, "issue");
+        if (!trustResult.trusted) deviceNotice = "Giriş doğrulandı fakat bu tarayıcı güvenilen cihaz olarak kaydedilemedi.";
+      }
+      await authorizeStaffSession(sessionData.session);
+      if (deviceNotice) pop(deviceNotice, 6000);
+      setMfaCode("");
+      setMfaEnrollment(null);
       setAuthBusy(false);
-      return;
-    }
-    const { data:sessionData, error:sessionError } = await supabase.auth.setSession({
-      access_token:verifiedSession.access_token,
-      refresh_token:verifiedSession.refresh_token,
-    });
-    if (sessionError || !sessionData?.session) {
-      setAuthError("Doğrulanmış oturum bu tarayıcıya kaydedilemedi. Tekrar deneyin.");
+    } catch {
+      setGiris(false);
+      setAuthError("Doğrulama tamamlanamadı. Bağlantıyı ve tarayıcı depolamasını kontrol edip tekrar deneyin.");
+    } finally {
       setAuthBusy(false);
-      return;
     }
-    let deviceNotice = "";
-    if (rememberDevice) {
-      const trustResult = await trustedDeviceRequest(sessionData.session, "issue");
-      if (!trustResult.trusted) deviceNotice = "Giriş doğrulandı fakat bu tarayıcı güvenilen cihaz olarak kaydedilemedi.";
-    }
-    await authorizeStaffSession(sessionData.session);
-    if (deviceNotice) pop(deviceNotice, 6000);
-    setMfaCode("");
-    setMfaEnrollment(null);
-    setAuthBusy(false);
   };
 
   const handleSecureLogout = async (forgetDevice = false) => {
     if (authBusy) return;
     setAuthBusy(true);
     setAuthError("");
-    const supabaseLogin = sessionStorage.getItem(CRM_AUTH_METHOD_KEY) === "supabase" || !!authSession;
-    if (supabaseLogin) {
-      if (forgetDevice && authSession) {
-        const revokeResult = await trustedDeviceRequest(authSession, "revoke");
-        if (revokeResult.unavailable) {
-          setAuthError("Bu cihazın güven kaydı kaldırılamadı. Tekrar deneyin.");
-          pop("Cihaz güveni kaldırılamadı. Tekrar deneyin.", 6000);
+    try {
+      const supabaseLogin = sessionStorage.getItem(CRM_AUTH_METHOD_KEY) === "supabase" || !!authSession;
+      if (supabaseLogin) {
+        if (forgetDevice && authSession) {
+          const revokeResult = await trustedDeviceRequest(authSession, "revoke");
+          if (revokeResult.unavailable) {
+            setAuthError("Bu cihazın güven kaydı kaldırılamadı. Tekrar deneyin.");
+            pop("Cihaz güveni kaldırılamadı. Tekrar deneyin.", 6000);
+            setAuthBusy(false);
+            return;
+          }
+        }
+        if (SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.isCurrent()) { resetSignedOutView(); return; }
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+          setAuthError(authErrorMessage(error));
+          pop("Güvenli çıkış tamamlanamadı. Tekrar deneyin.", 6000);
           setAuthBusy(false);
           return;
         }
       }
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        setAuthError(authErrorMessage(error));
-        pop("Güvenli çıkış tamamlanamadı. Tekrar deneyin.", 6000);
-        setAuthBusy(false);
-        return;
+      if (SUPABASE_AUTH_STORAGE && !SUPABASE_AUTH_STORAGE.isCurrent()) { resetSignedOutView(); return; }
+      try {
+        SUPABASE_AUTH_STORAGE?.completeLogout(forgetDevice);
+        if (forgetDevice) setKeepSession(false);
+      } catch {
+        setAuthError("Sunucu çıkışı tamamlandı fakat tarayıcıdaki kayıt temizlenemedi. Bu siteye depolama izni verip tekrar çıkış yapın.");
       }
+      resetSignedOutView();
+    } catch {
+      setAuthError("Güvenli çıkış tamamlanamadı. Bağlantıyı ve tarayıcı depolamasını kontrol edip tekrar deneyin.");
+    } finally {
+      setAuthBusy(false);
     }
+  };
+
+  const resetSignedOutView = () => {
+    authorizedAuthSessionRef.current = "";
     sessionStorage.removeItem(CRM_AUTH_KEY);
     sessionStorage.removeItem(CRM_AUTH_METHOD_KEY);
     sessionStorage.removeItem(CRM_PASSWORD_SETUP_PENDING_KEY);
@@ -8236,7 +8427,6 @@ export default function App() {
     setStaffAssignmentEditingId("");
     setStaffAssignmentSelections({});
     setGiris(false);
-    setAuthBusy(false);
   };
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
@@ -13553,7 +13743,7 @@ export default function App() {
                   />
                   <label style={{display:"flex",alignItems:"center",gap:9,marginTop:13,cursor:"pointer"}}>
                     <input type="checkbox" checked={rememberDevice} onChange={e => setRememberDevice(e.target.checked)} style={{width:16,height:16,margin:0}} />
-                    Bu tarayıcıya {TRUSTED_DEVICE_DAYS} gün güven
+                    Bu tarayıcıda {TRUSTED_DEVICE_DAYS} gün doğrulama kodu sorma
                   </label>
                   {authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
                   <button disabled={authBusy} onClick={handleMfaVerify} style={{opacity:authBusy ? .65 : 1}}>
@@ -13583,7 +13773,7 @@ export default function App() {
               />
               <label style={{display:"flex",alignItems:"center",gap:9,marginTop:13,cursor:"pointer"}}>
                 <input type="checkbox" checked={rememberDevice} onChange={e => setRememberDevice(e.target.checked)} style={{width:16,height:16,margin:0}} />
-                Bu tarayıcıya {TRUSTED_DEVICE_DAYS} gün güven
+                Bu tarayıcıda {TRUSTED_DEVICE_DAYS} gün doğrulama kodu sorma
               </label>
               {authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
               {authNotice && <p style={{ color:"#8a6414", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authNotice}</p>}
@@ -13615,6 +13805,11 @@ export default function App() {
                 onKeyDown={e => { if (e.key === "Enter") handleSupabaseLogin(); }}
                 placeholder="Parolanızı girin"
               />
+              <label style={{display:"flex",alignItems:"center",gap:9,marginTop:13,cursor:"pointer"}}>
+                <input type="checkbox" checked={keepSession} disabled={authBusy} onChange={e => setKeepSession(e.target.checked)} style={{width:16,height:16,margin:0}} />
+                Bu cihazda oturumumu açık tut
+              </label>
+              <p style={{fontSize:11,lineHeight:1.5,margin:"6px 0 0"}}>Yalnızca güvendiğiniz kişisel cihazlarda kullanın. Ortak cihazlarda seçmeyin.</p>
               {authError && <p style={{ color:"#dc5d51", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authError}</p>}
               {authNotice && <p style={{ color:"#0f8a62", fontSize:12, fontWeight:700, margin:"9px 0 0" }}>{authNotice}</p>}
               <button disabled={authBusy} onClick={handleSupabaseLogin} style={{opacity:authBusy ? .65 : 1}}>
@@ -14239,7 +14434,7 @@ export default function App() {
       {showSecurityMenu ? (
         <div data-crm-security>
         <Sheet title="Hesap ve cihaz güvenliği" subtitle="Nasıl çıkış yapmak istediğinizi seçin" onClose={()=>{ if(!authBusy) setShowSecurityMenu(false); }}>
-          <p style={{fontSize:13,color:"#666",lineHeight:1.6,margin:"0 0 16px"}}>Normal çıkışta bu tarayıcı 30 gün boyunca güvenilen cihaz olarak kalır. Bir sonraki girişte parolanız sorulur, doğrulama kodu sorulmaz.</p>
+          <p style={{fontSize:13,color:"#666",lineHeight:1.6,margin:"0 0 16px"}}>Güvenli çıkış, açık oturumunuzu ve bu tarayıcıdaki oturum kayıtlarını sonlandırır. Yeniden girişte parolanız gerekir. Daha önce verilen 30 günlük cihaz güveni hâlâ geçerliyse doğrulama kodu atlanabilir. Cihazı unutmak bu güveni de iptal eder ve oturumu açık tut tercihini kapatır.</p>
           <Btn bg="#5b42d6" onClick={()=>handleSecureLogout(false)}>Yalnızca Güvenli Çıkış</Btn>
           <Btn bg="#dc5d51" outline onClick={()=>handleSecureLogout(true)}>Çıkış Yap ve Bu Cihazı Unut</Btn>
         </Sheet>
