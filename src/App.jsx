@@ -1,5 +1,6 @@
 import { useState, useEffect, useEffectEvent, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { createPortal } from "react-dom";
 
 const SUPABASE_URL = "https://wuizpkfueudglmgdsavu.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1aXpwa2Z1ZXVkZ2xtZ2RzYXZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMTg4OTUsImV4cCI6MjA5NDc5NDg5NX0.p1-d04TxeQfa_sg6QfoL8eAD4A9DULCwaS3GEiUcqmk";
@@ -717,6 +718,131 @@ function calculateLessonScore({ homeworkStatus, homeworkApplicable=true, activeM
     total:maximum ? roundedScore((earned / maximum) * 100) : 0,
     homeworkApplicable,
   };
+}
+
+
+const LESSON_SCORING_V200 = 200;
+const TECHNICAL_QUESTIONS_V200 = {
+  Piyano:[
+    ["Parmak sırası", "Çalışılan bölümde belirlenen parmak sırasını uyguluyor mu?"],
+    ["Anahtar bilgisi", "Notaları doğru anahtara göre okuyup çalıyor mu?"],
+    ["El ve oturma pozisyonu", "Öğretilen el ve oturma pozisyonunu koruyor mu?"],
+    ["Tuşe kontrolü", "İstenen ses şiddetini ve değişimlerini kontrollü verebiliyor mu?"],
+  ],
+  Davul:[
+    ["Baget tutuşu", "Öğretilen baget tutuşunu çalarken koruyabiliyor mu?"],
+    ["El–ayak koordinasyonu", "Çalışılan ritimde el ve ayak vuruşlarını doğru yerde, doğru zamanda ve gerektiğinde aynı anda uygulayabiliyor mu?"],
+    ["Tempo koruma", "Çalışılan ritmi belirlenen tempoda hızlanmadan veya yavaşlamadan sürdürebiliyor mu?"],
+    ["Pedal ve vuruş kontrolü", "Pedalı öğretilen teknikle kullanıp vuruşların ses şiddetini ve değişimlerini kontrollü verebiliyor mu?"],
+  ],
+  Gitar:[
+    ["Parmak yerleşimi", "Çalışılan bölümde belirlenen parmakları doğru tel ve perdelerde kullanıyor mu?"],
+    ["İki el koordinasyonu", "Teldeki basışlarla çalma hareketlerini doğru zamanda eşleştirebiliyor mu?"],
+    ["Duruş ve tutuş", "Öğretilen gitar tutuşunu ve el pozisyonlarını koruyor mu?"],
+    ["Ses kontrolü", "Çalışılan bölümü istenmeyen cızırtı veya fazladan tel sesleri olmadan kontrollü ve uygun şiddette çalabiliyor mu?"],
+  ],
+};
+
+function technicalQuestionsForInstrument(instrument) {
+  return Object.prototype.hasOwnProperty.call(TECHNICAL_QUESTIONS_V200,instrument) ? TECHNICAL_QUESTIONS_V200[instrument] : null;
+}
+
+function lessonEvaluationScoringVersion(record) {
+  const marker = record?.lessonScoreBreakdown?.scoringVersion;
+  if (marker !== undefined) return marker === LESSON_SCORING_V200 ? LESSON_SCORING_V200 : null;
+  const stored = record?.lessonScore ?? record?.lesson_score;
+  return record?.status === "completed" || record?.done === true || String(record?.done).toLowerCase() === "true"
+    || (stored !== null && stored !== undefined && String(stored).trim() !== "") ? 199 : LESSON_SCORING_V200;
+}
+
+function emptyTechnicalAssessment() {
+  return { instructions:"", consistency:"", tracking:"", skills:["","","",""] };
+}
+
+function validTechnicalAssessment(answers, instrument) {
+  if (!Object.prototype.hasOwnProperty.call(TECHNICAL_QUESTIONS_V200,instrument)) return false;
+  if (!answers || Object.keys(answers).sort().join(",") !== "consistency,instructions,skills,tracking") return false;
+  const valid = value => [0,5,10].includes(value);
+  return [answers.instructions,answers.consistency,answers.tracking].every(valid)
+    && Array.isArray(answers.skills) && answers.skills.length === 4
+    && [...answers.skills].every(value => valid(value) || value === "not_taught");
+}
+
+function technicalAssessmentPoints(answers) {
+  const applicable = answers.skills.filter(value=>value !== "not_taught");
+  const instrumentTechnique = applicable.length ? applicable.reduce((sum,value)=>sum+value,0)/applicable.length : null;
+  const main = [answers.instructions,answers.consistency,answers.tracking,...(instrumentTechnique === null ? [] : [instrumentTechnique])];
+  return { instrumentTechnique, technical:main.reduce((sum,value)=>sum+value,0)/main.length*4 };
+}
+
+function calculateLessonScoreV200({ homeworkStatus, homeworkApplicable=true, activeMinutes, cognitiveMinutes, redirectionCount, technicalAssessment, instrument }) {
+  const integer = value => ["number","string"].includes(typeof value) && String(value).trim() !== "" && Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 2147483647;
+  if (![activeMinutes,cognitiveMinutes,redirectionCount].every(integer) || !Object.prototype.hasOwnProperty.call(TECHNICAL_QUESTIONS_V200,instrument)) return null;
+  if (homeworkApplicable && !["done","partial","not_done"].includes(homeworkStatus)) return null;
+  const activeValue=Number(activeMinutes), cognitiveValue=Number(cognitiveMinutes), redirects=Number(redirectionCount);
+  const inactive = activeValue === 0;
+  if (inactive && (cognitiveValue !== 0 || redirects !== 0 || technicalAssessment !== null)) return null;
+  if (!inactive && !validTechnicalAssessment(technicalAssessment,instrument)) return null;
+  const homework = homeworkApplicable ? (homeworkStatus === "done" ? 20 : homeworkStatus === "partial" ? 10 : 0) : 0;
+  const active = activeValue === 0 ? 0 : activeValue <= 10 ? 2 : activeValue <= 20 ? 5 : activeValue <= 34 ? 8 : 10;
+  const cognitive = inactive ? 0 : cognitiveValue <= 10 ? 5 : cognitiveValue <= 20 ? 10 : cognitiveValue <= 30 ? 15 : 20;
+  const redirection = inactive ? 0 : Math.max(0,10-redirects*2);
+  const tech = inactive ? { instrumentTechnique:null, technical:0 } : technicalAssessmentPoints(technicalAssessment);
+  const earned = homework+active+cognitive+redirection+tech.technical;
+  const maximum = homeworkApplicable ? 100 : 80;
+  return { scoringVersion:LESSON_SCORING_V200, instrument, cognitiveMinutes:cognitiveValue,
+    technicalAssessment:inactive ? null : { instructions:technicalAssessment.instructions, consistency:technicalAssessment.consistency, tracking:technicalAssessment.tracking, skills:[...technicalAssessment.skills] },
+    inactive, homework, homeworkMaximum:homeworkApplicable?20:0, active, activeMaximum:10,
+    cognitive, cognitiveMaximum:20, redirection, redirectionMaximum:10,
+    instrumentTechnique:tech.instrumentTechnique, technical:tech.technical, technicalMaximum:40,
+    earned, maximum, total:inactive ? homework : roundedScore(earned/maximum*100), homeworkApplicable };
+}
+
+function lessonEvaluationMetrics(detail, record) {
+  if (detail.scoringVersion === LESSON_SCORING_V200) return {
+    scoringVersion:LESSON_SCORING_V200,
+    instrument:String(detail.instrument || record?.lessonScoreBreakdown?.instrument || ""),
+    cognitiveMinutes:Number(detail.cognitiveMinutes),
+    ...(detail.technicalAssessment === null ? {} : {technicalAssessment:detail.technicalAssessment}),
+  };
+  return { taskFocusMinutes:Math.max(0,parseInt(detail.taskFocusMinutes)||0) };
+}
+
+function scoreForEvaluation(evaluation) {
+  return evaluation?.scoringVersion === LESSON_SCORING_V200
+    ? calculateLessonScoreV200({ ...evaluation, technicalAssessment:evaluation.technicalAssessment ?? null, homeworkApplicable:!!evaluation.previousHomeworkSource })
+    : calculateLessonScore({ ...evaluation, homeworkApplicable:!!evaluation.previousHomeworkSource });
+}
+
+function lessonScoreBreakdownMatches(actual, expected) {
+  if (!actual || !expected) return false;
+  if (expected.scoringVersion !== LESSON_SCORING_V200) return JSON.stringify(canonicalJson(actual)) === JSON.stringify(canonicalJson(expected));
+  const compare=(a,b)=>{
+    if (typeof a === "number" && typeof b === "number") return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a-b)<1e-8;
+    if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && a.length===b.length && a.every((value,index)=>compare(value,b[index]));
+    if (a && b && typeof a === "object" && typeof b === "object") return Object.keys(a).sort().join(",")===Object.keys(b).sort().join(",") && Object.keys(a).every(key=>compare(a[key],b[key]));
+    return a===b;
+  };
+  return compare(actual,expected);
+}
+
+function lessonEvaluationTargetMatches(target, evaluation) {
+  if (evaluation?.scoringVersion !== LESSON_SCORING_V200) return storedLessonScore(target) !== null;
+  const expected=scoreForEvaluation(evaluation);
+  return !!expected && storedLessonScore(target) === expected.total && lessonScoreBreakdownMatches(target?.lessonScoreBreakdown,expected)
+    && Number(target.activeMinutes)===Number(evaluation.activeMinutes) && Number(target.redirectionCount)===Number(evaluation.redirectionCount);
+}
+
+function technicalAnswerLabel(value) {
+  return value === "not_taught" ? "Henüz öğretilmedi" : value === 10 ? "Evet" : value === 5 ? "Kısmen" : value === 0 ? "Hayır" : "Seçilmedi";
+}
+
+function lessonEvaluationBreakdownText(record) {
+  const b=record?.lessonScoreBreakdown;
+  if (!b) return "";
+  if (b.scoringVersion !== undefined && b.scoringVersion !== LESSON_SCORING_V200) return "Bu değerlendirme modeli bu sürümde desteklenmiyor.";
+  if (b.scoringVersion !== LESSON_SCORING_V200) return (b.homeworkApplicable === false ? "Değerlendirilecek önceki ödev yok" : "Ödev "+b.homework+"/40")+" · Aktif süre "+b.active+"/10 · Görev odağı "+b.taskFocus+"/20 · Yönlendirme "+b.redirection+"/30";
+  return (b.homeworkApplicable === false ? "Değerlendirilecek önceki ödev yok" : "Ödev "+b.homework+"/20")+" · Aktif süre "+b.active+"/10 · Bilişsel dayanıklılık "+b.cognitive+"/20 · Yönlendirme "+b.redirection+"/10 · Teknik "+fmtNumber(b.technical)+"/40";
 }
 
 function storedLessonScore(record) {
@@ -1527,6 +1653,10 @@ function telafiStatusLabel(record) {
 }
 
 function telafiMetricText(record) {
+  if (record?.lessonScoreBreakdown?.scoringVersion === LESSON_SCORING_V200) {
+    const b=record.lessonScoreBreakdown;
+    return (record.activeMinutes || 0)+" dk aktif"+(b.inactive ? " · Diğer değerlendirmeler uygulanmadı" : " · "+b.cognitiveMinutes+" dk bilişsel dayanıklılık · "+(record.redirectionCount || 0)+" yönlendirme");
+  }
   const parts = [];
   if (record?.activeMinutes) parts.push(record.activeMinutes + " dk aktif");
   if (record?.taskFocusMinutes !== undefined || record?.task_focus_minutes !== undefined) parts.push((record.taskFocusMinutes ?? record.task_focus_minutes) + " dk görev odağı");
@@ -2556,7 +2686,7 @@ function normalLessonEvaluationIntent(student, lessonId, detail={}, correctionRe
   const evaluation = {
     note:String(detail.note || "").trim(),
     activeMinutes:Math.max(0,parseInt(detail.activeMinutes) || 0),
-    taskFocusMinutes:Math.max(0,parseInt(detail.taskFocusMinutes) || 0),
+    ...lessonEvaluationMetrics(detail,lesson),
     redirectionCount:Math.max(0,parseInt(detail.redirectionCount) || 0),
     lessonFocus:String(detail.lessonFocus || "").trim(),
     homework:String(detail.homework || "").trim(),
@@ -2566,7 +2696,8 @@ function normalLessonEvaluationIntent(student, lessonId, detail={}, correctionRe
       homeworkStatus:String(detail.homeworkStatus || "").trim(),
     } : {}),
   };
-  const expectedRecordVersion = Math.max(0,parseInt(student?.record_version) || 0);
+  const expectedRecordVersion = detail.scoringVersion === LESSON_SCORING_V200 && Number.isInteger(detail.evaluationContextVersion) && detail.evaluationContextVersion >= 0
+    ? detail.evaluationContextVersion : Math.max(0,parseInt(student?.record_version) || 0);
   const reason = String(correctionReason || "").trim();
   const invalidatedPackageKey = invalidatedPackageKeyForLesson(student,lessonId);
   const requestPayload = {
@@ -2583,6 +2714,7 @@ function normalLessonEvaluationIntent(student, lessonId, detail={}, correctionRe
 function normalLessonEvaluationKnownRejection(error) {
   const message = String(error?.message || error || "");
   return [
+    "LESSON_EVALUATION_V200_",
     "NORMAL_LESSON_EVALUATION_NOT_AUTHORIZED",
     "NORMAL_LESSON_EVALUATION_INVALID_INPUT",
     "NORMAL_LESSON_EVALUATION_INPUT_TOO_LONG",
@@ -2739,7 +2871,8 @@ function normalLessonMakeupPlanErrorText(error) {
 function normalLessonMakeupCompletionIntent(student, makeupRecordId, payload={}, correctionReason="") {
   const matchingRecords = (student?.telafi_records || []).filter(record=>String(record?.id || "") === String(makeupRecordId || ""));
   const record = matchingRecords.length === 1 ? matchingRecords[0] : null;
-  const expectedRecordVersion = Math.max(0,parseInt(student?.record_version) || 0);
+  const expectedRecordVersion = payload.scoringVersion === LESSON_SCORING_V200 && Number.isInteger(payload.evaluationContextVersion) && payload.evaluationContextVersion >= 0
+    ? payload.evaluationContextVersion : Math.max(0,parseInt(student?.record_version) || 0);
   const actionKind = payload.action === "counted" ? "counted" : "attended";
   const doneAt = String(payload.doneAt || telafiPlannedAt(record) || "");
   const doneNote = String(payload.doneNote || "").trim();
@@ -2748,7 +2881,7 @@ function normalLessonMakeupCompletionIntent(student, makeupRecordId, payload={},
   const evaluation = actionKind === "attended" ? {
     note:doneNote,
     activeMinutes:parseInt(payload.activeMinutes) || 0,
-    taskFocusMinutes:parseInt(payload.taskFocusMinutes) || 0,
+    ...(payload.scoringVersion === LESSON_SCORING_V200 ? lessonEvaluationMetrics(payload,record) : {taskFocusMinutes:parseInt(payload.taskFocusMinutes) || 0}),
     redirectionCount:parseInt(payload.redirectionCount) || 0,
     lessonFocus:String(payload.lessonFocus || "").trim(),
     homework:String(payload.homework || "").trim(),
@@ -2791,19 +2924,14 @@ function normalLessonMakeupCompletionTargetMatches(target, intent) {
   if (telafiDoneAt(target) !== intent.doneAt || String(target.doneNote || "") !== intent.doneNote) return false;
   if (intent.actionKind === "counted") return true;
   const storedScore = storedLessonScore(target);
-  const expectedScoreBreakdown = calculateLessonScore({
-    homeworkStatus:intent.evaluation.homeworkStatus,
-    homeworkApplicable:!!intent.evaluation.previousHomeworkSource,
-    activeMinutes:intent.evaluation.activeMinutes,
-    taskFocusMinutes:intent.evaluation.taskFocusMinutes,
-    redirectionCount:intent.evaluation.redirectionCount,
-  });
+  const expectedScoreBreakdown = scoreForEvaluation(intent.evaluation);
+  if (!expectedScoreBreakdown) return false;
   const homeworkChanged = String(intent.record?.homework || "") !== intent.evaluation.homework;
   const expectedHomeworkStatus = intent.evaluation.homework
     ? (homeworkChanged ? "pending" : String(intent.record?.homeworkStatus || "pending"))
     : "";
   return Number(target.activeMinutes || 0) === Number(intent.evaluation.activeMinutes)
-    && Number(target.taskFocusMinutes ?? target.task_focus_minutes ?? 0) === Number(intent.evaluation.taskFocusMinutes)
+    && (intent.evaluation.scoringVersion === LESSON_SCORING_V200 || Number(target.taskFocusMinutes ?? target.task_focus_minutes ?? 0) === Number(intent.evaluation.taskFocusMinutes))
     && Number(target.redirectionCount ?? target.redirection_count ?? 0) === Number(intent.evaluation.redirectionCount)
     && String(target.lessonFocus || target.lesson_focus || "") === intent.evaluation.lessonFocus
     && String(target.homework || "") === intent.evaluation.homework
@@ -2811,7 +2939,7 @@ function normalLessonMakeupCompletionTargetMatches(target, intent) {
     && String(target.evaluatedHomework || "") === String(intent.expectedEvaluatedHomework || "")
     && String(target.evaluatedHomeworkStatus || "") === String(intent.evaluation.homeworkStatus || "")
     && storedScore === expectedScoreBreakdown.total
-    && JSON.stringify(canonicalJson(target.lessonScoreBreakdown || {})) === JSON.stringify(canonicalJson(expectedScoreBreakdown));
+    && lessonScoreBreakdownMatches(target.lessonScoreBreakdown || {},expectedScoreBreakdown);
 }
 
 function normalLessonMakeupCompletionHomeworkMatches(student, intent) {
@@ -2831,6 +2959,7 @@ function normalLessonMakeupCompletionHomeworkMatches(student, intent) {
 function normalLessonMakeupCompletionKnownRejection(error) {
   const message = String(error?.message || error || "");
   return [
+    "LESSON_EVALUATION_V200_",
     "NORMAL_LESSON_MAKEUP_COMPLETION_NOT_AUTHORIZED",
     "NORMAL_LESSON_MAKEUP_COMPLETION_INVALID_INPUT",
     "NORMAL_LESSON_MAKEUP_COMPLETION_INPUT_TOO_LONG",
@@ -3305,6 +3434,50 @@ async function shareSvgAsPng(svgId, filename, student) {
 const INP = { width:"100%", border:"1px solid #ded9d3", borderRadius:11, padding:"12px 13px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", background:"#fff", color:"#211e28" };
 const LBL = { display:"block", fontSize:11, fontWeight:750, color:"#756f7a", letterSpacing:.3, marginBottom:6, marginTop:15 };
 
+
+function TechnicalAssessmentSheet({ instrument, answers, onChange, onClose }) {
+  const questions=technicalQuestionsForInstrument(instrument);
+  const answerSelect=(label,question,key,index=null)=>{
+    const value=index === null ? answers[key] : answers.skills[index];
+    return <div key={key+String(index)} style={{ marginBottom:14 }}>
+      <label style={{ ...LBL, marginTop:0 }}>{label}</label>
+      <p style={{ margin:"0 0 7px", fontSize:13, lineHeight:1.5, color:"#475569" }}>{question}</p>
+      <select aria-label={label} style={INP} value={value} onChange={event=>{
+        const selected=event.target.value === "" || event.target.value === "not_taught" ? event.target.value : Number(event.target.value);
+        onChange(index === null ? {...answers,[key]:selected} : {...answers,skills:answers.skills.map((item,i)=>i===index?selected:item)});
+      }}>
+        <option value="">Seçin</option><option value={10}>Evet · 10 puan</option><option value={5}>Kısmen · 5 puan</option><option value={0}>Hayır · 0 puan</option>
+        {index !== null ? <option value="not_taught">Henüz öğretilmedi</option> : null}
+      </select>
+    </div>;
+  };
+  return createPortal(<Sheet title="Teknik değerlendirme" subtitle={instrument+" · 40 puan"} onClose={onClose}>
+    {questions ? <>
+      {answerSelect("Yönergeleri uygulama","Verilen teknik açıklamayı veya düzeltmeyi anlayıp uygulayabiliyor mu?","instructions")}
+      {answerSelect("Tutarlılık","Doğru uygulamayı sonraki tekrarlarında koruyabiliyor mu?","consistency")}
+      <p style={{ fontWeight:800, color:"#6366f1" }}>{instrument} tekniği · 10 puan</p>
+      {questions.map(([label,question],index)=>answerSelect(label,question,"skills",index))}
+      {answerSelect("Parça takibi","Çalışılan parçadaki yerini takip edebiliyor mu?","tracking")}
+      {validTechnicalAssessment(answers,instrument) ? <p style={{ fontWeight:800 }}>Teknik puan: {fmtNumber(technicalAssessmentPoints(answers).technical)}/40</p> : <p style={{ fontSize:12,color:"#64748b" }}>Her soruyu yanıtlayın. Henüz öğretilmemiş becerileri ilgili seçenekle belirtin.</p>}
+    </> : <p>Öğrencinin kayıtlı enstrümanı doğrulanamadı.</p>}
+    <Btn bg="#6366f1" onClick={onClose}>Değerlendirmeye Dön</Btn>
+  </Sheet>,document.body);
+}
+
+function RecordedTechnicalAssessment({ record }) {
+  const b=record?.lessonScoreBreakdown;
+  if (b?.scoringVersion !== LESSON_SCORING_V200) return null;
+  const answers=b.technicalAssessment, questions=technicalQuestionsForInstrument(b.instrument);
+  if (b.inactive) return <p style={{ fontSize:12,color:"#64748b" }}>Aktif süre 0: bilişsel dayanıklılık, yeniden yönlendirme ve teknik değerlendirme uygulanmadı.</p>;
+  if (!answers || !questions) return null;
+  return <details style={{ marginTop:8,fontSize:12 }}><summary style={{ cursor:"pointer",fontWeight:700 }}>Teknik değerlendirme · {fmtNumber(b.technical)}/40</summary>
+    <p>Yönergeleri uygulama: {technicalAnswerLabel(answers.instructions)}</p>
+    <p>Tutarlılık: {technicalAnswerLabel(answers.consistency)}</p>
+    {questions.map(([label],index)=><p key={label}>{label}: {technicalAnswerLabel(answers.skills[index])}</p>)}
+    <p>Parça takibi: {technicalAnswerLabel(answers.tracking)}</p>
+  </details>;
+}
+
 function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluationMessage, saving=false }) {
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
   const previousHomework = homeworkForLessonCheck(student, lesson);
@@ -3321,6 +3494,30 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === lessonCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
   const [correctionReason, setCorrectionReason] = useState("");
   const [formError, setFormError] = useState("");
+  const [evaluationContext]=useState(()=>({
+    scoringVersion:lessonEvaluationScoringVersion(lesson),
+    instrument:lesson?.lessonScoreBreakdown?.scoringVersion === LESSON_SCORING_V200 ? lesson.lessonScoreBreakdown.instrument : student.instrument,
+    recordVersion:Math.max(0,parseInt(student?.record_version) || 0),
+  }));
+  const scoringVersion=evaluationContext.scoringVersion === LESSON_SCORING_V200 ? LESSON_SCORING_V200 : lessonEvaluationScoringVersion(lesson);
+  const isNewEvaluation=scoringVersion === LESSON_SCORING_V200;
+  const evaluationInstrument=evaluationContext.instrument;
+  const [cognitiveMinutes,setCognitiveMinutes]=useState(lesson?.lessonScoreBreakdown?.cognitiveMinutes ?? "");
+  const [technicalAssessment,setTechnicalAssessment]=useState(()=>lesson?.lessonScoreBreakdown?.technicalAssessment || emptyTechnicalAssessment());
+  const [technicalOpen,setTechnicalOpen]=useState(false);
+  const inactive=isNewEvaluation && activeMinutes !== "" && Number(activeMinutes) === 0;
+  const changeActiveMinutes=value=>{
+    setActiveMinutes(value); setFormError("");
+    if (isNewEvaluation && value !== "" && Number(value) === 0) {
+      setCognitiveMinutes("0"); setRedirectionCount("0"); setTechnicalAssessment(emptyTechnicalAssessment()); setTechnicalOpen(false);
+    } else if (inactive) {
+      setCognitiveMinutes(""); setRedirectionCount(""); setTechnicalAssessment(emptyTechnicalAssessment());
+    }
+  };
+  const scoringInput={ homeworkStatus, homeworkApplicable:!!homeworkToEvaluate, activeMinutes, taskFocusMinutes, redirectionCount,
+    instrument:evaluationInstrument, cognitiveMinutes:inactive?0:cognitiveMinutes, technicalAssessment:inactive?null:technicalAssessment };
+  const scorePreview=isNewEvaluation ? calculateLessonScoreV200(scoringInput) : null;
+
   const [pendingExceptionAction, setPendingExceptionAction] = useState("");
   const quotaRecordsForLesson = telafiRecordsWithoutLesson(student.telafi_records, lesson);
   const telafiQuota = telafiQuotaInfo(student, lesson?.date || new Date(), quotaRecordsForLesson);
@@ -3358,7 +3555,7 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
               {[
                 ["Ders süresi", getLessonDuration(student, lesson)+" dk"],
                 ["Aktif ders süresi", lesson.activeMinutes ?? lesson.active_minutes, " dk"],
-                [lesson.taskFocusMinutes !== undefined || lesson.task_focus_minutes !== undefined ? "Görev odağını sürdürme" : "En uzun odaklanma", lesson.taskFocusMinutes ?? lesson.task_focus_minutes ?? lesson.focusMinutes ?? lesson.focus_minutes, " dk"],
+                [lesson.lessonScoreBreakdown?.scoringVersion === LESSON_SCORING_V200 ? "Bilişsel dayanıklılık" : lesson.taskFocusMinutes !== undefined || lesson.task_focus_minutes !== undefined ? "Görev odağını sürdürme" : "En uzun odaklanma", lesson.lessonScoreBreakdown?.scoringVersion === LESSON_SCORING_V200 ? lesson.lessonScoreBreakdown.cognitiveMinutes : lesson.taskFocusMinutes ?? lesson.task_focus_minutes ?? lesson.focusMinutes ?? lesson.focus_minutes, " dk"],
                 ["Yeniden yönlendirme", lesson.redirectionCount ?? lesson.redirection_count, " kez"],
                 [lesson.lessonFocus || lesson.lesson_focus ? "Dersin temel odağı" : "Dersin güçlü bölümü", lesson.lessonFocus || lesson.lesson_focus || lesson.focusSection || lesson.focus_section],
                 ["En verimli zaman", lesson.productiveWindow || lesson.productive_window],
@@ -3371,8 +3568,9 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
               {storedLessonScore(lesson) !== null ? <div style={{ margin:"9px 0 0", background:"#ecfdf5", border:"1px solid #a7f3d0", borderRadius:10, padding:"10px 11px" }}>
                 <p style={{ margin:0, fontSize:11, fontWeight:800, color:"#047857", letterSpacing:.5 }}>DERS VERİM PUANI</p>
                 <p style={{ margin:"4px 0 0", fontSize:20, fontWeight:900, color:"#065f46" }}>{fmtNumber(storedLessonScore(lesson))}/100</p>
-                {lesson.lessonScoreBreakdown ? <p style={{ margin:"5px 0 0", fontSize:11, color:"#047857" }}>{lesson.lessonScoreBreakdown.homeworkApplicable === false ? "Değerlendirilecek önceki ödev yok" : "Ödev "+lesson.lessonScoreBreakdown.homework+"/40"} · Aktif süre {lesson.lessonScoreBreakdown.active}/10 · Görev odağı {lesson.lessonScoreBreakdown.taskFocus}/20 · Yönlendirme {lesson.lessonScoreBreakdown.redirection}/30</p> : null}
+                {lesson.lessonScoreBreakdown ? <p style={{ margin:"5px 0 0", fontSize:11, color:"#047857" }}>{lessonEvaluationBreakdownText(lesson)}</p> : null}
               </div> : null}
+              <RecordedTechnicalAssessment record={lesson} />
               <div style={{ marginTop:7, background:"#fff", border:"1px solid #e2e8f0", borderRadius:9, padding:"8px 9px" }}>
                 <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#94a3b8", letterSpacing:.5 }}>ÖĞRETMEN NOTU</p>
                 <p style={{ margin:"4px 0 0", fontSize:12, color:lesson.note?"#334155":"#94a3b8", whiteSpace:"pre-wrap" }}>{lesson.note || "Bu ders için not girilmemiş."}</p>
@@ -3440,11 +3638,19 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
           </select>
         </div> : null}
         <label style={{ ...LBL, marginTop:0 }}>Aktif Ders Süresi (dk)</label>
-        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={activeMinutes} onChange={e=>{ setActiveMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 35" />
-        <label style={LBL}>Görev Odağını Sürdürme (en uzun / yaklaşık dk)</label>
-        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={taskFocusMinutes} onChange={e=>{ setTaskFocusMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 17" />
+        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} value={activeMinutes} onChange={e=>changeActiveMinutes(e.target.value)} placeholder="Örn. 35" />
+        <label style={LBL}>{isNewEvaluation ? "Bilişsel Dayanıklılık Süresi (yaklaşık dk)" : "Görev Odağını Sürdürme (en uzun / yaklaşık dk)"}</label>
+        <input style={INP} type="number" min={0} max={getLessonDuration(student, lesson)} disabled={inactive} value={isNewEvaluation ? (inactive ? 0 : cognitiveMinutes) : taskFocusMinutes} onChange={e=>{ if(isNewEvaluation) setCognitiveMinutes(e.target.value); else setTaskFocusMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 17" />
         <label style={LBL}>Yeniden Yönlendirme Sayısı</label>
-        <input style={INP} type="number" min={0} step={1} value={redirectionCount} onChange={e=>{ setRedirectionCount(e.target.value); setFormError(""); }} placeholder="Örn. 2" />
+        <input style={INP} type="number" min={0} step={1} disabled={inactive} value={inactive ? 0 : redirectionCount} onChange={e=>{ setRedirectionCount(e.target.value); setFormError(""); }} placeholder="Örn. 2" />
+        {isNewEvaluation ? <div style={{ marginTop:14 }}>
+          <label style={{ ...LBL,marginTop:0 }}>Teknik Değerlendirme · 40 puan</label>
+          <Btn bg="#6366f1" disabled={inactive || !technicalQuestionsForInstrument(evaluationInstrument)} onClick={()=>setTechnicalOpen(true)}>{inactive ? "Aktif süre 0: uygulanmaz" : "Teknik değerlendirmeyi aç"}</Btn>
+          {!inactive && validTechnicalAssessment(technicalAssessment,evaluationInstrument) ? <p style={{ fontSize:12,fontWeight:700 }}>Teknik puan: {fmtNumber(technicalAssessmentPoints(technicalAssessment).technical)}/40</p> : null}
+          {!technicalQuestionsForInstrument(evaluationInstrument) ? <p style={{ color:"#b91c1c",fontSize:12 }}>Öğrencinin kayıtlı enstrümanı doğrulanamadı. Değerlendirme kaydedilemez.</p> : null}
+          {technicalOpen && !inactive ? <TechnicalAssessmentSheet instrument={evaluationInstrument} answers={technicalAssessment} onChange={value=>{setTechnicalAssessment(value);setFormError("");}} onClose={()=>setTechnicalOpen(false)} /> : null}
+          {inactive ? <p style={{ fontSize:12,color:"#64748b" }}>Yalnız önceki ödev puanı uygulanır. Ödev yoksa ders puanı 0 olur.</p> : null}
+        </div> : null}
         <label style={LBL}>Dersin Temel Odağı</label>
         <select style={INP} value={lessonFocus} onChange={e=>{ setLessonFocus(e.target.value); setFormError(""); }}>
           <option value="">Seçin</option>
@@ -3462,17 +3668,20 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
           <label style={LBL}>Düzeltme Nedeni</label>
           <NoteArea value={correctionReason} onChange={value=>{ setCorrectionReason(value); setFormError(""); }} label="Düzeltme gerekçesi" placeholder="Örn. Aktif ders süresi yanlış girilmişti." />
         </> : null}
+        {scorePreview ? <p style={{fontSize:16,fontWeight:800,color:"#065f46"}}>Ders puanı: {fmtNumber(scorePreview.total)}/100</p> : null}
         {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
         <Btn bg="#10b981" disabled={saving} onClick={() => {
           if (saving) return;
           const duration = getLessonDuration(student, lesson);
           if (homeworkToEvaluate && !homeworkStatus) { setFormError("Ödev durumunu seçin."); return; }
-          if (activeMinutes === "" || parseInt(activeMinutes) < 0 || parseInt(activeMinutes) > duration) { setFormError("Geçerli aktif ders süresi girin."); return; }
-          if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > duration) { setFormError("Geçerli görev odağı süresi girin."); return; }
+          if (activeMinutes === "" || (isNewEvaluation ? Number(activeMinutes) : parseInt(activeMinutes)) < 0 || (isNewEvaluation ? Number(activeMinutes) : parseInt(activeMinutes)) > duration) { setFormError("Geçerli aktif ders süresi girin."); return; }
+          if (!isNewEvaluation && (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > duration)) { setFormError("Geçerli görev odağı süresi girin."); return; }
           if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
-          if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
+          if (scoringVersion === null) { setFormError("Bu değerlendirme modeli bu sürümde desteklenmiyor."); return; }
+                  if (isNewEvaluation && (!scorePreview || Number(cognitiveMinutes) > duration)) { setFormError("Bilişsel süreyi ve bütün teknik değerlendirme cevaplarını kontrol edin."); return; }
+                  if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
           if (correctionRequired && !correctionReason.trim()) { setFormError("Daha önce kaydedilmiş ders verilerini değiştirmek için düzeltme nedenini yazın."); return; }
-          const scoreBreakdown = calculateLessonScore({
+          const scoreBreakdown = isNewEvaluation ? scorePreview : calculateLessonScore({
             homeworkStatus,
             homeworkApplicable:!!homeworkToEvaluate,
             activeMinutes,
@@ -3481,9 +3690,9 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
           });
           onAction("attended", {
             note:note.trim(),
-            activeMinutes:parseInt(activeMinutes)||0,
-            taskFocusMinutes:parseInt(taskFocusMinutes)||0,
-            redirectionCount:parseInt(redirectionCount)||0,
+            activeMinutes:isNewEvaluation ? Number(activeMinutes) : parseInt(activeMinutes)||0,
+            ...(isNewEvaluation ? {scoringVersion:LESSON_SCORING_V200,evaluationContextVersion:evaluationContext.recordVersion,instrument:evaluationInstrument,cognitiveMinutes:inactive?0:Number(cognitiveMinutes),technicalAssessment:inactive?null:technicalAssessment} : {taskFocusMinutes:parseInt(taskFocusMinutes)||0}),
+            redirectionCount:isNewEvaluation ? Number(redirectionCount) : parseInt(redirectionCount)||0,
             lessonFocus,
             lessonScore:scoreBreakdown.total,
             lessonScoreBreakdown:scoreBreakdown,
@@ -3578,6 +3787,30 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === telafiCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
   const [correctionReason, setCorrectionReason] = useState("");
   const [formError, setFormError] = useState("");
+  const [evaluationContext]=useState(()=>({
+    scoringVersion:lessonEvaluationScoringVersion(record),
+    instrument:record?.lessonScoreBreakdown?.scoringVersion === LESSON_SCORING_V200 ? record.lessonScoreBreakdown.instrument : student.instrument,
+    recordVersion:Math.max(0,parseInt(student?.record_version) || 0),
+  }));
+  const scoringVersion=evaluationContext.scoringVersion === LESSON_SCORING_V200 ? LESSON_SCORING_V200 : lessonEvaluationScoringVersion(record);
+  const isNewEvaluation=scoringVersion === LESSON_SCORING_V200;
+  const evaluationInstrument=evaluationContext.instrument;
+  const [cognitiveMinutes,setCognitiveMinutes]=useState(record?.lessonScoreBreakdown?.cognitiveMinutes ?? "");
+  const [technicalAssessment,setTechnicalAssessment]=useState(()=>record?.lessonScoreBreakdown?.technicalAssessment || emptyTechnicalAssessment());
+  const [technicalOpen,setTechnicalOpen]=useState(false);
+  const inactive=isNewEvaluation && activeMinutes !== "" && Number(activeMinutes) === 0;
+  const changeActiveMinutes=value=>{
+    setActiveMinutes(value); setFormError("");
+    if (isNewEvaluation && value !== "" && Number(value) === 0) {
+      setCognitiveMinutes("0"); setRedirectionCount("0"); setTechnicalAssessment(emptyTechnicalAssessment()); setTechnicalOpen(false);
+    } else if (inactive) {
+      setCognitiveMinutes(""); setRedirectionCount(""); setTechnicalAssessment(emptyTechnicalAssessment());
+    }
+  };
+  const scoringInput={ homeworkStatus, homeworkApplicable:!!homeworkToEvaluate, activeMinutes, taskFocusMinutes, redirectionCount,
+    instrument:evaluationInstrument, cognitiveMinutes:inactive?0:cognitiveMinutes, technicalAssessment:inactive?null:technicalAssessment };
+  const scorePreview=isNewEvaluation ? calculateLessonScoreV200(scoringInput) : null;
+
   const [savingPlan, setSavingPlan] = useState(false);
   const [savingCompletion, setSavingCompletion] = useState(false);
   const days = daysLeft(record.expiry);
@@ -3645,6 +3878,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
             {telafiDoneAt(record) && <p style={{ margin:"4px 0 0", fontSize:13, color:"#16a34a" }}>{telafiDoneDateText(record)}</p>}
             {telafiMetricText(record) ? <p style={{ margin:"4px 0 0", fontSize:13, color:"#166534" }}>{telafiMetricText(record)}</p> : null}
             {storedLessonScore(record) !== null ? <p style={{ margin:"6px 0 0", fontSize:15, color:"#065f46", fontWeight:900 }}>Ders Verim Puanı: {fmtNumber(storedLessonScore(record))}/100</p> : null}
+            <RecordedTechnicalAssessment record={record} />
             {record.doneNote ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>{record.doneNote}</p> : null}
             {checkedHomework ? <div style={{ marginTop:9, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:9, padding:"8px 9px" }}>
               <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#92400e", letterSpacing:.5 }}>BU TELAFİDE KONTROL EDİLEN ÖDEV</p>
@@ -3692,12 +3926,20 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
                   </select>
                 </div> : null}
                 <label style={{ ...LBL, marginTop:0 }}>Aktif Ders Süresi (dk)</label>
-                <input style={INP} type="number" min={0} max={duration} value={activeMinutes} onChange={e=>{ setActiveMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 35" />
-                <label style={LBL}>Görev Odağını Sürdürme (en uzun / yaklaşık dk)</label>
-                <input style={INP} type="number" min={0} max={duration} value={taskFocusMinutes} onChange={e=>{ setTaskFocusMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 17" />
+                <input style={INP} type="number" min={0} max={duration} value={activeMinutes} onChange={e=>changeActiveMinutes(e.target.value)} placeholder="Örn. 35" />
+                <label style={LBL}>{isNewEvaluation ? "Bilişsel Dayanıklılık Süresi (yaklaşık dk)" : "Görev Odağını Sürdürme (en uzun / yaklaşık dk)"}</label>
+                <input style={INP} type="number" min={0} max={duration} disabled={inactive} value={isNewEvaluation ? (inactive ? 0 : cognitiveMinutes) : taskFocusMinutes} onChange={e=>{ if(isNewEvaluation) setCognitiveMinutes(e.target.value); else setTaskFocusMinutes(e.target.value); setFormError(""); }} placeholder="Örn. 17" />
                 <label style={LBL}>Yeniden Yönlendirme Sayısı</label>
-                <input style={INP} type="number" min={0} step={1} value={redirectionCount} onChange={e=>{ setRedirectionCount(e.target.value); setFormError(""); }} placeholder="Örn. 2" />
-                <label style={LBL}>Dersin Temel Odağı</label>
+                <input style={INP} type="number" min={0} step={1} disabled={inactive} value={inactive ? 0 : redirectionCount} onChange={e=>{ setRedirectionCount(e.target.value); setFormError(""); }} placeholder="Örn. 2" />
+                {isNewEvaluation ? <div style={{ marginTop:14 }}>
+          <label style={{ ...LBL,marginTop:0 }}>Teknik Değerlendirme · 40 puan</label>
+          <Btn bg="#6366f1" disabled={inactive || !technicalQuestionsForInstrument(evaluationInstrument)} onClick={()=>setTechnicalOpen(true)}>{inactive ? "Aktif süre 0: uygulanmaz" : "Teknik değerlendirmeyi aç"}</Btn>
+          {!inactive && validTechnicalAssessment(technicalAssessment,evaluationInstrument) ? <p style={{ fontSize:12,fontWeight:700 }}>Teknik puan: {fmtNumber(technicalAssessmentPoints(technicalAssessment).technical)}/40</p> : null}
+          {!technicalQuestionsForInstrument(evaluationInstrument) ? <p style={{ color:"#b91c1c",fontSize:12 }}>Öğrencinin kayıtlı enstrümanı doğrulanamadı. Değerlendirme kaydedilemez.</p> : null}
+          {technicalOpen && !inactive ? <TechnicalAssessmentSheet instrument={evaluationInstrument} answers={technicalAssessment} onChange={value=>{setTechnicalAssessment(value);setFormError("");}} onClose={()=>setTechnicalOpen(false)} /> : null}
+          {inactive ? <p style={{ fontSize:12,color:"#64748b" }}>Yalnız önceki ödev puanı uygulanır. Ödev yoksa ders puanı 0 olur.</p> : null}
+        </div> : null}
+        <label style={LBL}>Dersin Temel Odağı</label>
                 <select style={INP} value={lessonFocus} onChange={e=>{ setLessonFocus(e.target.value); setFormError(""); }}>
                   <option value="">Seçin</option>
                   {lessonFocus && !LESSON_FOCUS_OPTIONS.includes(lessonFocus) ? <option value={lessonFocus}>{lessonFocus} (Eski kayıt)</option> : null}
@@ -3711,23 +3953,26 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
                   <label style={LBL}>Düzeltme Nedeni</label>
                   <NoteArea value={correctionReason} onChange={value=>{ setCorrectionReason(value); setFormError(""); }} placeholder="Örn. Öğretmen notundaki süre yanlış girilmişti." />
                 </> : null}
-                {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
+                {scorePreview ? <p style={{fontSize:16,fontWeight:800,color:"#065f46"}}>Ders puanı: {fmtNumber(scorePreview.total)}/100</p> : null}
+        {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
                 <Btn bg="#10b981" disabled={savingCompletion} onClick={() => {
                   const lessonDuration = parseInt(duration) || getLessonDuration(student);
                   if (homeworkToEvaluate && !homeworkStatus) { setFormError("Ödev durumunu seçin."); return; }
-                  if (activeMinutes === "" || parseInt(activeMinutes) < 0 || parseInt(activeMinutes) > lessonDuration) { setFormError("Geçerli aktif ders süresi girin."); return; }
-                  if (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > lessonDuration) { setFormError("Geçerli görev odağı süresi girin."); return; }
+                  if (activeMinutes === "" || (isNewEvaluation ? Number(activeMinutes) : parseInt(activeMinutes)) < 0 || (isNewEvaluation ? Number(activeMinutes) : parseInt(activeMinutes)) > lessonDuration) { setFormError("Geçerli aktif ders süresi girin."); return; }
+                  if (!isNewEvaluation && (taskFocusMinutes === "" || parseInt(taskFocusMinutes) < 0 || parseInt(taskFocusMinutes) > lessonDuration)) { setFormError("Geçerli görev odağı süresi girin."); return; }
                   if (redirectionCount === "" || parseInt(redirectionCount) < 0) { setFormError("Yeniden yönlendirme sayısını girin; gerekmediyse 0 yazın."); return; }
+                  if (scoringVersion === null) { setFormError("Bu değerlendirme modeli bu sürümde desteklenmiyor."); return; }
+                  if (isNewEvaluation && (!scorePreview || Number(cognitiveMinutes) > lessonDuration)) { setFormError("Bilişsel süreyi ve bütün teknik değerlendirme cevaplarını kontrol edin."); return; }
                   if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
                   if (record.done && !correctionReason.trim()) { setFormError("Düzeltme nedenini yazın."); return; }
-                  const scoreBreakdown = calculateLessonScore({ homeworkStatus, homeworkApplicable:!!homeworkToEvaluate, activeMinutes, taskFocusMinutes, redirectionCount });
+                  const scoreBreakdown = isNewEvaluation ? scorePreview : calculateLessonScore({ homeworkStatus, homeworkApplicable:!!homeworkToEvaluate, activeMinutes, taskFocusMinutes, redirectionCount });
                   void saveCompletion({
                     action: "attended",
                     doneAt: plannedAt || `${date}T${time}:00`,
                     doneNote:doneNote.trim(),
-                    activeMinutes: parseInt(activeMinutes) || 0,
-                    taskFocusMinutes: parseInt(taskFocusMinutes) || 0,
-                    redirectionCount: parseInt(redirectionCount) || 0,
+                    activeMinutes: isNewEvaluation ? Number(activeMinutes) : parseInt(activeMinutes) || 0,
+                    ...(isNewEvaluation ? {scoringVersion:LESSON_SCORING_V200,evaluationContextVersion:evaluationContext.recordVersion,instrument:evaluationInstrument,cognitiveMinutes:inactive?0:Number(cognitiveMinutes),technicalAssessment:inactive?null:technicalAssessment} : {taskFocusMinutes: parseInt(taskFocusMinutes) || 0}),
+                    redirectionCount: isNewEvaluation ? Number(redirectionCount) : parseInt(redirectionCount) || 0,
                     lessonFocus,
                     lessonScore:scoreBreakdown.total,
                     lessonScoreBreakdown:scoreBreakdown,
@@ -4819,6 +5064,8 @@ function msgPaketOzeti(student) {
     });
   }
   const verim = lessonEngagementStats(student, info);
+  const cognitiveRecords=sonPaket.filter(l=>l.status === "completed" && l.lessonScoreBreakdown?.scoringVersion === LESSON_SCORING_V200 && !l.lessonScoreBreakdown.inactive);
+  const cognitiveAverage=cognitiveRecords.length ? cognitiveRecords.reduce((sum,l)=>sum+l.lessonScoreBreakdown.cognitiveMinutes,0)/cognitiveRecords.length : null;
   const aktifTelafi = activeTelafiRecords(student.telafi_records);
   const yapilanTelafi = (student.telafi_records||[]).filter(r => r.done);
   let msg = "Sonsuz Sanat - Ders Özeti\n\n";
@@ -4832,7 +5079,8 @@ function msgPaketOzeti(student) {
     const durationMax = completedWithStats.reduce((max,l)=>Math.max(max, getLessonDuration(student, l)), getLessonDuration(student));
     msg += "\nDers Verimi:\n";
     msg += "Ortalama aktif ders süresi: "+fmtNumber(verim.avgActive, 1)+" dk\n";
-    if (verim.avgFocus) msg += "Ortalama odaklanma süresi: "+fmtNumber(verim.avgFocus, 1)+" dk\n";
+    if (verim.avgFocus) msg += (cognitiveRecords.length ? "Eski kayıtlardaki ortalama odaklanma süresi: " : "Ortalama odaklanma süresi: ")+fmtNumber(verim.avgFocus, 1)+" dk\n";
+    if (cognitiveAverage !== null) msg += "Ortalama bilişsel dayanıklılık süresi: "+fmtNumber(cognitiveAverage,1)+" dk\n";
     if (verim.topWindow) msg += "Genelde en verimli bölüm: "+verim.topWindow+"\n";
     msg += "\nGelişim Grafiği\n";
     if (activeValues.some(Boolean)) {
@@ -4886,7 +5134,33 @@ function msgPaketOzeti(student) {
   return msg;
 }
 
+
+function msgDersDegerlendirmesiV200(student, record, type="normal") {
+  const b=record.lessonScoreBreakdown, isTelafi=type === "telafi";
+  const date=isTelafi ? (telafiDoneAt(record)||telafiPlannedAt(record)) : record.date;
+  const lines=[student.name+" için "+(isTelafi?"telafi dersi":"bugünkü ders")+" değerlendirmesi:", date?"Ders tarihi: "+fmtMed(date):"", "",
+    "Dersin temel odağı: "+(record.lessonFocus || "-"),
+    "Aktif ders süresi: "+(record.activeMinutes || 0)+" dakika ("+b.active+"/10)"];
+  if (b.inactive) lines.push("Aktif ders süresi 0 olduğu için bilişsel dayanıklılık, yeniden yönlendirme ve teknik değerlendirme uygulanmadı.");
+  else {
+    lines.push("Bilişsel dayanıklılık: Yaklaşık "+b.cognitiveMinutes+" dakika ("+b.cognitive+"/20)",
+      "Yeniden yönlendirme: "+(record.redirectionCount || 0)+" kez ("+b.redirection+"/10)", "Teknik değerlendirme: "+fmtNumber(b.technical)+"/40");
+    const answers=b.technicalAssessment, questions=technicalQuestionsForInstrument(b.instrument);
+    if (answers && questions) {
+      lines.push("Yönergeleri uygulama: "+technicalAnswerLabel(answers.instructions),"Tutarlılık: "+technicalAnswerLabel(answers.consistency),b.instrument+" tekniği: "+(b.instrumentTechnique===null?"Henüz öğretilmedi":fmtNumber(b.instrumentTechnique)+"/10"));
+      questions.forEach(([label],index)=>lines.push("- "+label+": "+technicalAnswerLabel(answers.skills[index])));
+      lines.push("Parça takibi: "+technicalAnswerLabel(answers.tracking));
+    }
+  }
+  lines.push(b.homeworkApplicable ? "Önceki ödev: "+homeworkStatusLabel(record.evaluatedHomeworkStatus)+" ("+b.homework+"/20)" : "Önceki ödev: Bu ders için değerlendirilecek ödev yoktu");
+  lines.push("","Ders Verim Puanı: "+fmtNumber(storedLessonScore(record) ?? 0)+"/100");
+  if (record.note || record.doneNote) lines.push("","Öğretmen notu: "+(record.note || record.doneNote));
+  lines.push("","Gelecek ders ödevi: "+(record.homework || "Ödev verilmedi"));
+  return lines.join("\n");
+}
+
 function msgDersDegerlendirmesi(student, record, type="normal") {
+  if (record?.lessonScoreBreakdown?.scoringVersion === LESSON_SCORING_V200) return msgDersDegerlendirmesiV200(student,record,type);
   const isTelafi = type === "telafi";
   const date = isTelafi ? (telafiDoneAt(record) || telafiPlannedAt(record)) : record?.date;
   const breakdown = record?.lessonScoreBreakdown || {};
@@ -11184,7 +11458,7 @@ export default function App() {
     try {
       const result = await timedSingleLessonRequest(() => supabase
         .from("normal_lesson_evaluation_operations")
-        .select("operation_id,student_id,branch_id,lesson_id,operation_kind,expected_record_version,resulting_record_version,request_payload,actor_user_id,created_at")
+        .select("operation_id,student_id,branch_id,lesson_id,operation_kind,expected_record_version,resulting_record_version,request_payload,target_after,actor_user_id,created_at")
         .eq("operation_id",issue.operationId)
         .maybeSingle());
       if (result.error) {
@@ -11214,7 +11488,8 @@ export default function App() {
         && Number(row.expected_record_version) === Number(issue.expectedRecordVersion)
         && Number(row.resulting_record_version) > Number(row.expected_record_version)
         && row.actor_user_id === issue.actorUserId
-        && normalLessonEvaluationIntentSignature(row.request_payload) === issue.requestSignature;
+        && normalLessonEvaluationIntentSignature(row.request_payload) === issue.requestSignature
+        && (row.request_payload?.evaluation?.scoringVersion !== LESSON_SCORING_V200 || lessonEvaluationTargetMatches(row.target_after,row.request_payload.evaluation));
       if (!exactEvidence) {
         persistNormalLessonEvaluationIssue({ ...issue, state:"conflict" });
         if (options.notify !== false) pop("Ders değerlendirme kanıtı beklenen öğrenci veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.",9000);
@@ -11288,6 +11563,12 @@ export default function App() {
       pop("Önce bekleyen telafi tamamlama sonucunu üstteki uyarıdan kesinleştirin.",9000);
       return false;
     }
+    if (detail.scoringVersion === LESSON_SCORING_V200 && Number.isInteger(detail.evaluationContextVersion)
+      && detail.evaluationContextVersion !== Math.max(0,parseInt(sourceStudent.record_version) || 0)) {
+      pop("Değerlendirme açıkken öğrenci kaydı değişti. Kayıt gönderilmedi; pencereyi kapatıp güncel kaydı yeniden açın.",9000);
+      await loadStudents(undefined,branchId);
+      return false;
+    }
     const intent = normalLessonEvaluationIntent(sourceStudent,lid,detail,actionOptions.correctionReason);
     if (!intent.lesson || !intent.evaluation.lessonFocus) {
       pop("Ders değerlendirme bilgileri eksik; kayıt gönderilmedi.",7000);
@@ -11337,7 +11618,7 @@ export default function App() {
           && Number(savedStudent?.record_version) === intent.expectedRecordVersion + 1
           && savedStudent?.last_write_id === operationId
           && evaluatedLesson?.status === "completed"
-          && storedLessonScore(evaluatedLesson) !== null;
+          && lessonEvaluationTargetMatches(evaluatedLesson,intent.evaluation);
         if (exactResult) {
           setStudents(previous=>previous.map(student=>student.id === savedStudent.id ? savedStudent : student));
           setDetailSt(previous=>previous?.id === savedStudent.id ? savedStudent : previous);
@@ -11980,6 +12261,12 @@ export default function App() {
       pop("Önce devam eden telafi tamamlama sonucunu üstteki uyarıdan kesinleştirin.",9000);
       return false;
     }
+    if (payload.scoringVersion === LESSON_SCORING_V200 && Number.isInteger(payload.evaluationContextVersion)
+      && payload.evaluationContextVersion !== Math.max(0,parseInt(sourceStudent.record_version) || 0)) {
+      pop("Değerlendirme açıkken öğrenci kaydı değişti. Kayıt gönderilmedi; pencereyi kapatıp güncel kaydı yeniden açın.",9000);
+      await loadStudents(undefined,branchId);
+      return false;
+    }
     const requestedAction = payload.action || "attended";
     if (!["attended","counted"].includes(requestedAction)) {
       pop("Telafi sonucu türü doğrulanamadı; kayıt gönderilmedi.",7000);
@@ -12016,7 +12303,7 @@ export default function App() {
       if (!intent.evaluation.lessonFocus || !sourcePairValid
         || (intent.evaluation.previousHomeworkSource && !["schedule","telafi"].includes(intent.evaluation.previousHomeworkSource))
         || !Number.isInteger(intent.evaluation.activeMinutes) || intent.evaluation.activeMinutes < 0 || intent.evaluation.activeMinutes > lessonDuration
-        || !Number.isInteger(intent.evaluation.taskFocusMinutes) || intent.evaluation.taskFocusMinutes < 0 || intent.evaluation.taskFocusMinutes > lessonDuration
+        || (intent.evaluation.scoringVersion === LESSON_SCORING_V200 ? (!scoreForEvaluation(intent.evaluation) || intent.evaluation.cognitiveMinutes > lessonDuration) : (!Number.isInteger(intent.evaluation.taskFocusMinutes) || intent.evaluation.taskFocusMinutes < 0 || intent.evaluation.taskFocusMinutes > lessonDuration))
         || !Number.isInteger(intent.evaluation.redirectionCount) || intent.evaluation.redirectionCount < 0
         || (intent.evaluation.previousHomeworkSource && !["done","partial","not_done"].includes(intent.evaluation.homeworkStatus))) {
         pop("Telafi değerlendirme bilgileri doğrulanamadı; kayıt gönderilmedi.",7000);
