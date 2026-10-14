@@ -6234,26 +6234,204 @@ function calendarProgramModel(students,branchId) {
   })};
 }
 
+// Anonymous projection of the existing permanent program; no business writes.
+function calendarProgramExportModel(program,branchName,generatedAt=new Date()) {
+  const names=['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi','Pazar'];
+  const date=new Date(generatedAt);
+  if(!program || !Array.isArray(program.days) || program.days.length!==7 || isNaN(date.getTime()))return null;
+  const days=program.days.map((day,index)=>{
+    const starts=calendarAvailabilityStarts(index);
+    if(day.dayName!==names[index] || !Array.isArray(day.options) || day.options.length!==starts.length)return null;
+    const options=day.options.map((option,i)=>option?.time===starts[i]&&typeof option.busy==='boolean'?{time:option.time,busy:option.busy}:null);
+    return options.some(option=>!option)?null:{dayName:day.dayName,options};
+  });
+  if(days.some(day=>!day))return null;
+  return {branchName:String(branchName || '').trim(),generatedLabel:date.toLocaleString('tr-TR',{timeZone:'Europe/Istanbul',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).replace(/\s/g,' '),days};
+}
+function calendarProgramText(model) {
+  if(!model)throw new Error('Ders programı doğrulanamadı.');
+  return ['SONSUZ SANAT',...(model.branchName?[model.branchName]:[]),'Ders Programı','',
+    ...model.days.map(day=>day.dayName+':\n'+day.options.map(option=>option.time+' ('+(option.busy?'Dolu':'Boş')+')').join(' - ')),
+    '', 'Kalıcı haftalık program.','Hazırlanma: '+model.generatedLabel].join('\n');
+}
+function calendarProgramWhatsAppText(model) {
+  if(!model)throw new Error('Ders programı doğrulanamadı.');
+  return ['*SONSUZ SANAT*',...(model.branchName?[model.branchName]:[]),'*Ders Programı*','',
+    model.days.map(day=>'*'+day.dayName+'*\n'+day.options.map(option=>option.busy?'~'+option.time+'~':option.time).join(' · ')).join('\n\n'),
+    '', 'Kalıcı haftalık program. Üzeri çizili saatler doludur.','Hazırlanma: '+model.generatedLabel].join('\n');
+}
+function calendarProgramPdfBytes(model) {
+  const checked=calendarProgramExportModel(model,model?.branchName);
+  if(!checked || typeof model.generatedLabel!=='string')throw new Error('Ders programı çıktısı doğrulanamadı.');
+  const font=CALENDAR_AVAILABILITY_PDF_FONT,encoder=new TextEncoder();
+  const encodeText=value=>Array.from(String(value)).map(character=>{
+    const index=font.characters.indexOf(character);if(index<0)throw new Error('PDF karakteri desteklenmiyor.');
+    return index.toString(16).padStart(2,'0');
+  }).join('');
+  const width=(value,size)=>Array.from(String(value)).reduce((sum,character)=>{
+    const index=font.characters.indexOf(character);if(index<0)throw new Error('PDF karakteri desteklenmiyor.');
+    return sum+font.widths[index]*size/1000;
+  },0);
+  const commands=[];
+  const text=(value,x,y,size=12,color='0.13 0.16 0.22')=>commands.push('BT /F1 '+size+' Tf '+color+' rg 1 0 0 1 '+x.toFixed(2)+' '+y.toFixed(2)+' Tm <'+encodeText(value)+'> Tj ET');
+  const centered=(value,x,y,size,color)=>text(value,x-width(value,size)/2,y,size,color);
+  const rect=(x,y,w,h,color)=>commands.push(color+' rg '+[x,y,w,h].map(n=>n.toFixed(2)).join(' ')+' re f');
+  const line=(x1,y1,x2,y2,color='0.85 0.87 0.90',thickness=.6)=>commands.push(color+' RG '+thickness+' w '+x1+' '+y1+' m '+x2+' '+y2+' l S');
+  const pageWidth=841.89,pageHeight=595.28,margin=32,dayWidth=106,cellWidth=(pageWidth-margin*2-dayWidth)/7,top=450,rowHeight=45;
+  text('SONSUZ SANAT',margin,552,13,'0.36 0.24 0.77');
+  // Wrap branch names using actual embedded-font widths, including long words.
+  let branchLines=[''];
+  for(const word of model.branchName.split(/\s+/).filter(Boolean)){
+    const last=branchLines.length-1,candidate=branchLines[last]+(branchLines[last]?' ':'')+word;
+    if(width(candidate,12)<=pageWidth-margin*2)branchLines[last]=candidate;
+    else {
+      if(branchLines[last])branchLines.push('');
+      for(const character of word){const i=branchLines.length-1;if(width(branchLines[i]+character,12)>pageWidth-margin*2)branchLines.push(character);else branchLines[i]+=character;}
+    }
+  }
+  if(branchLines.length>2)throw new Error('Şube adı PDF alanına sığmadı.');
+  branchLines.forEach((value,i)=>text(value,margin,532-i*15,12,'0.40 0.44 0.50'));
+  text('Ders Programı',margin,480,27,'0.16 0.13 0.28');
+  model.days.forEach((day,index)=>{
+    const bottom=top-(index+1)*rowHeight;
+    rect(margin,bottom,dayWidth,rowHeight,'0.93 0.94 0.95');
+    centered(day.dayName,margin+dayWidth/2,bottom+17,12,'0.21 0.28 0.31');
+    day.options.forEach((option,i)=>{
+      const x=margin+dayWidth+i*cellWidth,center=x+cellWidth/2,y=bottom+17;
+      rect(x+5,bottom+8,cellWidth-10,rowHeight-16,option.busy?'0.95 0.94 0.95':'0.89 0.96 0.93');
+      centered(option.time,center,y,14,option.busy?'0.46 0.40 0.43':'0.13 0.46 0.33');
+      if(option.busy){const half=width(option.time,14)/2;line(center-half,y+4,center+half,y+4,'0.46 0.40 0.43',1.4);}
+    });
+    line(margin,bottom,pageWidth-margin,bottom);
+  });
+  line(margin,top,pageWidth-margin,top);line(margin,top-7*rowHeight,margin,top);
+  line(margin+dayWidth,top-7*rowHeight,margin+dayWidth,top);line(pageWidth-margin,top-7*rowHeight,pageWidth-margin,top);
+  text('Kalıcı haftalık program. Üzeri çizili saatler doludur.',margin,101,10,'0.40 0.44 0.50');
+  text('Hazırlanma: '+model.generatedLabel,margin,79,10,'0.40 0.44 0.50');
+  const fontBytes=Uint8Array.from(atob(font.font),character=>character.charCodeAt(0));
+  const cmapEntries=Array.from(font.characters).map((character,index)=>"<"+index.toString(16).padStart(2,"0")+"> <"+character.codePointAt(0).toString(16).padStart(4,"0")+">");
+  const cmap=["/CIDInit /ProcSet findresource begin","12 dict begin","begincmap","/CIDSystemInfo << /Registry (Sonsuz) /Ordering (Unicode) /Supplement 0 >> def","/CMapName /SonsuzAvailabilityUnicode def","/CMapType 2 def","1 begincodespacerange","<00> <FF>","endcodespacerange"];
+  for(let index=0;index<cmapEntries.length;index+=100) {
+    const batch=cmapEntries.slice(index,index+100);
+    cmap.push(batch.length+" beginbfchar",...batch,"endbfchar");
+  }
+  cmap.push("endcmap","CMapName currentdict /CMap defineresource pop","end","end");
+  const stream=(data,extra="")=>concatPdfBytes([encoder.encode("<< /Length "+data.length+extra+" >>\nstream\n"),data,encoder.encode("\nendstream")]);
+  const objects=[
+    encoder.encode("<< /Type /Catalog /Pages 2 0 R >>"),
+    encoder.encode("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+    encoder.encode("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "+pageWidth+" "+pageHeight+"] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
+    stream(encoder.encode(commands.join("\n"))),
+    encoder.encode("<< /Type /Font /Subtype /TrueType /BaseFont /SONSUZ+Availability /FirstChar 0 /LastChar "+(font.characters.length-1)+" /Widths ["+font.widths.join(" ")+"] /FontDescriptor 6 0 R /ToUnicode 8 0 R >>"),
+    encoder.encode("<< /Type /FontDescriptor /FontName /SONSUZ+Availability /Flags 4 /FontBBox ["+font.bbox.join(" ")+"] /ItalicAngle 0 /Ascent "+font.ascent+" /Descent "+font.descent+" /CapHeight "+font.capHeight+" /StemV 80 /FontFile2 7 0 R >>"),
+    stream(fontBytes," /Length1 "+fontBytes.length),
+    stream(encoder.encode(cmap.join("\n"))),
+  ];
+  const parts=[encoder.encode("%PDF-1.4\n")],offsets=[0];
+  let offset=parts[0].length;
+  objects.forEach((object,index)=>{
+    offsets.push(offset);
+    const part=concatPdfBytes([encoder.encode((index+1)+" 0 obj\n"),object,encoder.encode("\nendobj\n")]);
+    parts.push(part);offset+=part.length;
+  });
+  const xref=offset;
+  parts.push(encoder.encode("xref\n0 "+(objects.length+1)+"\n0000000000 65535 f \n"+offsets.slice(1).map(value=>String(value).padStart(10,"0")+" 00000 n \n").join("")+"trailer\n<< /Size "+(objects.length+1)+" /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF"));
+  return concatPdfBytes(parts);
+}
+
+
 function CalendarProgramSheet({students,branchId,branchName,onClose}) {
   const dialogRef=useRef(null),closeRef=useRef(onClose);
   closeRef.current=onClose;
   const model=calendarProgramModel(students,branchId);
+  const recipients=calendarAvailabilityRecipients(students,branchId);
+  const aliveRef=useRef(true);
+  const exportBusyRef=useRef(false);
+  const [feedback,setFeedback]=useState("");
+  const [copyBusy,setCopyBusy]=useState(false);
+  const [shareOpen,setShareOpen]=useState(false);
+  const [recipientMode,setRecipientMode]=useState("student");
+  const [recipientSearch,setRecipientSearch]=useState("");
+  const [recipientId,setRecipientId]=useState("");
+  const [manualPhone,setManualPhone]=useState("");
+  const [whatsAppOpened,setWhatsAppOpened]=useState(false);
+  const sendStartedRef=useRef(false);
+  const sharePanelRef=useRef(null);
+  const recipient=recipients.find(item=>item.id===recipientId);
+  const recipientPhone=calendarAvailabilityPhone(recipientMode==="student"?recipient?.phone:manualPhone);
+  const query=recipientSearch.trim().toLocaleLowerCase("tr-TR");
+  const matchingRecipients=recipients.filter(item=>[item.name,item.guardian,item.phone].some(value=>String(value).toLocaleLowerCase("tr-TR").includes(query)) || item.id===recipientId);
+  const exportModel=calendarProgramExportModel(model,branchName);
+  const signature=JSON.stringify([branchName,model?.days]);
+  const currentSignatureRef=useRef(signature);
+  currentSignatureRef.current=signature;
+  useEffect(()=>{ setFeedback(""); },[signature]);
+  useEffect(()=>{ sendStartedRef.current=false;setWhatsAppOpened(false); },[shareOpen,recipientMode,recipientId,manualPhone,recipient?.phone,signature]);
+  useEffect(()=>{ if(shareOpen)sharePanelRef.current?.querySelector("input,select")?.focus(); },[shareOpen,recipientMode]);
+
   useEffect(()=>{
+    aliveRef.current=true;
     const previous=document.activeElement,overflow=document.body.style.overflow;
     document.body.style.overflow="hidden";
     dialogRef.current?.querySelector("button")?.focus();
     const onKey=event=>{
       if (event.key==="Escape") {event.preventDefault();closeRef.current();return;}
       if (event.key!=="Tab") return;
-      const buttons=Array.from(dialogRef.current?.querySelectorAll("button:not(:disabled)") || []);
+      const buttons=Array.from(dialogRef.current?.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)") || []);
       if (!buttons.length) return;
       const first=buttons[0],last=buttons.at(-1);
       if(event.shiftKey && document.activeElement===first){event.preventDefault();last.focus();}
       else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first.focus();}
     };
     document.addEventListener("keydown",onKey);
-    return ()=>{document.body.style.overflow=overflow;document.removeEventListener("keydown",onKey);if(previous?.isConnected)previous.focus();};
+    return ()=>{aliveRef.current=false;document.body.style.overflow=overflow;document.removeEventListener("keydown",onKey);if(previous?.isConnected)previous.focus();};
   },[]);
+  const copy=async()=>{
+    if (!model || exportBusyRef.current) return;
+    const startedSignature=signature;
+    exportBusyRef.current=true;setCopyBusy(true);setFeedback("");
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(calendarProgramText(calendarProgramExportModel(calendarProgramModel(students,branchId),branchName)));
+      if (aliveRef.current && currentSignatureRef.current===startedSignature) setFeedback("Metin kopyalandı.");
+    } catch {
+      if (aliveRef.current && currentSignatureRef.current===startedSignature) setFeedback("Kopyalama izni alınamadı. PDF'yi indirip gönderebilirsiniz.");
+    } finally {
+      exportBusyRef.current=false;if(aliveRef.current)setCopyBusy(false);
+    }
+  };
+  const download=()=>{
+    if (!model || exportBusyRef.current) return;
+    let url="",link=null;
+    try {
+      const freshModel=calendarProgramExportModel(calendarProgramModel(students,branchId),branchName);
+      const bytes=calendarProgramPdfBytes(freshModel);
+      url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+      link=document.createElement("a");link.href=url;
+      link.download="Sonsuz-Sanat-Ders-Programi-"+turkeyDateKey(new Date())+".pdf";
+      document.body.appendChild(link);link.click();setFeedback("PDF indirme başlatıldı.");
+    } catch { setFeedback("PDF hazırlanamadı. Lütfen tekrar deneyin."); }
+    finally { link?.remove();if(url)window.setTimeout(()=>URL.revokeObjectURL(url),10000); }
+  };
+  const send=()=>{
+    if (!shareOpen || !model || !recipientPhone || exportBusyRef.current || sendStartedRef.current) return;
+    if (recipientMode==="student" && recipients.filter(item=>item.id===recipientId).length!==1) return;
+    const freshModel=calendarProgramExportModel(calendarProgramModel(students,branchId),branchName);
+    if (!freshModel) return;
+    sendStartedRef.current=true;setFeedback("");
+    let opened=null;
+    try {
+      // Detach the opener before navigating; a blocked popup is not a successful send.
+      opened=window.open("about:blank","_blank");
+      if (!opened) throw new Error("Popup blocked");
+      opened.opener=null;
+      opened.location.replace("https://wa.me/"+recipientPhone+"?text="+encodeURIComponent(calendarProgramWhatsAppText(freshModel)));
+      setWhatsAppOpened(true);setFeedback("Mesaj WhatsApp'ta hazırlandı. Kontrol edip Gönder'e basın.");
+    } catch {
+      try { opened?.close(); } catch {}
+      sendStartedRef.current=false;setFeedback("WhatsApp açılamadı. Tarayıcının açılır pencere iznini kontrol edip tekrar deneyin.");
+    }
+  };
   return <div className="crm-program-backdrop" onClick={event=>{if(event.target===event.currentTarget)onClose();}}>
     <style>{`
       .crm-program-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(24,18,44,.45);padding:24px;display:flex;align-items:center;justify-content:center;}
@@ -6272,6 +6450,24 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
       .crm-program-busy{background:#f3f0f2;color:#74656d;}
       .crm-program-busy strong{text-decoration:line-through;text-decoration-thickness:2px;}
       .crm-program-warning{margin:24px 0 0;padding:18px;background:#fff7ed;color:#9a3412;border-radius:12px;font-size:13px;line-height:1.7;}
+      .crm-program-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;}
+      .crm-program-actions button{padding:11px 18px;border:1px solid #ded6ec;border-radius:10px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:#fff;color:#60468c;}
+      .crm-program-actions .crm-program-pdf{background:#6440d7;border-color:#6440d7;color:#fff;}
+      .crm-program-actions .crm-program-send{background:#e4f5ed;border-color:#cfebdd;color:#166534;}
+      .crm-program-actions button:disabled{opacity:.45;cursor:not-allowed;}
+      .crm-program-share{margin-top:20px;padding:18px;border:1px solid #e8e3f0;border-radius:14px;background:#fcfbfe;}
+      .crm-program-share h3{margin:0 0 12px;font-size:16px;}
+      .crm-program-share-modes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;}
+      .crm-program-share-modes button{border:1px solid #ded6ec;border-radius:9px;background:#fff;padding:9px 12px;color:#60468c;font:inherit;font-size:12px;cursor:pointer;}
+      .crm-program-share-modes button[aria-pressed=true]{background:#ede7fa;border-color:#b9a5e8;}
+      .crm-program-recipient-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+      .crm-program-share label{display:block;min-width:0;font-size:12px;font-weight:700;color:#514563;}
+      .crm-program-share input,.crm-program-share select,.crm-program-share textarea{display:block;box-sizing:border-box;width:100%;min-width:0;margin-top:7px;border:1px solid #ded6ec;border-radius:9px;padding:10px;background:#fff;color:#292438;font:inherit;font-size:13px;}
+      .crm-program-share textarea{height:240px;resize:vertical;line-height:1.6;}
+      .crm-program-recipient-info{font-size:12px;line-height:1.7;overflow-wrap:anywhere;color:#635477;}
+      .crm-program-recipient-error{color:#9a3412;}
+      .crm-program-share-note{margin:14px 0;font-size:12px;line-height:1.6;color:#716b7e;}
+      .crm-program-feedback{min-height:18px;margin:12px 0 0;color:#635477;font-size:12px;text-align:right;}
       @media(max-width:760px){
         .crm-program-backdrop{padding:10px;}
         .crm-program-dialog{padding:20px 15px;border-radius:16px;max-height:calc(100dvh - 20px);}
@@ -6283,6 +6479,9 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
         .crm-program-table .crm-program-day{width:auto;text-align:left;padding:12px;font-size:13px;}
         .crm-program-options{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}
         .crm-program-option{padding:10px 2px;}
+        .crm-program-actions button{flex:1;padding:11px 8px;font-size:12px;}
+        .crm-program-recipient-fields{grid-template-columns:1fr;}
+        .crm-program-share{padding:14px;}
       }
     `}</style>
     <div ref={dialogRef} className="crm-program-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-program-title">
@@ -6290,6 +6489,20 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
       {model ? <table className="crm-program-table" aria-label="Kalıcı ders programı"><tbody>{model.days.map(day=><tr key={day.dayName}>
         <th scope="row" className="crm-program-day">{day.dayName}</th><td><div className="crm-program-options">{day.options.map(option=><span key={option.time} className={"crm-program-option "+(option.busy?"crm-program-busy":"crm-program-free")} aria-label={day.dayName+" "+option.time+" "+(option.busy?"Dolu":"Boş")}><strong>{option.time}</strong></span>)}</div></td>
       </tr>)}</tbody></table> : <div className="crm-program-warning" role="status">Program görüntülenemedi.</div>}
+      <div className="crm-program-actions"><button onClick={copy} disabled={!model || copyBusy}>{copyBusy?"Kopyalanıyor…":"Metni Kopyala"}</button><button className="crm-program-pdf" onClick={download} disabled={!model || copyBusy}>PDF İndir</button><button className="crm-program-send" onClick={()=>{setShareOpen(value=>!value);setFeedback("");}} disabled={!model || copyBusy} aria-expanded={shareOpen}>Gönder</button></div>
+      {shareOpen && exportModel ? <section ref={sharePanelRef} className="crm-program-share" aria-label="WhatsApp gönderimi">
+        <h3>Ders programını WhatsApp'ta paylaş</h3>
+        <div className="crm-program-share-modes"><button aria-pressed={recipientMode==="student"} onClick={()=>{setRecipientMode("student");setManualPhone("");setFeedback("");}}>Kayıtlı öğrenci</button><button aria-pressed={recipientMode==="manual"} onClick={()=>{setRecipientMode("manual");setRecipientId("");setFeedback("");}}>Numara yaz</button></div>
+        {recipientMode==="student" ? <>
+          <div className="crm-program-recipient-fields"><label>Öğrenci ara<input value={recipientSearch} onChange={event=>setRecipientSearch(event.target.value)} placeholder="Öğrenci veya veli adı" disabled={copyBusy} /></label><label>Öğrenci seç<select value={recipientId} onChange={event=>{setRecipientId(event.target.value);setFeedback("");}} disabled={copyBusy}><option value="">Öğrenci seçin</option>{matchingRecipients.map(item=><option key={item.id} value={item.id}>{item.name}{item.guardian?" — "+item.guardian:""}</option>)}</select></label></div>
+          {!recipients.length ? <p className="crm-program-recipient-info">Seçili şubede mevcut öğrenci yok. Numara yaz seçeneğini kullanabilirsiniz.</p> : null}
+          {recipient ? <p className={"crm-program-recipient-info"+(recipientPhone?"":" crm-program-recipient-error")}>{recipient.name}{recipient.guardian?" · Veli: "+recipient.guardian:""}<br/>{recipientPhone?"WhatsApp numarası: +"+recipientPhone:"Kayıtlı telefon yok veya biçimi geçersiz. Numara yaz seçeneğini kullanabilirsiniz."}</p> : null}
+        </> : <><label>WhatsApp numarası<input type="tel" inputMode="tel" autoComplete="off" value={manualPhone} onChange={event=>{setManualPhone(event.target.value);setFeedback("");}} placeholder="05xx xxx xx xx" disabled={copyBusy} /></label><p className={"crm-program-recipient-info"+(manualPhone && !recipientPhone?" crm-program-recipient-error":"")}>{recipientPhone?"Alıcı: +"+recipientPhone:manualPhone?"Geçerli bir numara girin. Yurt dışı için +ülke kodunu ekleyin.":"Bu numara öğrenci kaydına kaydedilmez."}</p></>}
+        <p className="crm-program-share-note">Yalnız aşağıdaki ders programı metni paylaşılır. WhatsApp açılır; son Gönder onayı sizdedir.</p>
+        <label>Mesaj önizlemesi<textarea readOnly value={calendarProgramWhatsAppText(exportModel)} /></label>
+        <div className="crm-program-actions"><button className="crm-program-send" onClick={send} disabled={!recipientPhone || copyBusy || whatsAppOpened}>{whatsAppOpened?"WhatsApp açıldı":"WhatsApp'ta Aç"}</button></div>
+      </section> : null}
+      <p className="crm-program-feedback" role="status">{feedback}</p>
     </div>
   </div>;
 }
