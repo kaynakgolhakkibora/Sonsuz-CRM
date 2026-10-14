@@ -4425,6 +4425,149 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
   );
 }
 
+function pieceHistorySourceSnapshot(log) {
+  const manual=log?.type==='manual_piece',piece=manual?log?.piece:log?.evaluation;
+  return {kind:manual?'manual':'period',key:(manual?log?.id:log?.packageKey)??null,
+    ...(manual?{addedAt:log?.addedAt??null}:{packageStart:log?.packageStart??null,packageEnd:log?.packageEnd??null}),
+    name:(manual?piece?.name:piece?.pieceName)??null,result:(manual?piece?.result:piece?.pieceResult)??null,
+    label:(manual?piece?.label:piece?.pieceLabel)??null,score:(manual?piece?.score:piece?.pieceScore)??null};
+}
+
+function pieceHistorySources(student) {
+  const logs=student.package_summary_logs || [];
+  const entries=logs.map(log=>{
+    const display=studentPieceHistory({...student,package_summary_logs:[log]})[0];
+    if(!display) return null;
+    const sourceKind=log.type==='manual_piece'?'manual':'period';
+    const sourceKey=sourceKind==='manual'?log.id:log.packageKey;
+    const matches=logs.filter(item=>(sourceKind==='manual'?item?.type==='manual_piece'&&item.id===sourceKey:item?.type!=='manual_piece'&&item?.packageKey===sourceKey));
+    return {...display,sourceKind,sourceKey,sourceSnapshot:pieceHistorySourceSnapshot(log),originalName:display.name,originalResult:display.result,sourceResult:sourceKind==='manual'?log.piece?.result:log.evaluation?.pieceResult,
+      editable:typeof sourceKey==='string'&&!!sourceKey.trim()&&sourceKey.length<=500&&matches.length===1};
+  }).filter(Boolean);
+  return entries.sort((a,b)=>b.date-a.date);
+}
+
+function pieceHistoryCurrent(entry, rows) {
+  const history=rows.filter(row=>row.source_kind===entry.sourceKind&&row.source_key===entry.sourceKey).sort((a,b)=>b.source_revision-a.source_revision);
+  const latest=history[0] || null;
+  const matches=latest && JSON.stringify(canonicalJson(latest.source_snapshot))===JSON.stringify(canonicalJson(entry.sourceSnapshot));
+  const option=matches?pieceResultOption(latest.piece_result):null;
+  return {...entry,name:matches?latest.piece_name:entry.name,result:option?option.label:entry.result,score:option?option.score:entry.score,
+    currentResult:matches?latest.piece_result:entry.sourceResult,latest,history,sourceChanged:!!latest&&!matches};
+}
+
+function pieceUpdateScopeKey(scope) { return JSON.stringify([scope?.actorUserId,scope?.branchId,scope?.generation]); }
+function pieceUpdateStorageKey(scope,studentId) { return 'sonsuz_crm_piece_edit_v201_'+scope.actorUserId+'_'+scope.branchId+'_'+studentId; }
+function validPieceUpdateRequest(request) {
+  const p=request?.params, uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(value);
+  return !!p && uuid(request.actorUserId) && uuid(p.studentId) && uuid(p.branchId) && uuid(p.operationId)
+    && ['manual','period'].includes(p.sourceKind) && typeof p.sourceKey==='string'&&!!p.sourceKey.trim()&&p.sourceKey.length<=500
+    && p.sourceSnapshot&&typeof p.sourceSnapshot==='object'&&!Array.isArray(p.sourceSnapshot)
+    && Number.isInteger(p.expectedRecordVersion)&&p.expectedRecordVersion>=0
+    && (p.expectedPreviousOperationId===null||uuid(p.expectedPreviousOperationId))
+    && typeof p.name==='string'&&p.name===p.name.trim()&&p.name.length>0&&p.name.length<=120&&!!pieceResultOption(p.result);
+}
+function pieceUpdateReceiptMatches(row,request) {
+  const p=request.params;
+  return !!row&&row.operation_id===p.operationId&&row.actor_user_id===request.actorUserId&&row.student_id===p.studentId&&row.branch_id===p.branchId
+    && row.source_kind===p.sourceKind&&row.source_key===p.sourceKey&&row.piece_name===p.name&&row.piece_result===p.result
+    && row.previous_operation_id===p.expectedPreviousOperationId&&Number.isInteger(row.source_revision)&&row.source_revision>0
+    && JSON.stringify(canonicalJson(row.request_payload))===JSON.stringify(canonicalJson(p))
+    && JSON.stringify(canonicalJson(row.source_snapshot))===JSON.stringify(canonicalJson(p.sourceSnapshot))
+    && !isNaN(new Date(row.recorded_at).getTime());
+}
+function readPendingPieceUpdate(scope,studentId) {
+  try {
+    const text=sessionStorage.getItem(pieceUpdateStorageKey(scope,studentId));
+    if(!text) return null;
+    const request=JSON.parse(text);
+    return validPieceUpdateRequest(request)&&request.actorUserId===scope.actorUserId&&request.params.branchId===scope.branchId&&request.params.studentId===studentId?request:{invalid:true};
+  } catch { return {invalid:true}; }
+}
+function storePendingPieceUpdate(scope,studentId,request) {
+  try { const key=pieceUpdateStorageKey(scope,studentId); if(request)sessionStorage.setItem(key,JSON.stringify(request));else sessionStorage.removeItem(key);return true; } catch { return false; }
+}
+async function readPieceHistoryUpdates(studentId,branchId) {
+  const rows=[];
+  for(let page=0;page<50;page++) {
+    const result=await timedSingleLessonRequest(()=>supabase.from('student_piece_updates').select('*').eq('student_id',studentId).eq('branch_id',branchId).order('recorded_at',{ascending:false}).order('operation_id',{ascending:false}).range(page*200,page*200+199));
+    if(result.error || !Array.isArray(result.data)) throw new Error('Parça güncellemeleri yüklenemedi. SQL kurulumu ve bağlantı kontrol edilmeli.');
+    for(const row of result.data) {
+      if(row.student_id!==studentId||row.branch_id!==branchId||!Number.isInteger(row.source_revision)||row.source_revision<1
+        ||!pieceResultOption(row.piece_result)||typeof row.piece_name!=='string'||!row.source_snapshot||isNaN(new Date(row.recorded_at).getTime())) throw new Error('Parça güncelleme kaydı doğrulanamadı.');
+    }
+    rows.push(...result.data);
+    if(result.data.length<200)return rows;
+  }
+  throw new Error('Parça güncelleme geçmişi bu ekranın yükleme sınırını aşıyor; düzenleme kapalı.');
+}
+
+function PieceEditSheet({student,entry,pending,onClose,onSubmit,onResolve,busy,error}) {
+  const [name,setName]=useState(entry.name),[result,setResult]=useState(entry.currentResult||''),[localError,setLocalError]=useState('');
+  const submit=()=>{
+    if(busy||pending)return;
+    if(!name.trim()||name.trim().length>120||!pieceResultOption(result)){setLocalError('Parça adı ve sonucunu kontrol edin.');return;}
+    if(name.trim()===entry.name&&result===entry.currentResult){onClose();return;}
+    void onSubmit(name.trim(),result);
+  };
+  return createPortal(<Sheet title="Parçayı Düzenle" subtitle={student.name} onClose={()=>{if(!busy&&!pending)onClose();}}>
+    <p style={{fontSize:12,color:'#64748b',lineHeight:1.5}}>Bu değişiklik parçanın güncel durumunu kaydeder. Eski dönem sonucu ve notu korunur.</p>
+    <label style={LBL}>Parçanın Adı</label><input aria-label="Parçanın Adı" style={INP} value={name} maxLength={120} disabled={busy||!!pending} onChange={e=>{setName(e.target.value);setLocalError('');}}/>
+    <label style={LBL}>Güncel Parça Sonucu</label><select aria-label="Güncel Parça Sonucu" style={INP} value={result} disabled={busy||!!pending} onChange={e=>{setResult(e.target.value);setLocalError('');}}><option value="">Seçin</option>{PIECE_RESULT_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
+    {(error||localError)?<p role="alert" style={{fontSize:12,color:'#b91c1c',fontWeight:700}}>{error||localError}</p>:null}
+    {pending?<><p style={{fontSize:12,color:'#92400e'}}>İşlem sonucu henüz doğrulanmadı. Yeni kayıt göndermeyin.</p><Btn bg="#6d28d9" disabled={busy} onClick={()=>onResolve('check')}>Sonucu Kontrol Et</Btn><Btn bg="#111" outline disabled={busy} onClick={()=>onResolve('retry')}>Aynı İşlemi Yeniden Gönder</Btn></>:<><Btn bg="#6d28d9" disabled={busy} onClick={submit}>{busy?'Kaydediliyor...':'Güncel Durumu Kaydet'}</Btn><Btn bg="#111" outline disabled={busy} onClick={onClose}>İptal</Btn></>}
+  </Sheet>,document.body);
+}
+
+function PieceHistoryPanel({student,scope,onAdd,onEdit}) {
+  const scopeKey=pieceUpdateScopeKey(scope),[rows,setRows]=useState([]),[ready,setReady]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(''),[reload,setReload]=useState(0);
+  const [editing,setEditing]=useState(null),[pending,setPending]=useState(()=>readPendingPieceUpdate(scope,student.id)),[busy,setBusy]=useState(false),[editError,setEditError]=useState('');
+  const alive=useRef(false),busyRef=useRef(false);
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+  useEffect(()=>{
+    let active=true;setReady(false);setLoading(true);setError('');
+    if(!scope?.ready||scope.branchId!==student.branch_id){setLoading(false);setError('Aktif şube ve öğrenci erişimi doğrulanamadı.');return()=>{active=false;};}
+    readPieceHistoryUpdates(student.id,student.branch_id).then(data=>{if(active){setRows(data);setReady(true);}}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setLoading(false);});
+    return()=>{active=false;};
+  },[scopeKey,scope?.ready,student.id,student.branch_id,student.record_version,reload]);
+  const entries=pieceHistorySources(student).map(entry=>pieceHistoryCurrent(entry,rows));
+  const finish=async(request,mode)=>{
+    if(busyRef.current)return;busyRef.current=true;setBusy(true);setEditError('');
+    try {
+      const response=await onEdit(request,mode);
+      if(!alive.current)return;
+      if(response.ok){
+        if(!storePendingPieceUpdate(scope,student.id,null)){setEditError('Kayıt doğrulandı; bekleyen işlem bilgisi temizlenemedi. Sonucu tekrar kontrol edin.');return;}
+        setRows(current=>[...current.filter(row=>row.operation_id!==response.row.operation_id),response.row]);setPending(null);setEditing(null);setReload(v=>v+1);
+      }else{
+        setEditError(response.error||'Sonuç doğrulanamadı.');
+        if(response.rejected){storePendingPieceUpdate(scope,student.id,null);setPending(null);setReload(v=>v+1);}
+      }
+    }catch{if(alive.current)setEditError('Sonuç doğrulanamadı; aynı işlemi kontrol edin.');}
+    finally{busyRef.current=false;if(alive.current)setBusy(false);}
+  };
+  const submit=(name,result)=>{
+    if(!editing||pending||busyRef.current)return;
+    const request={actorUserId:scope.actorUserId,params:{studentId:student.id,branchId:student.branch_id,operationId:uid(),sourceKind:editing.sourceKind,sourceKey:editing.sourceKey,sourceSnapshot:editing.sourceSnapshot,expectedRecordVersion:editing.openedRecordVersion,expectedPreviousOperationId:editing.latest?.operation_id||null,name,result}};
+    if(!validPieceUpdateRequest(request)||!storePendingPieceUpdate(scope,student.id,request)){setEditError('İşlem güvenliği tarayıcıda hazırlanamadı; kayıt gönderilmedi.');return;}
+    setPending(request);void finish(request,'write');
+  };
+  return <div style={{background:'#fafafa',border:'1px solid #e5e7eb',borderRadius:10,padding:'10px 14px',marginBottom:14}}>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,marginBottom:entries.length?6:0}}><p style={{margin:0,fontSize:11,fontWeight:700,color:'#888',letterSpacing:1}}>PARÇA GEÇMİŞİ</p><button onClick={onAdd} style={{border:'none',borderRadius:9,background:'#ede9fe',color:'#6d28d9',padding:'7px 10px',fontSize:11,fontWeight:800,cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>+ Parça Ekle</button></div>
+    {loading?<p style={{fontSize:11,color:'#64748b'}}>Güncel parça durumları yükleniyor...</p>:null}
+    {error?<p role="alert" style={{fontSize:12,color:'#b91c1c'}}>{error} <button onClick={()=>setReload(v=>v+1)}>Yeniden Yükle</button></p>:null}
+    {pending&&!editing?<div style={{background:'#fffbeb',borderRadius:8,padding:9,fontSize:12}}><p>Bekleyen parça güncellemesi var.{pending.invalid?' İşlem bilgisi okunamadı; düzenleme kapalı.':''}</p>{!pending.invalid?<><button disabled={busy} onClick={()=>finish(pending,'check')}>Sonucu Kontrol Et</button> <button disabled={busy} onClick={()=>finish(pending,'retry')}>Aynı İşlemi Yeniden Gönder</button></>:null}{editError?<p role="alert">{editError}</p>:null}</div>:null}
+    {entries.map((entry,index)=><div key={entry.sourceKind+'|'+entry.sourceKey+'|'+index} style={{borderBottom:index<entries.length-1?'1px solid #f0f0f0':'none',padding:'8px 0'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}><div style={{minWidth:0,overflowWrap:'anywhere'}}><p style={{margin:0,fontSize:13,fontWeight:800,color:'#111'}}>{entry.name}</p>{entry.period?<p style={{margin:'2px 0 0',fontSize:11,color:'#94a3b8'}}>{entry.period}</p>:null}{entry.latest&&!entry.sourceChanged?<p style={{margin:'2px 0 0',fontSize:11,color:'#64748b'}}>Güncellendi: {fmtDate(entry.latest.recorded_at)}</p>:null}</div><div style={{textAlign:'right',flexShrink:0}}><p style={{margin:0,fontSize:12,fontWeight:700,color:entry.score===100?'#047857':entry.score===50?'#b45309':'#64748b'}}>{entry.result}</p><button aria-label={entry.name+' parçasını düzenle'} disabled={!ready||!entry.editable||busy||!!pending} onClick={()=>{setEditing({...entry,openedRecordVersion:student.record_version??0});setEditError('');}} style={{marginTop:5,border:'none',borderRadius:7,padding:'5px 8px',fontFamily:'inherit',color:'#6d28d9',background:'#ede9fe',cursor:'pointer'}}>Düzenle</button></div></div>
+      {!entry.editable?<p style={{fontSize:11,color:'#92400e'}}>Eski kaydın kaynağı güvenli biçimde eşleştirilemiyor.</p>:null}
+      {entry.sourceChanged?<p style={{fontSize:11,color:'#92400e'}}>Kaynak değerlendirme değişti; önceki güncelleme yeni kayda uygulanmadı.</p>:null}
+      {entry.history.length?<details style={{fontSize:11,color:'#64748b',marginTop:6}}><summary>Durum geçmişi ({entry.history.length+1})</summary><p>{entry.sourceKind==='period'?'Dönemdeki sonuç':'İlk kayıt'}: {entry.originalName} · {entry.originalResult}</p>{[...entry.history].reverse().map(row=><p key={row.operation_id}>{fmtDate(row.recorded_at)} · {row.piece_name} · {displayPieceResult(row.piece_result)}</p>)}</details>:null}
+    </div>)}
+    {!entries.length?<p style={{margin:'9px 0 2px',fontSize:12,color:'#94a3b8'}}>Henüz parça kaydı yok.</p>:null}
+    {editing?<PieceEditSheet student={student} entry={editing} pending={pending} busy={busy} error={editError} onClose={()=>{if(!busy&&!pending)setEditing(null);}} onSubmit={submit} onResolve={mode=>{if(pending&&!pending.invalid)void finish(pending,mode);}}/>:null}
+  </div>;
+}
+
 function PieceAddSheet({ student, onClose, onSave }) {
   const [pieceName, setPieceName] = useState("");
   const [pieceResult, setPieceResult] = useState("");
@@ -4459,7 +4602,7 @@ function studentLinkedSingleLessons(singleLessons, studentId) {
     .sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at));
 }
 
-function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onPreviewProgram, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onPieceEdit, pieceEditScope, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onPreviewProgram, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -4491,7 +4634,6 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
   const currentOrLastInfo = currentPaymentDueInfo(student) || nextPayablePackageInfo(student) || lastCompletedPackageInfo(student);
   const startInfo = lessonStartInfo(student);
   const left = isStudentLeft(student);
-  const pieceHistory = studentPieceHistory(student);
   const statusText = [
     left ? "Ayrılan" : student.frozen ? "Dondurulmuş" : "Aktif",
     isRaiseDue(student) ? "Zam zamanı" : "",
@@ -4545,27 +4687,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
           </div>
         ) : null}
         <ProgressChart student={student} />
-        <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, marginBottom:pieceHistory.length?6:0 }}>
-            <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>PARÇA GEÇMİŞİ</p>
-            <button onClick={()=>setShowPieceAdd(true)} style={{ border:"none", borderRadius:9, background:"#ede9fe", color:"#6d28d9", padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer", fontFamily:"inherit", flexShrink:0 }}>+ Parça Ekle</button>
-          </div>
-          {pieceHistory.length > 0 ? (
-            <>
-            {pieceHistory.map((piece,index) => (
-              <div key={piece.id || piece.name+"|"+piece.date.getTime()+"|"+index} style={{ borderBottom:index<pieceHistory.length-1?"1px solid #f0f0f0":"none", padding:"8px 0" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
-                  <div style={{ minWidth:0 }}>
-                    <p style={{ margin:0, fontSize:13, fontWeight:800, color:"#111" }}>{piece.name}</p>
-                    {piece.period ? <p style={{ margin:"2px 0 0", fontSize:11, color:"#94a3b8" }}>{piece.period}</p> : null}
-                  </div>
-                  <p style={{ margin:0, fontSize:12, color:piece.score===100?"#047857":piece.score===50?"#b45309":"#64748b", fontWeight:700, textAlign:"right", flexShrink:0 }}>{piece.result}</p>
-                </div>
-              </div>
-            ))}
-            </>
-          ) : <p style={{ margin:"9px 0 2px", fontSize:12, color:"#94a3b8" }}>Henüz parça kaydı yok.</p>}
-        </div>
+        <PieceHistoryPanel key={student.id+"|"+pieceEditScope?.actorUserId+"|"+pieceEditScope?.branchId+"|"+pieceEditScope?.generation} student={student} scope={pieceEditScope} onAdd={()=>setShowPieceAdd(true)} onEdit={onPieceEdit} />
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Ödeme Geçmişi</p>
@@ -8188,6 +8310,10 @@ export default function App() {
   const [monthlyReports, setMonthlyReports] = useState([]);
   const [downloadingReportId, setDownloadingReportId] = useState(null);
   const [loadedSources, setLoadedSources] = useState({ students:false, teachers:false, expenses:false });
+  const pieceEditScopeRef=useRef(null);
+  const pieceEditScope={actorUserId:authSession?.user?.id||"",branchId:currentBranch?.id||"",generation:protectedDataLoadGenerationRef.current,ready:giris&&loadedSources.students};
+  pieceEditScopeRef.current=pieceEditScope;
+
   const [protectedDataLoadIssues, setProtectedDataLoadIssues] = useState({ students:false, teachers:false, expenses:false });
   const [protectedDataRetrying, setProtectedDataRetrying] = useState(false);
   const reportInitializationRef = useRef(false);
@@ -13259,6 +13385,28 @@ export default function App() {
     }
   };
 
+  const handlePieceHistoryUpdate = async (request,mode="write") => {
+    const scope={...pieceEditScopeRef.current},key=pieceUpdateScopeKey(scope),p=request?.params;
+    if(!validPieceUpdateRequest(request)||request.actorUserId!==scope.actorUserId||p.branchId!==scope.branchId||!scope.ready
+      ||!students.some(student=>student.id===p.studentId&&student.branch_id===p.branchId))return {ok:false,rejected:true,error:"Öğrenci, oturum veya aktif şube doğrulanamadı; kayıt gönderilmedi."};
+    if(!browserOnline)return {ok:false,error:"İnternet bağlantısı yok; yeni kayıt gönderilmedi."};
+    if(!requireProtectedSources(["students"],"Parça düzenleme"))return {ok:false,error:"Öğrenci kaynağı doğrulanamadı."};
+    const active=()=>pieceUpdateScopeKey(pieceEditScopeRef.current)===key&&pieceEditScopeRef.current?.ready;
+    try {
+      const result=mode==="check"
+        ? await timedSingleLessonRequest(()=>supabase.from("student_piece_updates").select("*").eq("operation_id",p.operationId).eq("student_id",p.studentId).eq("branch_id",p.branchId).maybeSingle())
+        : await runBranchScopedWrite(()=>timedSingleLessonRequest(()=>supabase.rpc("update_student_piece_history",{p_request:p})));
+      if(!active())return {ok:false,error:"Oturum veya şube değişti. Sonuç ilgili oturumda yeniden kontrol edilmeli."};
+      if(result.error){
+        const known=mode!=="check"&&(/PIECE_HISTORY_(?:NOT_AUTHORIZED|INVALID_INPUT|STUDENT_NOT_FOUND|STALE_STUDENT|SOURCE_CHANGED|INVALID_SOURCE|STALE_PIECE|NO_CHANGE|OPERATION_ID_CONFLICT)/.test(String(result.error.message||""))||result.error.code==="PGRST202");
+        return {ok:false,rejected:known,error:known?"Kayıt gönderimi reddedildi. Kaynak, yetki veya parça değişmiş olabilir; pencereyi güncel kayıttan yeniden açın. SQL kurulumu eksikse düzenleme yapılamaz.":"İşlem sonucu doğrulanamadı; aynı işlemi kontrol edin."};
+      }
+      if(!result.data)return {ok:false,error:"İşlem kaydı henüz bulunamadı; yeni işlem açmadan aynı işlemi tekrar kontrol edin."};
+      if(!pieceUpdateReceiptMatches(result.data,request))return {ok:false,error:"Parça işlem kanıtı beklenen bilgilerle eşleşmedi; yeni kayıt göndermeyin."};
+      pop("Parçanın güncel durumu kaydedildi.");return {ok:true,row:result.data};
+    }catch{return {ok:false,error:"Sonuç doğrulanamadı; aynı işlemi kontrol edin."};}
+  };
+
   const handlePieceAdd = async (sid, piece) => {
     const student = students.find(s => s.id === sid);
     const result = pieceResultOption(piece?.result);
@@ -14784,7 +14932,7 @@ export default function App() {
 
       {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} saving={normalLessonEvaluationBusyId===actionModal.lessonId || normalLessonMakeupBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current || normalLessonMakeupWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onPreviewProgram={previewProgramChange} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onPieceEdit={handlePieceHistoryUpdate} pieceEditScope={pieceEditScope} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onPreviewProgram={previewProgramChange} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
