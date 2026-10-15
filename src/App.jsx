@@ -4636,7 +4636,6 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
   const left = isStudentLeft(student);
   const statusText = [
     left ? "Ayrılan" : student.frozen ? "Dondurulmuş" : "Aktif",
-    isRaiseDue(student) ? "Zam zamanı" : "",
     ekDersler.length > 0 ? "+"+ekDersler.length+" ek ders" : "",
     odenmemisEk.length > 0 ? odenmemisEk.length+" ödenmemiş ek" : "",
   ].filter(Boolean).join(" · ");
@@ -5604,12 +5603,11 @@ function OdemeAlSheet({ student, onClose, onÖdemeAl, saving=false }) {
 function ZamSheet({ student, onClose, onSave }) {
   const [fee, setFee] = useState(student.ucret || "");
   const [date, setDate] = useState(turkeyDateKey());
-  const next = nextRaiseDate(student);
   return (
     <Sheet title="Zam Yap" subtitle={student.name} onClose={onClose}>
       <div style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
         <p style={{ margin:0, fontSize:13, color:"#9a3412" }}>Mevcut ücret: <strong>{(student.ucret||0).toLocaleString("tr-TR")} TL</strong></p>
-        {student.last_raise_date ? <p style={{ margin:"5px 0 0", fontSize:12, color:"#9a3412" }}>Son zam: {fmtMed(student.last_raise_date)}{next ? " · Yeni zam: "+fmtMed(next) : ""}</p> : null}
+        {student.last_raise_date ? <p style={{ margin:"5px 0 0", fontSize:12, color:"#9a3412" }}>Son zam: {fmtMed(student.last_raise_date)}</p> : null}
       </div>
       <label style={LBL}>Yeni 4 Ders Ücreti (TL)</label>
       <input style={INP} type="number" value={fee} onChange={e=>setFee(e.target.value)} />
@@ -14236,7 +14234,6 @@ export default function App() {
   const pendingPeriodEvaluations = mainTab === "bugün" ? pendingPeriodEvaluationRows(operationalStudents) : [];
   const sentPeriodSummaries = mainTab === "bugün" ? sentPeriodSummaryRows(operationalStudents) : [];
   const todayPayments = operationalStudents.filter(isÖdemeBekleyen);
-  const raiseDueList = operationalStudents.filter(isRaiseDue);
   const filtered = operationalStudents.filter(s => {
     if (search.trim() && !s.name.toLowerCase().includes(search.toLowerCase().trim())) return false;
     if (filter==="active") return !s.frozen;
@@ -14244,11 +14241,10 @@ export default function App() {
     if (filter==="left") return isStudentLeft(s);
     if (filter==="telafi") return s.telafi_records.some(isCurrentTelafi);
     if (filter==="odeme") return isÖdemeBekleyen(s);
-    if (filter==="zam") return isRaiseDue(s);
     return true;
   });
 
-  const stats = { total:operationalStudents.length, active:operationalStudents.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:operationalStudents.filter(s=>s.frozen && !isStudentLeft(s)).length, left:operationalStudents.filter(isStudentLeft).length, telafi:operationalStudents.filter(s=>s.telafi_records.some(isCurrentTelafi)).length, odeme:todayPayments.length, zam:raiseDueList.length };
+  const stats = { total:operationalStudents.length, active:operationalStudents.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:operationalStudents.filter(s=>s.frozen && !isStudentLeft(s)).length, left:operationalStudents.filter(isStudentLeft).length, telafi:operationalStudents.filter(s=>s.telafi_records.some(isCurrentTelafi)).length, odeme:todayPayments.length };
   const telafiWarnList = operationalStudents.filter(s => telafiQuotaInfo(s).count===5 && !s.frozen);
   const pendingMonthlyReports = monthlyReports.filter(report=>!report.downloadedAt);
   const branchOptions = accessBranchOptions(accessContext);
@@ -14993,7 +14989,7 @@ export default function App() {
                 {telafiWarnList.map(s=>(<p key={s.id} style={{ margin:"4px 0 0", fontSize:13, color:"#78350f" }}>· {s.name} 5/6 telafi</p>))}
               </div>
             ) : null}
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8, marginBottom:14 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8, marginBottom:14 }}>
               {[
                 { key:"all", label:"Toplam", val:stats.total, bg:"#fff", color:"#111" },
                 { key:"active", label:"Aktif", val:stats.active, bg:"#ecfdf5", color:"#059669" },
@@ -15001,7 +14997,6 @@ export default function App() {
                 { key:"left", label:"Ayrılan", val:stats.left, bg:stats.left>0?"#fff1f2":"#f9fafb", color:stats.left>0?"#be123c":"#999" },
                 { key:"telafi", label:"Telafi", val:stats.telafi, bg:stats.telafi>0?"#faf5ff":"#f9fafb", color:stats.telafi>0?"#9333ea":"#999" },
                 { key:"odeme", label:"Ödeme", val:stats.odeme, bg:stats.odeme>0?"#fff7ed":"#f9fafb", color:stats.odeme>0?"#ea580c":"#999" },
-                { key:"zam", label:"Zam", val:stats.zam, bg:stats.zam>0?"#fff7ed":"#f9fafb", color:stats.zam>0?"#ea580c":"#999" },
               ].map(s=>(
                 <button type="button" key={s.key} onClick={()=>setFilter(s.key)} style={{ background:s.bg, border:filter===s.key?`2px solid ${s.color}`:"2px solid transparent", borderRadius:12, padding:"10px 6px", textAlign:"center", boxShadow:"0 1px 3px rgba(0,0,0,.05)", cursor:"pointer", fontFamily:"inherit" }}>
                   <p style={{ fontSize:22, fontWeight:800, color:s.color, margin:0 }}>{s.val}</p>
@@ -15035,7 +15030,6 @@ export default function App() {
                           {warn ? <TonePill tone="warn">5/6 Telafi</TonePill> : null}
                           {quotaFull ? <TonePill tone="danger">6/6 Normal Telafi{quota.exceptionCount>0?" · "+quota.exceptionCount+" Yönetici İnisiyatifi":""}{quota.legacyOverflowCount>0?" · "+quota.legacyOverflowCount+" Geçmiş Ek":""}</TonePill> : null}
                           {payDue ? <TonePill tone="warn">Ödeme</TonePill> : null}
-                          {isRaiseDue(s) ? <TonePill tone="warn">Zam</TonePill> : null}
                           {ekCount>0 ? <TonePill tone="special">+{ekCount} ek</TonePill> : null}
                           {unpaidEkCount>0 ? <TonePill tone="warn">{unpaidEkCount} ek ödenmedi</TonePill> : null}
                         </div>
