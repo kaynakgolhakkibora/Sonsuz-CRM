@@ -5115,7 +5115,7 @@ function msgIlkDersÖdeme(student, selectedInfo = null) {
     msg += "Dönem: "+info.donem+"\n";
     if (lessons) msg += "Planlanan dersler:\n"+lessons+"\n\n";
   }
-  msg += "İlginiz için teşekkür eder, iyi dersler dileriz.\n\nBodrum Sonsuz Sanat";
+  msg += "Bodrum Sonsuz Sanat";
   return msg;
 }
 
@@ -5123,11 +5123,11 @@ function msgYeniKayitKurallari() {
   return "Sonsuz Sanat Ders Süreci Bilgilendirmesi\n\nDerslerimiz haftalık sabit gün ve saatlerde ilerler. Eğitim sürecinde devamlılık ve düzenli katılım büyük önem taşır.\n\nLütfen aşağıdaki kuralları inceleyiniz:\n\nDers İptalleri\n\n• Ders iptallerinin en az 24 saat önceden bildirilmesi gerekir.\n• Her telafi hakkı, telafiye alınan asıl ders tarihinden itibaren 30 gün geçerlidir.\n• Kullanılmayan telafi hakları bir sonraki döneme devredilmez.\n\nDers Günü İptalleri\n\n• Ders günü yapılan iptallerde, eğer iptal sebebi sağlık sorunlarının dışındaysa ders yapılmış sayılır.\n• Derse habersiz gelinmemesi durumunda ders yapılmış sayılır ve telafi hakkı oluşmaz.\n\nTelafi Dersleri\n\n• Telafi dersleri kurumun uygunluk durumuna göre planlanır, uygunluk oluştuğunda tarafınıza bilgi verilir.\n\nProgram Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi halinde öğrenciye ayrılan gün ve saat korunur; ders ve ödeme takvimi normal şekilde işlemeye devam eder.\n• Planlı yokluk sırasında derslere katılmasanız bile, size ayırılan gün ve saatin korunması için ödeme günleri gelmeye devam eder ve telafi hakları birikebilir. Bunu istemiyorsanız programı dondurmanızı öneririz.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.\n\nÖdeme Düzeni\n\n• Ödemelerin zamanında yapılması programın devamlılığı açısından önemlidir.\n• Ödeme sürecinin aksaması durumunda program dondurulabilir ve ayrılan gün/saat başka öğrencilere açılabilir.\n\nAmacımız tüm öğrencilerimiz için düzenli, adil ve sürdürülebilir bir eğitim süreci oluşturmaktır.\n\nBodrum Sonsuz Sanat";
 }
 function msgWhatsAppGroup(student) {
-  const greeting = student?.veli_adi ? "Merhaba "+student.veli_adi+"," : "Merhaba,";
+  const greeting = "Merhaba,";
   return greeting+"\n\nBodrum Sonsuz Sanat ders duyurularını ve önemli bilgilendirmeleri takip edebilmeniz için WhatsApp grubumuza aşağıdaki bağlantıdan katılabilirsiniz:\n\n"+WHATSAPP_GROUP_URL+"\n\nBodrum Sonsuz Sanat";
 }
 function msgNewsletter(student) {
-  const greeting = student?.veli_adi ? "Merhaba "+student.veli_adi+"," : "Merhaba,";
+  const greeting = "Merhaba,";
   return greeting+"\n\nBodrum Sonsuz Sanat bültenine abone olarak sanat, eğitim ve etkinlik içeriklerimizi takip edebilirsiniz:\n\n"+NEWSLETTER_URL+"\n\nBodrum Sonsuz Sanat";
 }
 function msgGoogleReview(student) {
@@ -5259,7 +5259,7 @@ function msgPaketOzeti(student) {
 function msgDersDegerlendirmesiV200(student, record, type="normal") {
   const b=record.lessonScoreBreakdown, isTelafi=type === "telafi";
   const date=isTelafi ? (telafiDoneAt(record)||telafiPlannedAt(record)) : record.date;
-  const lines=[student.name+" için "+(isTelafi?"telafi dersi":"bugünkü ders")+" değerlendirmesi:", date?"Ders tarihi: "+fmtMed(date):"", "",
+  const lines=[student.name+" için "+(isTelafi?"telafi dersi":"ders")+" değerlendirmesi:", date?"Ders tarihi: "+fmtMed(date):"", "",
     "Dersin temel odağı: "+(record.lessonFocus || "-"),
     "Aktif ders süresi: "+(record.activeMinutes || 0)+" dakika ("+b.active+"/10)"];
   if (b.inactive) lines.push("Aktif ders süresi 0 olduğu için bilişsel dayanıklılık, yeniden yönlendirme ve teknik değerlendirme uygulanmadı.");
@@ -5286,7 +5286,7 @@ function msgDersDegerlendirmesi(student, record, type="normal") {
   const date = isTelafi ? (telafiDoneAt(record) || telafiPlannedAt(record)) : record?.date;
   const breakdown = record?.lessonScoreBreakdown || {};
   const lines = [
-    student.name+" için "+(isTelafi ? "telafi dersi" : "bugünkü ders")+" değerlendirmesi:",
+    student.name+" için "+(isTelafi ? "telafi dersi" : "ders")+" değerlendirmesi:",
     date ? "Ders tarihi: "+fmtMed(date) : "",
     "",
     "Dersin temel odağı: "+(record?.lessonFocus || record?.lesson_focus || "-"),
