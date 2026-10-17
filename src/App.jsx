@@ -3193,17 +3193,19 @@ const MIZAN_UI_CSS = `
   button,input,select,textarea{font:inherit}button{color:inherit}
   .crm-app{min-height:100vh;background:#fff;color:var(--crm-ink)}
   .crm-sidebar{position:fixed;inset:0 auto 0 0;width:245px;padding:30px 20px 22px;background:#fff;border-right:1px solid var(--crm-border);display:flex;flex-direction:column;z-index:30}
-  .crm-brand{display:flex;align-items:center;gap:11px;padding:0 10px 32px}
+  .crm-brand{display:flex;align-items:center;gap:11px;padding:0 10px 32px;flex-shrink:0}
   .crm-brand-mark{width:38px;height:38px;display:grid;place-items:center;background:var(--crm-purple);color:#fff;border-radius:13px 13px 13px 4px;font-size:19px;font-weight:900;box-shadow:0 8px 20px rgba(91,66,214,.22)}
   .crm-brand-copy strong{display:block;font-size:19px;letter-spacing:-.04em}.crm-brand-copy span{display:block;margin-top:2px;color:#9d96a4;font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
   .crm-nav-label{margin:3px 13px 12px;color:#aaa4af;font-size:10px;font-weight:800;letter-spacing:.13em}
-  .crm-nav{display:flex;flex-direction:column;gap:4px}
+  .crm-nav{display:flex;flex-direction:column;gap:4px;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+  .crm-menu-toggle{flex-shrink:0;margin-bottom:8px}.crm-menu-toggle:focus-visible{outline:2px solid var(--crm-purple);outline-offset:2px}.crm-menu-toggle-arrow{margin-left:auto}
   .crm-nav-btn{width:100%;border:0;background:transparent;display:flex;align-items:center;gap:12px;padding:12px 13px;border-radius:11px;color:#6e6975;font-weight:700;text-align:left;cursor:pointer;transition:.2s}
   .crm-nav-btn:hover,.crm-nav-btn.active{background:#eeeafd;color:var(--crm-purple)}
   .crm-nav-icon{width:22px;text-align:center;font-size:18px}.crm-nav-badge{margin-left:auto;min-width:20px;padding:3px 6px;border-radius:20px;background:#f2effb;color:var(--crm-purple);font-size:10px;text-align:center}
   .crm-sidebar-bottom{margin-top:auto}.crm-tip{margin:0 3px 18px;padding:15px;background:#f6f2e7;border-radius:14px;color:#7b7466;font-size:11px;line-height:1.5}.crm-tip strong{display:block;margin-bottom:4px;color:#5d5547;font-size:12px}
   .crm-side-action{width:100%;border:1px solid var(--crm-border);background:#fff;border-radius:11px;padding:10px 12px;margin-top:7px;text-align:left;font-size:11px;font-weight:750;cursor:pointer}.crm-side-action:hover{border-color:#c7bfd6;color:var(--crm-purple)}
   .crm-desktop-logout{position:fixed;right:82px;bottom:24px;z-index:50;border:1px solid #ded9d3;background:#fff;color:#5b42d6;border-radius:12px;padding:11px 15px;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(38,30,48,.14)}.crm-desktop-logout:hover{border-color:#9e90d8;background:#f8f6ff}.crm-desktop-logout:disabled{cursor:wait;opacity:.65}
+  .crm-desktop-actions{position:fixed;right:82px;bottom:24px;z-index:50;display:flex;flex-direction:column;gap:9px;align-items:stretch;width:max-content;max-width:calc(100vw - 32px)}.crm-desktop-actions .crm-desktop-logout{position:static}.crm-desktop-actions .crm-side-action{margin-top:0}
   .crm-owner-branches{display:none;border:1px solid #ddd6fe;border-radius:12px;padding:10px 12px;background:#fff;color:#5b42d6;font-weight:850;cursor:pointer;white-space:nowrap}
   .crm-content{min-height:100vh;margin-left:245px;padding:38px clamp(28px,5vw,76px) 76px;max-width:1530px;background:var(--crm-paper)}
   .crm-topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px}
@@ -3222,7 +3224,7 @@ const MIZAN_UI_CSS = `
   .crm-student-info-item{min-width:0;padding:8px 13px;border-left:1px solid #ece8e4;font-size:12px;line-height:1.4}
   .crm-student-info-item:nth-child(3n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+4){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}
   .crm-student-info-label{display:block;margin-bottom:3px;color:#7b7680;font-size:10px;font-weight:850;letter-spacing:.05em;text-transform:uppercase}.crm-student-info-value{display:block;color:#1c1921;font-weight:750;overflow-wrap:anywhere}
-  @media(max-width:760px){.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-owner-branches{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;font-size:0}.crm-owner-branches:after{content:"⌂";font-size:19px}.crm-branch-switch{max-width:105px;padding:9px 10px;font-size:10px}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(var(--crm-mobile-nav-columns,9),1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
+  @media(max-width:760px){.crm-desktop-actions{display:none}.crm-sidebar{display:none}.crm-desktop-logout{display:none}.crm-content{margin-left:0;padding:24px 17px 108px}.crm-topbar{align-items:center;margin-bottom:22px}.crm-title{font-size:27px}.crm-subtitle{max-width:235px;font-size:12px}.crm-header-actions .crm-secondary{display:none}.crm-owner-branches{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;font-size:0}.crm-owner-branches:after{content:"⌂";font-size:19px}.crm-branch-switch{max-width:105px;padding:9px 10px;font-size:10px}.crm-primary{width:44px;height:44px;padding:0;font-size:0}.crm-primary:after{content:"+";font-size:25px;font-weight:500}.crm-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(var(--crm-mobile-nav-columns,9),1fr);left:8px;right:8px;bottom:8px;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--crm-border);border-radius:17px;padding:6px 3px;box-shadow:0 8px 30px rgba(38,30,48,.13)}.crm-mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:#8d8691;font-size:7px;font-weight:700;padding:5px 1px;min-width:0}.crm-mobile-nav button span{font-size:18px}.crm-mobile-nav button.active{color:var(--crm-purple)}.crm-login{grid-template-columns:1fr}.crm-login-brand{display:none}.crm-login-panel{min-height:100vh;padding:24px}.crm-sheet-backdrop{place-items:end center;padding:0}.crm-sheet{max-height:92vh;border-radius:22px 22px 0 0}.crm-sheet-body{max-height:calc(92vh - 76px);padding:17px 18px 28px}.crm-student-metrics{grid-template-columns:repeat(3,1fr)}.crm-student-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-student-info-item:nth-child(3n+1){border-left:1px solid #ece8e4;padding-left:13px}.crm-student-info-item:nth-child(2n+1){border-left:0;padding-left:0}.crm-student-info-item:nth-child(n+3){border-top:1px solid #ece8e4;padding-top:12px;margin-top:4px}.crm-page [style*="grid-template-columns: repeat(6"],.crm-page [style*="grid-template-columns: repeat(7"]{grid-template-columns:repeat(2,1fr)!important}.crm-page [style*="gridTemplateColumns:\"repeat(6"],.crm-page [style*="gridTemplateColumns:\"repeat(7"]{grid-template-columns:repeat(2,1fr)!important}}
   @media(max-width:430px){.crm-content{padding-left:13px;padding-right:13px}.crm-title{font-size:24px}.crm-topbar{gap:10px}.crm-login-card h2{font-size:27px}}
 `;
 
@@ -8542,6 +8544,9 @@ export default function App() {
   const communicationQueueRef = useRef(Promise.resolve());
   const [filter, setFilter] = useState("all");
   const [mainTab, setMainTab] = useState("bugün");
+  const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
+  const desktopMenuToggleRef = useRef(null);
+  useEffect(()=>{ setDesktopMenuOpen(false); },[authSession?.user?.id,currentBranch?.id]);
   const [singleLessonResultClock, setSingleLessonResultClock] = useState(()=>new Date());
   useEffect(()=>{
     if (mainTab!=="bugün") return;
@@ -14571,18 +14576,16 @@ export default function App() {
           <div className="crm-brand-mark">S</div>
           <div className="crm-brand-copy"><strong>Sonsuz Sanat</strong><span>ÖĞRENCİ YÖNETİMİ</span></div>
         </div>
-        <p className="crm-nav-label">MENÜ</p>
-        <nav className="crm-nav">
+        <button type="button" ref={desktopMenuToggleRef} className="crm-nav-btn crm-menu-toggle" aria-expanded={desktopMenuOpen} aria-controls="crm-desktop-menu" onClick={()=>setDesktopMenuOpen(open=>!open)}>
+          <span className="crm-nav-icon" aria-hidden="true">☰</span><span>Menü</span><span className="crm-menu-toggle-arrow" aria-hidden="true">{desktopMenuOpen?"▲":"▼"}</span>
+        </button>
+        {desktopMenuOpen ? <nav id="crm-desktop-menu" className="crm-nav" aria-label="Ana menü" onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setDesktopMenuOpen(false);desktopMenuToggleRef.current?.focus();}}}>
           {mainNav.map(t=>(
-            <button key={t.key} className={`crm-nav-btn ${mainTab===t.key?"active":""}`} onClick={()=>setMainTab(t.key)}>
+            <button key={t.key} className={`crm-nav-btn ${mainTab===t.key?"active":""}`} aria-current={mainTab===t.key?"page":undefined} onClick={()=>{setMainTab(t.key);setDesktopMenuOpen(false);desktopMenuToggleRef.current?.focus();}}>
               <span className="crm-nav-icon">{t.icon}</span><span>{t.label}</span>{t.badge !== undefined ? <span className="crm-nav-badge">{t.badge}</span> : null}
             </button>
           ))}
-        </nav>
-        <div className="crm-sidebar-bottom">
-          <div className="crm-tip"><strong>Bugünün özeti</strong>{stats.active} aktif öğrenci · {stats.odeme} ödeme bekliyor · {telafiWarnList.length} telafi uyarısı.</div>
-          <button className="crm-side-action" onClick={handleGoogleCalendarExport}>⇧ Google Takvim'e aktar</button>
-        </div>
+        </nav> : null}
       </aside>
 
       <main className="crm-content">
@@ -15060,7 +15063,10 @@ export default function App() {
         </section>
       </main>
 
-      <button className="crm-desktop-logout" disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>↪ Güvenli çıkış</button>
+      <div className="crm-desktop-actions">
+        <button className="crm-side-action" onClick={handleGoogleCalendarExport}>⇧ Google Takvim'e aktar</button>
+        <button className="crm-desktop-logout" disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>↪ Güvenli çıkış</button>
+      </div>
 
       <nav className="crm-mobile-nav" style={{ "--crm-mobile-nav-columns":mobileNav.length + 1 }}>
         {mobileNav.map(t=>(
