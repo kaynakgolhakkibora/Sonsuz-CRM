@@ -14590,12 +14590,12 @@ export default function App() {
 
       <main className="crm-content">
         <header className="crm-topbar" style={mainTab==="takvim"?{flexWrap:"wrap"}:undefined}>
-          <div><p className="crm-eyebrow">{viewMeta.eyebrow}</p><h1 className="crm-title">{viewMeta.title}</h1><p className="crm-subtitle">{viewMeta.subtitle}</p></div>
+          <div><p className="crm-eyebrow">{viewMeta.eyebrow}</p></div>
           <div className="crm-header-actions" style={mainTab==="takvim"?{flexWrap:"wrap",maxWidth:"100%"}:undefined}>
             {canManageBranches && mainTab!=="subeler" ? <button type="button" className="crm-owner-branches" title="Şubeleri yönet" onClick={()=>setMainTab("subeler")}>Şubeler</button> : null}
             {hasMultipleSelectableBranches ? <button type="button" className="crm-branch-switch" title="Aktif şubeyi değiştir" onClick={()=>setShowBranchMenu(true)}>⌄ {currentBranch.name}</button> : null}
             {mainTab==="takvim" ? <button type="button" data-calendar-program-open disabled={!calendarProgramReady} onClick={()=>{if(calendarProgramReady)setCalendarProgramOpenScope(calendarProgramScopeKey);}} style={{border:"1px solid #ded6ec",borderRadius:12,padding:"10px 14px",background:"#fff",color:"#60468c",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:calendarProgramReady?"pointer":"not-allowed",opacity:calendarProgramReady?1:0.5,whiteSpace:"nowrap"}}>Ders Programı</button> : null}
-            <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="personel"?openStaffInvite():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):mainTab==="takvim"?setShowCalendarAvailability(true):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="personel"?"＋ Personel Davet Et":mainTab==="tekders"?"＋ Tek Ders Ekle":mainTab==="takvim"?"Uygun Saatler":"＋ Öğrenci ekle"}</button>
+            {["liste","subeler","personel","tekders","takvim"].includes(mainTab) ? <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="personel"?openStaffInvite():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):mainTab==="takvim"?setShowCalendarAvailability(true):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="personel"?"＋ Personel Davet Et":mainTab==="tekders"?"＋ Tek Ders Ekle":mainTab==="takvim"?"Uygun Saatler":"＋ Öğrenci ekle"}</button> : null}
           </div>
         </header>
         <section className="crm-page">
