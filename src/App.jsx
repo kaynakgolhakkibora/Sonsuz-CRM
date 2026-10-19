@@ -605,12 +605,6 @@ function withStatusEvent(student, type, at = new Date().toISOString()) {
     ]
   };
 }
-function latestCommunicationEvent(student, key) {
-  return [...(student?.status_history || [])]
-    .filter(event=>event?.type==="communication_"+key && event?.at)
-    .sort((a,b)=>new Date(b.at)-new Date(a.at))[0] || null;
-}
-function communicationFlag(student, key) { return latestCommunicationEvent(student,key)?.value === true; }
 function firstCompletedLessonAt(student) {
   const completed = (student?.schedule || []).filter(lesson=>lesson.status==="completed" && lesson.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
   return completed[0]?.date || null;
@@ -624,19 +618,20 @@ function instrumentLessonPhrase(student) {
   const instrument = String(student?.instrument || "müzik").trim().toLocaleLowerCase("tr-TR");
   return instrument.endsWith(" dersi") ? instrument : instrument+" dersi";
 }
-function googleReviewState(student) {
-  const event = latestCommunicationEvent(student,"google_review");
-  if (event?.value==="completed") return { key:"completed", label:"Yaptı", event };
-  if (event?.value==="closed") return { key:"closed", label:"Takip kapatıldı", event };
-  if (event?.value==="requested" || event?.value==="waiting") {
-    const checkAt = event.remindAt || addDays(event.at,7);
-    const due = midday(new Date(checkAt)).getTime() <= midday().getTime();
-    return { key:due?"check":"requested", label:due?"Yaptı mı?":"İstendi · bekleniyor", event, checkAt };
-  }
-  const dueAt = googleReviewDueAt(student);
-  if (!dueAt) return { key:"no-lesson", label:"İlk ders bekleniyor", dueAt:null };
-  const due = midday(new Date(dueAt)).getTime() <= midday().getTime();
-  return { key:due?"due":"scheduled", label:due?"İstenmedi":fmtShort(dueAt)+" tarihinde", dueAt };
+function googleReviewRequestRecorded(student) {
+  return (student?.status_history || []).some(event=>event?.type==="communication_google_review"
+    && ["requested","waiting","completed","closed"].includes(event.value));
+}
+function pendingGoogleReviewStudents(students, reference = new Date()) {
+  const today = midday(reference).getTime();
+  if (!Number.isFinite(today)) return [];
+  return (students || []).filter(student=>{
+    if (student.frozen || isStudentLeft(student) || isStudentDeleted(student) || googleReviewRequestRecorded(student)) return false;
+    try {
+      const dueAt = googleReviewDueAt(student);
+      return !!dueAt && midday(new Date(dueAt)).getTime() <= today;
+    } catch { return false; }
+  }).sort((a,b)=>a.name.localeCompare(b.name,"tr"));
 }
 function inMonth(iso, monthDate) {
   if (!iso) return false;
@@ -3234,10 +3229,6 @@ function StudentsNavIcon() {
 
 function TeachersNavIcon() {
   return <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="3" width="16" height="12" rx="1.5"/><path d="M13 11l3-3 3 2 3-4"/><circle cx="5.5" cy="11" r="3"/><path d="M1.5 24v-4.5c0-3.2 1.5-5 4-5 2.6 0 4 1.8 4 5V24"/><path d="M8 15l5-4"/></svg>;
-}
-
-function CommunicationNavIcon() {
-  return <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M4 5.5h20v14H11l-5.5 4v-4H4z"/><path d="M8 10h12M8 14h8"/></svg>;
 }
 
 function TonePill({ children, tone="neutral" }) {
@@ -6789,95 +6780,45 @@ function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentCl
   );
 }
 
-function İletişimPaneli({ students, onStudentClick, onMessage, onStatusChange }) {
-  const [filter, setFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const [googleConfirmId, setGoogleConfirmId] = useState(null);
-  const activeStudents = students.filter(student=>!student.frozen && !isStudentLeft(student));
-  const counts = {
-    whatsapp:activeStudents.filter(student=>communicationFlag(student,"whatsapp_group")).length,
-    newsletter:activeStudents.filter(student=>communicationFlag(student,"newsletter")).length,
-    rules:activeStudents.filter(student=>communicationFlag(student,"rules_sent")).length,
-    review:activeStudents.filter(student=>googleReviewState(student).key==="completed").length,
+function GoogleReviewRequests({ students, onStudentClick, onMessage, onRequested, savingId }) {
+  const [confirmId, setConfirmId] = useState(null);
+  const [openingId, setOpeningId] = useState(null);
+  const openingRef = useRef(false);
+  if (!students.length) return null;
+  const action = { border:"none", borderRadius:8, padding:"7px 10px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" };
+  const send = async student => {
+    if (openingRef.current || savingId) return;
+    openingRef.current = true;
+    setOpeningId(student.id);
+    try {
+      if (await onMessage(student,msgGoogleReview(student),"Google yorum mesajı WhatsApp'ta hazırlandı") === true) setConfirmId(student.id);
+    } finally { openingRef.current = false; setOpeningId(null); }
   };
-  const visibleStudents = activeStudents.filter(student=>{
-    if (search.trim() && !student.name.toLocaleLowerCase("tr-TR").includes(search.trim().toLocaleLowerCase("tr-TR"))) return false;
-    if (filter==="incomplete") return !communicationFlag(student,"whatsapp_group") || !communicationFlag(student,"newsletter") || !communicationFlag(student,"rules_sent") || !["completed","closed"].includes(googleReviewState(student).key);
-    if (filter==="whatsapp") return !communicationFlag(student,"whatsapp_group");
-    if (filter==="newsletter") return !communicationFlag(student,"newsletter");
-    if (filter==="rules") return !communicationFlag(student,"rules_sent");
-    if (filter==="review") return googleReviewState(student).key!=="completed";
-    return true;
-  }).sort((a,b)=>a.name.localeCompare(b.name,"tr"));
-  const smallAction = { border:"none", borderRadius:8, padding:"6px 8px", fontSize:11, fontWeight:800, cursor:"pointer", fontFamily:"inherit" };
-  const sendGoogle = student => {
-    onMessage(student,msgGoogleReview(student),"Google yorum mesajı WhatsApp'ta hazırlandı");
-    setGoogleConfirmId(student.id);
-  };
-  return (
-    <div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:8, marginBottom:14 }}>
-        <MiniMetric label="WhatsApp Grubunda" value={counts.whatsapp+" / "+activeStudents.length} tone="good" />
-        <MiniMetric label="Bültene Abone" value={counts.newsletter+" / "+activeStudents.length} tone="info" />
-        <MiniMetric label="Kurallar Gönderildi" value={counts.rules+" / "+activeStudents.length} tone="special" />
-        <MiniMetric label="Google Yorumu Yaptı" value={counts.review+" / "+activeStudents.length} tone="warn" />
+  return <AçılırBugünBölümü title={`Google Yorumu İste (${students.length})`} color="#9a3412" style={{ background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+    {students.map(student=><div key={student.id} style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, padding:"10px 0", borderBottom:"1px solid #ffedd5" }}>
+      <div style={{ flex:"1 1 180px", minWidth:0 }}>
+        <button type="button" onClick={()=>onStudentClick(student)} style={{ padding:0, border:"none", background:"transparent", textAlign:"left", fontFamily:"inherit", fontWeight:700, fontSize:14, color:"#111", cursor:"pointer", overflowWrap:"anywhere" }}>{student.name}</button>
+        <p style={{ margin:"3px 0 0", fontSize:12, color:"#9a3412" }}>İlk tamamlanan dersin üzerinden bir ay geçti.</p>
       </div>
-      <div style={{ ...CARD, padding:"12px", marginBottom:12 }}>
-        <input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Öğrenci ara..." style={{ width:"100%", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 12px", boxSizing:"border-box", fontFamily:"inherit", marginBottom:9 }} />
-        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-          {[["all","Tümü"],["incomplete","Eksikler"],["whatsapp","WhatsApp"],["newsletter","Bülten"],["rules","Kurallar"],["review","Google Yorumu"]].map(([key,label])=><button key={key} onClick={()=>setFilter(key)} style={{ ...smallAction, background:filter===key?"#5b42d6":"#f3f4f6", color:filter===key?"#fff":"#475569" }}>{label}</button>)}
-        </div>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
+        {confirmId===student.id ? <>
+          <button type="button" disabled={!!savingId || !!openingId} onClick={async()=>{ if(await onRequested(student.id)) setConfirmId(null); }} style={{ ...action, background:"#111", color:"#fff" }}>{savingId===student.id?"Kaydediliyor…":"Gönderdim"}</button>
+          <button type="button" disabled={!!savingId || !!openingId} onClick={()=>setConfirmId(null)} style={{ ...action, background:"#fff", color:"#9a3412" }}>Göndermedim</button>
+        </> : <button type="button" disabled={!!savingId || !!openingId} onClick={()=>send(student)} style={{ ...action, background:"#25D366", color:"#fff" }}>{openingId===student.id?"Hazırlanıyor…":"Yorum Linkini Gönder"}</button>}
       </div>
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {visibleStudents.map(student=>{
-          const waJoined = communicationFlag(student,"whatsapp_group");
-          const subscribed = communicationFlag(student,"newsletter");
-          const rulesSent = communicationFlag(student,"rules_sent");
-          const review = googleReviewState(student);
-          return <div key={student.id} style={{ ...CARD, padding:"15px 16px" }}>
-            <button onClick={()=>onStudentClick(student)} style={{ border:"none", background:"transparent", padding:0, margin:"0 0 11px", color:"#111", fontSize:15, fontWeight:850, cursor:"pointer", fontFamily:"inherit", textAlign:"left" }}>{student.name} <span style={{ color:"#94a3b8", fontSize:11 }}>· {student.instrument}</span></button>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(205px,1fr))", gap:8 }}>
-              <div style={{ background:"#f8fafc", borderRadius:10, padding:"10px" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}><strong style={{ fontSize:12 }}>WhatsApp Grubu</strong><TonePill tone={waJoined?"good":"neutral"}>{waJoined?"Katıldı":"Katılmadı"}</TonePill></div>
-                <div style={{ display:"flex", gap:6, marginTop:8 }}><button onClick={()=>onMessage(student,msgWhatsAppGroup(student),"Grup daveti WhatsApp'ta hazırlandı")} style={{ ...smallAction, background:"#dcfce7", color:"#166534" }}>Davet Gönder</button><button onClick={()=>onStatusChange(student,"whatsapp_group",!waJoined)} style={{ ...smallAction, background:waJoined?"#f3f4f6":"#111", color:waJoined?"#475569":"#fff" }}>{waJoined?"Geri Al":"Katıldı"}</button></div>
-              </div>
-              <div style={{ background:"#f8fafc", borderRadius:10, padding:"10px" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}><strong style={{ fontSize:12 }}>Bülten</strong><TonePill tone={subscribed?"info":"neutral"}>{subscribed?"Abone":"Abone değil"}</TonePill></div>
-                <div style={{ display:"flex", gap:6, marginTop:8 }}><button onClick={()=>onMessage(student,msgNewsletter(student),"Bülten bağlantısı WhatsApp'ta hazırlandı")} style={{ ...smallAction, background:"#dbeafe", color:"#1d4ed8" }}>Link Gönder</button><button onClick={()=>onStatusChange(student,"newsletter",!subscribed)} style={{ ...smallAction, background:subscribed?"#f3f4f6":"#111", color:subscribed?"#475569":"#fff" }}>{subscribed?"Geri Al":"Abone Oldu"}</button></div>
-              </div>
-              <div style={{ background:"#f8fafc", borderRadius:10, padding:"10px" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}><strong style={{ fontSize:12 }}>Ders Kuralları</strong><TonePill tone={rulesSent?"special":"neutral"}>{rulesSent?"Gönderildi":"Gönderilmedi"}</TonePill></div>
-                <div style={{ display:"flex", gap:6, marginTop:8 }}><button onClick={()=>onMessage(student,msgYeniKayitKurallari(),"Ders kuralları WhatsApp'ta hazırlandı")} style={{ ...smallAction, background:"#ede9fe", color:"#5b21b6" }}>Gönder</button><button onClick={()=>onStatusChange(student,"rules_sent",!rulesSent)} style={{ ...smallAction, background:rulesSent?"#f3f4f6":"#111", color:rulesSent?"#475569":"#fff" }}>{rulesSent?"Geri Al":"Gönderildi"}</button></div>
-              </div>
-              <div style={{ background:"#fff7ed", borderRadius:10, padding:"10px" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}><strong style={{ fontSize:12 }}>Google Yorumu</strong><TonePill tone={review.key==="completed"?"good":review.key==="check"||review.key==="due"?"warn":"neutral"}>{review.label}</TonePill></div>
-                <div style={{ display:"flex", gap:6, marginTop:8, flexWrap:"wrap" }}>
-                  {review.key!=="completed"&&review.key!=="closed"?<button onClick={()=>sendGoogle(student)} style={{ ...smallAction, background:"#f97316", color:"#fff" }}>Yorum Linkini Gönder</button>:null}
-                  {googleConfirmId===student.id?<><button onClick={()=>{ onStatusChange(student,"google_review","requested"); setGoogleConfirmId(null); }} style={{ ...smallAction, background:"#111", color:"#fff" }}>Gönderdim</button><button onClick={()=>setGoogleConfirmId(null)} style={{ ...smallAction, background:"#f3f4f6", color:"#475569" }}>Göndermedim</button></>:null}
-                  {review.key==="requested"||review.key==="check"?<button onClick={()=>onStatusChange(student,"google_review","completed")} style={{ ...smallAction, background:"#dcfce7", color:"#166534" }}>Yaptı</button>:null}
-                  {review.key==="check"?<><button onClick={()=>onStatusChange(student,"google_review","waiting",{ remindAt:addDays(new Date().toISOString(),7) })} style={{ ...smallAction, background:"#fef3c7", color:"#92400e" }}>Yapmadı · 7 gün sonra</button><button onClick={()=>onStatusChange(student,"google_review","closed")} style={{ ...smallAction, background:"#f3f4f6", color:"#475569" }}>Takibi Kapat</button></>:null}
-                </div>
-              </div>
-            </div>
-          </div>;
-        })}
-        {visibleStudents.length===0?<div style={{ textAlign:"center", padding:"42px 20px", color:"#94a3b8", fontWeight:700 }}>Bu filtrede öğrenci yok.</div>:null}
-      </div>
-    </div>
-  );
+    </div>)}
+    <p style={{ margin:"10px 0 0", fontSize:11, lineHeight:1.5, color:"#9a3412" }}>Mesajı gerçekten gönderdikten sonra Gönderdim'i seçin. Ardından yeniden hatırlatılmaz.</p>
+  </AçılırBugünBölümü>;
 }
 
-function YeniÖğrenciİletişimSheet({ student, onClose, onMessage, onStatusChange }) {
-  const waJoined = communicationFlag(student,"whatsapp_group");
-  const subscribed = communicationFlag(student,"newsletter");
-  const rulesSent = communicationFlag(student,"rules_sent");
-  const action = { border:"none", borderRadius:9, padding:"8px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit" };
-  const row = (title,status,sendLabel,onSend,doneLabel,onDone,tone="neutral") => <div style={{ background:"#f8fafc", border:"1px solid #eef2f7", borderRadius:12, padding:"12px", marginBottom:9 }}><div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}><strong style={{ fontSize:13 }}>{title}</strong><TonePill tone={status?tone:"neutral"}>{status?doneLabel:"Bekliyor"}</TonePill></div><div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:7, marginTop:9 }}><button onClick={onSend} style={{ ...action, background:"#25D366", color:"#fff" }}>{sendLabel}</button><button onClick={onDone} style={{ ...action, background:status?"#f3f4f6":"#111", color:status?"#475569":"#fff" }}>{status?"Geri Al":doneLabel}</button></div></div>;
+function YeniÖğrenciİletişimSheet({ student, onClose, onMessage }) {
+  const action = { border:"none", borderRadius:9, padding:"9px 10px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit", background:"#25D366", color:"#fff", width:"100%" };
+  const row = (title,sendLabel,text,successText) => <div style={{ background:"#f8fafc", border:"1px solid #eef2f7", borderRadius:12, padding:"12px", marginBottom:9 }}><strong style={{ display:"block", fontSize:13, marginBottom:9 }}>{title}</strong><button type="button" onClick={()=>onMessage(student,text,successText)} style={action}>{sendLabel}</button></div>;
   return <Sheet title="Yeni Öğrenci İletişimi" subtitle={student.name+" başarıyla kaydedildi"} onClose={onClose}>
-    {row("WhatsApp Grubu",waJoined,"Grup Davetini Gönder",()=>onMessage(student,msgWhatsAppGroup(student),"Grup daveti WhatsApp'ta hazırlandı"),"Katıldı",()=>onStatusChange(student,"whatsapp_group",!waJoined),"good")}
-    {row("Bülten",subscribed,"Abonelik Linkini Gönder",()=>onMessage(student,msgNewsletter(student),"Bülten bağlantısı WhatsApp'ta hazırlandı"),"Abone Oldu",()=>onStatusChange(student,"newsletter",!subscribed),"info")}
-    {row("Ders Kuralları",rulesSent,"Kuralları Gönder",()=>onMessage(student,msgYeniKayitKurallari(),"Ders kuralları WhatsApp'ta hazırlandı"),"Gönderildi",()=>onStatusChange(student,"rules_sent",!rulesSent),"special")}
-    <div style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:12, padding:"12px", marginBottom:13 }}><strong style={{ display:"block", fontSize:13, color:"#9a3412" }}>Google Yorumu</strong><span style={{ display:"block", marginTop:4, fontSize:12, color:"#9a3412" }}>İlk tamamlanan dersten bir ay sonra İletişim sekmesinde hatırlatılacak. Yorum linki oradan daha önce de gönderilebilir.</span></div>
+    {row("WhatsApp Grubu","Grup Davetini Gönder",msgWhatsAppGroup(student),"Grup daveti WhatsApp'ta hazırlandı")}
+    {row("Bülten","Abonelik Linkini Gönder",msgNewsletter(student),"Bülten bağlantısı WhatsApp'ta hazırlandı")}
+    {row("Ders Kuralları","Kuralları Gönder",msgYeniKayitKurallari(),"Ders kuralları WhatsApp'ta hazırlandı")}
+    <div style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:12, padding:"12px", marginBottom:13 }}><strong style={{ display:"block", fontSize:13, color:"#9a3412" }}>Google Yorumu</strong><span style={{ display:"block", marginTop:4, fontSize:12, color:"#9a3412" }}>İlk tamamlanan dersten bir ay sonra Google yorumu isteği Bugün ekranında gösterilir.</span></div>
     <Btn bg="#111" onClick={onClose}>Tamam</Btn>
   </Sheet>;
 }
@@ -8541,7 +8482,13 @@ export default function App() {
   const [detailInitialTab, setDetailInitialTab] = useState("takvim");
   const [showAdd, setShowAdd] = useState(false);
   const [welcomeStudentId, setWelcomeStudentId] = useState(null);
-  const communicationQueueRef = useRef(Promise.resolve());
+  const googleReviewWritingRef = useRef(false);
+  const [googleReviewSavingId, setGoogleReviewSavingId] = useState("");
+  const googleReviewScopeRef = useRef(null);
+  const googleReviewScopeKey = JSON.stringify([authSession?.user?.id,currentBranch?.id,protectedDataLoadGenerationRef.current]);
+  const googleReviewReady = !!(giris && authSession?.user?.id && currentBranch?.id && loadedSources.students
+    && browserOnline && !connectionRevalidationRequired && !accessContextLoading && !loading);
+  googleReviewScopeRef.current = { key:googleReviewScopeKey, ready:googleReviewReady, branchId:currentBranch?.id };
   const [filter, setFilter] = useState("all");
   const [mainTab, setMainTab] = useState("bugün");
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
@@ -13233,32 +13180,103 @@ export default function App() {
 
   const handleCommunicationMessage = async (student, text, successText) => {
     const phone = student.phone ? student.phone.replace(/[^0-9]/g,"") : "";
-    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text),"_blank");
-    else { await navigator.clipboard.writeText(text); pop("Telefon bulunamadı; mesaj kopyalandı"); return; }
-    pop(successText || "Mesaj WhatsApp'ta hazırlandı");
-  };
-
-  const handleCommunicationStatus = (student, key, value, extra={}) => {
-    const persist = async () => {
-      const branchId = currentBranch?.id;
-      if (!branchId || (student.branch_id && student.branch_id !== branchId)) return false;
-      return runBranchScopedWrite(async () => {
-        const result = await supabase.from("students").select("*").eq("id",student.id).eq("branch_id",branchId).single();
-        const current = result.data || students.find(item=>item.id===student.id && item.branch_id===branchId) || student;
-        const event = { id:uid(), type:"communication_"+key, value, at:new Date().toISOString(), ...extra };
-        const updatedStudent = { ...current, branch_id:branchId, status_history:[...(current.status_history || []),event] };
-        setStudents(prev=>prev.map(item=>item.id===updatedStudent.id?updatedStudent:item));
-        try {
-          await saveStudent(updatedStudent);
-          pop("İletişim durumu kaydedildi");
-          return true;
-        } catch (error) {
+    try {
+      if (phone) {
+        if (!window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text),"_blank")) {
+          pop("WhatsApp penceresi açılamadı. Tarayıcının açılır pencere iznini kontrol edin.",7000);
           return false;
         }
-      });
+      } else {
+        await navigator.clipboard.writeText(text);
+        pop("Telefon bulunamadı; mesaj kopyalandı");
+        return true;
+      }
+      pop(successText || "Mesaj WhatsApp'ta hazırlandı");
+      return true;
+    } catch {
+      pop("Mesaj hazırlanamadı. Yeniden deneyin; gönderildi olarak işaretlenmedi.",7000);
+      return false;
+    }
+  };
+
+  const handleGoogleReviewMessage = (student, text, successText) => {
+    const scope = googleReviewScopeRef.current;
+    if (!scope?.ready || scope.key!==googleReviewScopeKey || student.branch_id!==scope.branchId
+      || !requireProtectedSources(["students"],"Google yorum isteği")) return false;
+    return handleCommunicationMessage(student,text,successText);
+  };
+
+  const handleGoogleReviewRequested = async studentId => {
+    const scope = googleReviewScopeRef.current;
+    if (!scope?.ready || scope.key!==googleReviewScopeKey || googleReviewWritingRef.current
+      || !requireProtectedSources(["students"],"Google yorum isteği")) return false;
+    const matchesScope = () => googleReviewScopeRef.current?.ready && googleReviewScopeRef.current.key===scope.key;
+    const validStudent = student => student?.id===studentId && student.branch_id===scope.branchId
+      && Number.isInteger(student.record_version) && student.record_version>=0
+      && Array.isArray(student.schedule) && (student.status_history==null || Array.isArray(student.status_history));
+    const showStudent = student => {
+      if (!matchesScope() || !validStudent(student)) return;
+      setStudents(previous=>!matchesScope()?previous:previous.map(item=>item.id===studentId && item.branch_id===scope.branchId
+        && Number(item.record_version || 0)<=student.record_version ? student : item));
     };
-    communicationQueueRef.current = communicationQueueRef.current.then(persist,persist);
-    return communicationQueueRef.current;
+    const readStudent = () => timedSingleLessonRequest(()=>supabase.from("students").select("*")
+      .eq("id",studentId).eq("branch_id",scope.branchId).single());
+    googleReviewWritingRef.current = true;
+    setGoogleReviewSavingId(studentId);
+    try {
+      return await runBranchScopedWrite(async()=>{
+        const currentResult = await readStudent();
+        if (!matchesScope()) return false;
+        const current = currentResult.data;
+        if (currentResult.error || !validStudent(current)) {
+          pop("Öğrenci kaydı doğrulanamadı. İstek işareti kaydedilmedi; yeniden mesaj göndermeyin.",8000);
+          return false;
+        }
+        if (googleReviewRequestRecorded(current)) {
+          showStudent(current);
+          pop("Google yorum isteği daha önce işaretlenmiş; yeniden kayıt oluşturulmadı.",7000);
+          return true;
+        }
+        if (!pendingGoogleReviewStudents([current]).length) {
+          showStudent(current);
+          pop("Öğrencinin güncel durumu Google yorum isteğine uygun değil; kayıt gönderilmedi.",7000);
+          return false;
+        }
+        const event = { id:uid(), type:"communication_google_review", value:"requested", at:new Date().toISOString() };
+        const payload = { status_history:[...(current.status_history || []),event], record_version:current.record_version+1,
+          last_write_id:event.id, last_saved_at:event.at };
+        if (!matchesScope()) return false;
+        // Only communication history and CAS metadata are written; no lesson/payment/package payload.
+        const result = await timedSingleLessonRequest(()=>supabase.from("students").update(payload)
+          .eq("id",studentId).eq("branch_id",scope.branchId).eq("record_version",current.record_version).select("*").single());
+        if (!matchesScope()) return false;
+        const hasEvent = student => validStudent(student) && student.record_version>=payload.record_version
+          && (student.status_history || []).some(item=>item?.id===event.id && item.type===event.type && item.value===event.value && item.at===event.at);
+        if (!result.error && hasEvent(result.data) && result.data.record_version===payload.record_version && result.data.last_write_id===event.id) {
+          showStudent(result.data);
+          pop("Google yorum isteği kaydedildi; yeniden hatırlatılmayacak.");
+          return true;
+        }
+        // A failed/lost response is checked by SELECT only. Never repeat the write automatically.
+        const checked = await readStudent();
+        if (!matchesScope()) return false;
+        if (!checked.error && validStudent(checked.data)) {
+          showStudent(checked.data);
+          if (hasEvent(checked.data) || googleReviewRequestRecorded(checked.data)) {
+            pop("Google yorum isteği veritabanından doğrulandı; yeniden hatırlatılmayacak.");
+            return true;
+          }
+        }
+        pop("İstek işareti henüz doğrulanamadı. Mesajı tekrar göndermeyin; Gönderdim ile yalnız kaydı yeniden kontrol edebilirsiniz.",10000);
+        return false;
+      });
+    } catch {
+      if (matchesScope()) pop("İstek işareti doğrulanamadı. Mesajı tekrar göndermeyin; Gönderdim ile yeniden kontrol edin.",8000);
+      return false;
+    } finally {
+      googleReviewWritingRef.current = false;
+      setGoogleReviewSavingId("");
+    }
   };
 
   const buildPaymentUpdate = (sourceStudents, sid, tarih) => {
@@ -14236,6 +14254,7 @@ export default function App() {
   };
 
   const operationalStudents = students.filter(student=>!isStudentDeleted(student));
+  const pendingGoogleReviews = googleReviewReady ? pendingGoogleReviewStudents(operationalStudents.filter(student=>student.branch_id===currentBranch.id),singleLessonResultClock) : [];
   const pendingPeriodEvaluations = mainTab === "bugün" ? pendingPeriodEvaluationRows(operationalStudents) : [];
   const sentPeriodSummaries = mainTab === "bugün" ? sentPeriodSummaryRows(operationalStudents) : [];
   const todayPayments = operationalStudents.filter(isÖdemeBekleyen);
@@ -14286,7 +14305,6 @@ export default function App() {
     { key:"bugün", label:"Bugün", icon:"◫" },
     { key:"liste", label:"Öğrenciler", icon:<StudentsNavIcon />, badge:stats.active },
     { key:"ogretmenler", label:"Öğretmenler", icon:<TeachersNavIcon />, badge:teachers.filter(t=>t.active).length },
-    { key:"iletisim", label:"İletişim", icon:<CommunicationNavIcon /> },
     { key:"tekders", label:"Tek Ders", icon:"◇", badge:singleLessons.filter(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned").length },
     { key:"takvim", label:"Takvim", icon:"□" },
     { key:"gelir", label:"Finans", icon:"↗" },
@@ -14299,7 +14317,6 @@ export default function App() {
     bugün:{ eyebrow:"Günlük Merkez", title:"Bugünün akışı", subtitle:"Dersler, ödemeler ve bekleyen işler tek ekranda." },
     liste:{ eyebrow:"ÖĞRENCİ YÖNETİMİ", title:"Öğrenciler", subtitle:"Tüm öğrencileri, paketleri ve gelişim durumlarını yönet." },
     ogretmenler:{ eyebrow:"ÖĞRETMEN YÖNETİMİ", title:"Öğretmenler", subtitle:"Öğretmenlerin öğrencilerini, haftalık programını ve aylık derslerini gör." },
-    iletisim:{ eyebrow:"VELİ İLETİŞİMİ", title:"İletişim", subtitle:"WhatsApp grubu, bülten, ders kuralları ve Google yorumlarını takip et." },
     tekders:{ eyebrow:"BAĞIMSIZ DERS YÖNETİMİ", title:"Tek Ders", subtitle:"Kayıtlı öğrenciler ve misafirler için paket dışı tek dersleri yönet." },
     takvim:{ eyebrow:"Haftalık Program", title:"Ders takvimi", subtitle:"Haftanın derslerini ve değişikliklerini birlikte gör." },
     gelir:{ eyebrow:"Finansal Görünüm", title:"Finans", subtitle:"Tahsilat, gider ve net kârını aylık olarak takip et." },
@@ -14919,6 +14936,7 @@ export default function App() {
           <div>
             {weeklyReportReady?<PendingWeeklyReports key={weeklyReportScopeKey+":"+weeklyReportReady} reports={pendingWeeklyReports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}
             <PendingMonthlyReports reports={pendingMonthlyReports} onDownload={handleMonthlyReportDownload} downloadingId={downloadingReportId} />
+            {googleReviewReady ? <GoogleReviewRequests key={googleReviewScopeKey} students={pendingGoogleReviews} onStudentClick={setDetailSt} onMessage={handleGoogleReviewMessage} onRequested={handleGoogleReviewRequested} savingId={googleReviewSavingId} /> : null}
             {(() => {
               const bugün = new Date();
               const bugünMD = (bugün.getMonth()+1)+"-"+bugün.getDate();
@@ -14968,7 +14986,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && pendingWeeklyReports.length===0 && !weeklyVisibleState.error && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            {pendingGoogleReviews.length===0 && pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && pendingWeeklyReports.length===0 && !weeklyVisibleState.error && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -14980,7 +14998,6 @@ export default function App() {
         {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} availabilityOpen={showCalendarAvailability} onAvailabilityClose={()=>setShowCalendarAvailability(false)} /> : null}
         {mainTab==="takvim" && calendarProgramReady && calendarProgramOpenScope===calendarProgramScopeKey ? <CalendarProgramSheet key={calendarProgramScopeKey} students={operationalStudents} branchId={currentBranch.id} branchName={currentBranch.name} onClose={()=>setCalendarProgramOpenScope(null)} /> : null}
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} /> : null}
-        {mainTab === "iletisim" ? <İletişimPaneli students={students} onStudentClick={setDetailSt} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} onTrialAppointment={lesson=>openTrialAppointment(lesson)} trialAppointmentOpeningId={trialAppointmentOpeningId} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
         {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /></> : null}
@@ -15151,7 +15168,7 @@ export default function App() {
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {singleLessonSheet ? <SingleLessonSheet lesson={singleLessonSheet.lesson || null} students={students} teachers={teachers} saving={singleLessonSaving} onClose={()=>{ if(singleLessonSheet.mode==="add") pendingSingleLessonCreateRef.current=null; setSingleLessonSheet(null); }} onSave={handleSingleLessonSave} /> : null}
       {trialAppointmentPrompt && trialAppointmentReady && trialAppointmentPrompt.scopeKey===trialAppointmentScopeKey ? <TrialAppointmentSheet key={trialAppointmentPrompt.scopeKey+trialAppointmentSignature(trialAppointmentPrompt.lesson)} lesson={trialAppointmentPrompt.lesson} onVerify={()=>readTrialAppointment(trialAppointmentPrompt.lesson,trialAppointmentPrompt.scopeKey)} onClose={()=>setTrialAppointmentPrompt(null)} /> : null}
-      {welcomeStudentId && students.find(student=>student.id===welcomeStudentId) ? <YeniÖğrenciİletişimSheet student={students.find(student=>student.id===welcomeStudentId)} onClose={()=>setWelcomeStudentId(null)} onMessage={handleCommunicationMessage} onStatusChange={handleCommunicationStatus} /> : null}
+      {welcomeStudentId && students.find(student=>student.id===welcomeStudentId) ? <YeniÖğrenciİletişimSheet student={students.find(student=>student.id===welcomeStudentId)} onClose={()=>setWelcomeStudentId(null)} onMessage={handleCommunicationMessage} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {periodEvaluationModal ? <DonemDegerlendirmeSheet student={students.find(student=>student.id===periodEvaluationModal.student.id) || periodEvaluationModal.student} info={periodEvaluationModal.info} onClose={()=>setPeriodEvaluationModal(null)} onSave={evaluation=>handleDonemDegerlendirmeKaydet(periodEvaluationModal.student.id, periodEvaluationModal.info, evaluation)} /> : null}
       {periodSummaryPrompt ? <WhatsAppPreviewSheet title="Dönem Sonu Özeti" subtitle={periodSummaryPrompt.student} text={msgDonemDegerlendirmesi(periodSummaryPrompt.student, periodSummaryPrompt.info, periodSummaryPrompt.log)} onClose={()=>setPeriodSummaryPrompt(null)} onSent={()=>handlePaketOzetiGonderildi(periodSummaryPrompt.student.id, periodSummaryPrompt.info)} /> : null}
