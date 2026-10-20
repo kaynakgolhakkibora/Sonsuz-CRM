@@ -7022,7 +7022,7 @@ function BekleyenTelafiler({ students, onStudentClick }) {
   students.forEach(student => {
     if (isStudentLeft(student)) return;
     (student.telafi_records || []).forEach(record => {
-      if (isCurrentTelafi(record)) telafiler.push({ student, record });
+      if (isCurrentTelafi(record) && !telafiPlannedAt(record)) telafiler.push({ student, record });
     });
   });
   telafiler.sort((a,b) => {
@@ -14986,7 +14986,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {pendingGoogleReviews.length===0 && pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && pendingWeeklyReports.length===0 && !weeklyVisibleState.error && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(isCurrentTelafi)) ? (
+            {pendingGoogleReviews.length===0 && pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && pendingWeeklyReports.length===0 && !weeklyVisibleState.error && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(record=>isCurrentTelafi(record) && !telafiPlannedAt(record))) && !operationalStudents.some(s=>!s.frozen&&!isStudentLeft(s)&&(s.telafi_records||[]).some(isTodayPlannedTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
