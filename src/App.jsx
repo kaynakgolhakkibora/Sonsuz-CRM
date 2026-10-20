@@ -4515,6 +4515,7 @@ function PieceEditSheet({student,entry,pending,onClose,onSubmit,onResolve,busy,e
 function PieceHistoryPanel({student,scope,onAdd,onEdit}) {
   const scopeKey=pieceUpdateScopeKey(scope),[rows,setRows]=useState([]),[ready,setReady]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(''),[reload,setReload]=useState(0);
   const [editing,setEditing]=useState(null),[pending,setPending]=useState(()=>readPendingPieceUpdate(scope,student.id)),[busy,setBusy]=useState(false),[editError,setEditError]=useState('');
+  const [historyOpen,setHistoryOpen]=useState(false);
   const alive=useRef(false),busyRef=useRef(false);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   useEffect(()=>{
@@ -4546,10 +4547,11 @@ function PieceHistoryPanel({student,scope,onAdd,onEdit}) {
     setPending(request);void finish(request,'write');
   };
   return <div style={{background:'#fafafa',border:'1px solid #e5e7eb',borderRadius:10,padding:'10px 14px',marginBottom:14}}>
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,marginBottom:entries.length?6:0}}><p style={{margin:0,fontSize:11,fontWeight:700,color:'#888',letterSpacing:1}}>PARÇA GEÇMİŞİ</p><button onClick={onAdd} style={{border:'none',borderRadius:9,background:'#ede9fe',color:'#6d28d9',padding:'7px 10px',fontSize:11,fontWeight:800,cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>+ Parça Ekle</button></div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,marginBottom:entries.length?6:0}}><button type="button" aria-expanded={historyOpen} onClick={()=>setHistoryOpen(value=>!value)} style={{flex:1,minWidth:0,display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,background:'transparent',border:'none',padding:0,textAlign:'left',fontFamily:'inherit',fontSize:11,fontWeight:700,color:'#888',letterSpacing:1,cursor:'pointer'}}><span>PARÇA GEÇMİŞİ</span><span aria-hidden="true">{historyOpen?'▲':'▼'}</span></button><button onClick={onAdd} style={{border:'none',borderRadius:9,background:'#ede9fe',color:'#6d28d9',padding:'7px 10px',fontSize:11,fontWeight:800,cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>+ Parça Ekle</button></div>
     {loading?<p style={{fontSize:11,color:'#64748b'}}>Güncel parça durumları yükleniyor...</p>:null}
     {error?<p role="alert" style={{fontSize:12,color:'#b91c1c'}}>{error} <button onClick={()=>setReload(v=>v+1)}>Yeniden Yükle</button></p>:null}
     {pending&&!editing?<div style={{background:'#fffbeb',borderRadius:8,padding:9,fontSize:12}}><p>Bekleyen parça güncellemesi var.{pending.invalid?' İşlem bilgisi okunamadı; düzenleme kapalı.':''}</p>{!pending.invalid?<><button disabled={busy} onClick={()=>finish(pending,'check')}>Sonucu Kontrol Et</button> <button disabled={busy} onClick={()=>finish(pending,'retry')}>Aynı İşlemi Yeniden Gönder</button></>:null}{editError?<p role="alert">{editError}</p>:null}</div>:null}
+    <div hidden={!historyOpen}>
     {entries.map((entry,index)=><div key={entry.sourceKind+'|'+entry.sourceKey+'|'+index} style={{borderBottom:index<entries.length-1?'1px solid #f0f0f0':'none',padding:'8px 0'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}><div style={{minWidth:0,overflowWrap:'anywhere'}}><p style={{margin:0,fontSize:13,fontWeight:800,color:'#111'}}>{entry.name}</p>{entry.period?<p style={{margin:'2px 0 0',fontSize:11,color:'#94a3b8'}}>{entry.period}</p>:null}{entry.latest&&!entry.sourceChanged?<p style={{margin:'2px 0 0',fontSize:11,color:'#64748b'}}>Güncellendi: {fmtDate(entry.latest.recorded_at)}</p>:null}</div><div style={{textAlign:'right',flexShrink:0}}><p style={{margin:0,fontSize:12,fontWeight:700,color:entry.score===100?'#047857':entry.score===50?'#b45309':'#64748b'}}>{entry.result}</p><button aria-label={entry.name+' parçasını düzenle'} disabled={!ready||!entry.editable||busy||!!pending} onClick={()=>{setEditing({...entry,openedRecordVersion:student.record_version??0});setEditError('');}} style={{marginTop:5,border:'none',borderRadius:7,padding:'5px 8px',fontFamily:'inherit',color:'#6d28d9',background:'#ede9fe',cursor:'pointer'}}>Düzenle</button></div></div>
       {!entry.editable?<p style={{fontSize:11,color:'#92400e'}}>Eski kaydın kaynağı güvenli biçimde eşleştirilemiyor.</p>:null}
@@ -4557,6 +4559,7 @@ function PieceHistoryPanel({student,scope,onAdd,onEdit}) {
       {entry.history.length?<details style={{fontSize:11,color:'#64748b',marginTop:6}}><summary>Durum geçmişi ({entry.history.length+1})</summary><p>{entry.sourceKind==='period'?'Dönemdeki sonuç':'İlk kayıt'}: {entry.originalName} · {entry.originalResult}</p>{[...entry.history].reverse().map(row=><p key={row.operation_id}>{fmtDate(row.recorded_at)} · {row.piece_name} · {displayPieceResult(row.piece_result)}</p>)}</details>:null}
     </div>)}
     {!entries.length?<p style={{margin:'9px 0 2px',fontSize:12,color:'#94a3b8'}}>Henüz parça kaydı yok.</p>:null}
+    </div>
     {editing?<PieceEditSheet student={student} entry={editing} pending={pending} busy={busy} error={editError} onClose={()=>{if(!busy&&!pending)setEditing(null);}} onSubmit={submit} onResolve={mode=>{if(pending&&!pending.invalid)void finish(pending,mode);}}/>:null}
   </div>;
 }
@@ -4610,6 +4613,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
   const [mevcutAcik, setMevcutAcik] = useState(true);
   const [gelecekAcik, setGelecekAcik] = useState(false);
   const [gecmisAcik, setGecmisAcik] = useState(false);
+  const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
   const telafiRecords = student.telafi_records || [];
@@ -4637,22 +4641,16 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
     <>
       <Sheet title={student.name} onClose={onClose}>
         <div style={SECTION}>
-          <div className="crm-student-info-grid" style={{ marginBottom:startInfo?12:0 }}>
+          <div className="crm-student-info-grid">
             {[
               ["Enstrüman",student.instrument || "-"],
               ["Öğretmen",studentTeacherName(student) || "-"],
               ["Program",studentScheduleLabel(student) || "-"],
-              ["Ders süresi",lessonDurationLabel(student)],
+              ["Derse Başlama",startInfo || "-"],
               ["Veli",student.veli_adi || "-"],
               ["Durum",statusText],
             ].map(([label,value])=><div className="crm-student-info-item" key={label}><span className="crm-student-info-label">{label}</span><span className="crm-student-info-value">{value}</span></div>)}
           </div>
-          {startInfo ? (
-            <div style={{ background:"#f8fafc", border:"1px solid #eef2f7", borderRadius:12, padding:"9px 11px" }}>
-              <p style={{ margin:0, fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:1 }}>Derse Başlama</p>
-              <p style={{ margin:"3px 0 0", fontSize:13, color:"#111", fontWeight:800 }}>{startInfo}</p>
-            </div>
-          ) : null}
         </div>
         <div className="crm-student-metrics" style={{ display:"grid", gap:8, marginBottom:8 }}>
           <MiniMetric label="Kalan Ders" value={bal} />
@@ -4682,10 +4680,12 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
         <PieceHistoryPanel key={student.id+"|"+pieceEditScope?.actorUserId+"|"+pieceEditScope?.branchId+"|"+pieceEditScope?.generation} student={student} scope={pieceEditScope} onAdd={()=>setShowPieceAdd(true)} onEdit={onPieceEdit} />
         {student.odemeler && student.odemeler.length > 0 ? (
           <div style={{ background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1 }}>Ödeme Geçmişi</p>
+            <button type="button" aria-expanded={paymentHistoryOpen} onClick={()=>setPaymentHistoryOpen(value=>!value)} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, background:"transparent", border:"none", padding:0, textAlign:"left", fontFamily:"inherit", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, cursor:"pointer" }}><span>Ödeme Geçmişi</span><span aria-hidden="true">{paymentHistoryOpen ? "▲" : "▼"}</span></button>
+            <div hidden={!paymentHistoryOpen} style={{ marginTop:6 }}>
             {[...student.odemeler].map((o,i)=>({o,i})).reverse().map(({o,i}) => (
               <PaymentHistoryItem key={i} student={student} payment={o} index={i} onPaymentEdit={(idx,changes)=>onPaymentEdit(student.id,idx,changes)} onPaymentDelete={(idx)=>onPaymentDelete(student.id,idx)} />
             ))}
+            </div>
           </div>
         ) : null}
         <div style={{ display:"flex", gap:6, marginBottom:14, overflowX:"auto" }}>
