@@ -15081,7 +15081,6 @@ export default function App() {
       </main>
 
       <div className="crm-desktop-actions">
-        <button className="crm-side-action" onClick={handleGoogleCalendarExport}>⇧ Google Takvim'e aktar</button>
         <button className="crm-desktop-logout" disabled={authBusy} onClick={()=>setShowSecurityMenu(true)}>↪ Güvenli çıkış</button>
       </div>
 
