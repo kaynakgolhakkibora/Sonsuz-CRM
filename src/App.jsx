@@ -6823,7 +6823,7 @@ function YeniÖğrenciİletişimSheet({ student, onClose, onMessage }) {
   </Sheet>;
 }
 
-function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStudentClick, onTelafiClick }) {
+function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStudentClick, onTelafiClick, onLessonAction, onTelafiAction }) {
   const todayLessons = [];
   students.forEach(s => {
     if (s.frozen || isStudentLeft(s)) return;
@@ -6847,15 +6847,18 @@ function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStuden
         const occurrenceDate = kind === "telafi" ? telafiPlannedAt(record) : lesson.date;
         const occurrenceRef = homeworkCheckRef(kind === "telafi" ? "telafi" : "schedule", kind === "telafi" ? record.id : lesson.id);
         const pendingHomework = pendingHomeworkBefore(student, occurrenceDate, occurrenceRef);
+        const actionId = kind === "telafi" ? record.id : lesson.id;
+        const actionAvailable = !!actionId && (kind === "telafi" ? student.telafi_records : student.schedule).filter(item=>item.id===actionId).length === 1;
         return (
-        <div key={kind+"-"+(lesson?.id || record?.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #e0f2fe" }}>
-          <div onClick={() => kind === "telafi" ? onTelafiClick(student) : onStudentClick(student)} style={{ cursor:"pointer" }}>
+        <div key={kind+"-"+(lesson?.id || record?.id)} style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #e0f2fe" }}>
+          <div onClick={() => kind === "telafi" ? onTelafiClick(student) : onStudentClick(student)} style={{ cursor:"pointer", minWidth:0, overflowWrap:"anywhere" }}>
             <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
             <p style={{ margin:"2px 0 0", fontSize:12, color:kind==="telafi"?"#7e22ce":"#0369a1", fontWeight:kind==="telafi"?700:400 }}>{time} · {student.instrument}{kind === "telafi" ? " · Telafi dersi" : ""}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent ? "Hatırlatma gönderildi" : "Hatırlatma bekliyor"}</p>
             {pendingHomework ? <p style={{ margin:"3px 0 0", fontSize:11, color:"#b45309", fontWeight:800 }}>● Ödev kontrolü var</p> : null}
           </div>
-          <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6, flexShrink:0, marginLeft:"auto" }}>
+            <button type="button" disabled={!actionAvailable} onClick={() => kind === "telafi" ? onTelafiAction(student, record) : onLessonAction(student, lesson)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:10, padding:"8px 12px", fontSize:13, fontWeight:800, cursor:actionAvailable?"pointer":"default", fontFamily:"inherit", opacity:actionAvailable?1:.5 }}>İşlem</button>
             {student.phone ? (
               <button onClick={() => kind === "telafi" ? onWATelafi(student, record) : onWA(student, lesson)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:10, padding:"7px 12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>WA</button>
             ) : null}
@@ -14961,7 +14964,7 @@ export default function App() {
                 </AçılırBugünBölümü>
               );
             })()}
-            <BugünDersleri students={operationalStudents} onWA={handleWADers} onWATelafi={handleWATelafi} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} onTelafiClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
+            <BugünDersleri students={operationalStudents} onWA={handleWADers} onWATelafi={handleWATelafi} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} onTelafiClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} onLessonAction={(student,lesson)=>{ if(lesson?.id) setActionModal({student,lessonId:lesson.id}); }} onTelafiAction={(student,record)=>{ if(record?.id) setActionModal({student,kind:"telafi",makeupRecordId:record.id}); }} />
             <BugünEkDersleri students={operationalStudents} onWA={handleWAExtraLesson} onReminderToggle={handleExtraLessonReminderToggle} onOpen={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} />
             <BugünTekDersleri lessons={singleLessons} onWA={handleWASingleLesson} onReminderToggle={handleSingleLessonReminderToggle} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
@@ -15159,7 +15162,13 @@ export default function App() {
         </div>
       ) : null}
 
-      {actionModal ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} saving={normalLessonEvaluationBusyId===actionModal.lessonId || normalLessonMakeupBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current || normalLessonMakeupWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
+      {actionModal?.kind === "telafi" ? (() => {
+        const student = students.find(s=>s.id===actionModal.student.id);
+        const records = (student?.telafi_records || []).filter(record=>record.id===actionModal.makeupRecordId);
+        if (!student || records.length !== 1) return <Sheet title="Telafi Dersi" onClose={()=>setActionModal(null)}><p>Telafi kaydı güncellendi. Lütfen pencereyi kapatıp dersi yeniden açın.</p></Sheet>;
+        return <TelafiSheet key={student.id+"|"+records[0].id} student={student} record={records[0]} onClose={()=>setActionModal(null)} onSave={(id,payload)=>handleTelafiDone(student.id,id,payload)} onPlanMessage={record=>{ setActionModal(null); setTelafiPlanMessagePrompt({student,record}); }} onEvaluationMessage={record=>{ setActionModal(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} />;
+      })() : null}
+      {actionModal && actionModal.kind !== "telafi" ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} saving={normalLessonEvaluationBusyId===actionModal.lessonId || normalLessonMakeupBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current || normalLessonMakeupWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onPieceEdit={handlePieceHistoryUpdate} pieceEditScope={pieceEditScope} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onPreviewProgram={previewProgramChange} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
