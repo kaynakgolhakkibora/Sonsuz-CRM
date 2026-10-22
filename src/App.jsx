@@ -6888,6 +6888,19 @@ function studentAge(student) {
   return age >= 0 ? age : null;
 }
 
+function teacherSingleLessonCount(singleLessons, teacher, targetMonth) {
+  if (!teacher?.id || !Number.isFinite(targetMonth?.getTime())) return 0;
+  const monthKey = targetMonth.getFullYear()+"-"+String(targetMonth.getMonth()+1).padStart(2,"0");
+  return (singleLessons || []).reduce((count, lesson) => {
+    if (!lesson || lesson.deleted_at || lesson.lesson_status !== "completed"
+      || lesson.teacher_id !== teacher.id
+      || !["student","guest"].includes(lesson.participant_kind)
+      || (lesson.lesson_purpose != null && lesson.lesson_purpose !== "single")) return count;
+    const day = singleLessonTurkeyDay(lesson.starts_at);
+    return count + (day?.slice(0,7) === monthKey ? 1 : 0);
+  },0);
+}
+
 function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentClick, onSingleLessonClick, onExtraLessonClick, calendarMoveReadScope=null }) {
   const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [teacherWeekOffset, setTeacherWeekOffset] = useState(0);
@@ -6913,7 +6926,8 @@ function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentCl
         if (extra.status === "done" && inMonth(extra.date,targetMonth) && teacherForDate(student,extra.date,extra) === teacher.name) counts.extra++;
       });
     });
-    return { ...counts, total:counts.normal+counts.telafi+counts.extra };
+    const single = teacherSingleLessonCount(singleLessons,teacher,targetMonth);
+    return { ...counts, single, total:counts.normal+counts.telafi+counts.extra+single };
   };
   const now = new Date();
   const currentMonth = new Date(now.getFullYear(),now.getMonth(),1);
@@ -6978,6 +6992,7 @@ function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentCl
           <MiniMetric label="Normal" value={counts.normal} tone="good" />
           <MiniMetric label="Telafi" value={counts.telafi} tone="special" />
           <MiniMetric label="Ek Ders" value={counts.extra} tone="warn" />
+          <MiniMetric label="Tek Ders" value={counts.single} tone="info" />
         </div>
       </section>
     </div>
