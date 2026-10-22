@@ -5543,20 +5543,64 @@ function sentPeriodSummaryStudentGroups(rows) {
     .sort((a,b)=>(a.student.name || "").localeCompare(b.student.name || "", "tr"));
 }
 
+function sentPeriodSummaryPage(items, requestedPage, size) {
+  const pageCount = Math.max(1, Math.ceil(items.length / size));
+  const index = Math.min(Math.max(0, Number.isInteger(requestedPage) ? requestedPage : 0), pageCount - 1);
+  return { items:items.slice(index * size, (index + 1) * size), index, pageCount, total:items.length };
+}
+
+function sentPeriodSummaryArchiveView(rows, search="", year="", studentPage=0) {
+  const normalize = value => String(value || "").trim().replace(/\s+/g," ").toLocaleLowerCase("tr-TR")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/ı/g,"i");
+  const endYear = info => isValidLocalDateInput(info?.endKey) ? info.endKey.slice(0,4) : "";
+  const query = normalize(search);
+  const years = [...new Set([...(rows || []).map(row=>endYear(row.info)), year].filter(value=>/^\d{4}$/.test(value)))].sort((a,b)=>b.localeCompare(a));
+  const matchingRows = (rows || []).filter(row=>(!year || endYear(row.info)===year) && (!query || normalize(row.student.name).includes(query)));
+  const groups = sentPeriodSummaryStudentGroups(matchingRows);
+  return { years, studentCount:groups.length, summaryCount:matchingRows.length, page:sentPeriodSummaryPage(groups, studentPage, 20) };
+}
+
 function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, busyStudentId }) {
+  const [search, setSearch] = useState("");
+  const [year, setYear] = useState("");
+  const [studentPage, setStudentPage] = useState(0);
   const [openStudentId, setOpenStudentId] = useState(null);
-  const groups = sentPeriodSummaryStudentGroups(rows);
-  return <Sheet title="Gönderilmiş Özetler" subtitle={groups.length+" öğrenci · "+rows.length+" dönem özeti"} onClose={onClose}>
-    {groups.map(group => {
+  const [periodPage, setPeriodPage] = useState(0);
+  const view = sentPeriodSummaryArchiveView(rows, search, year, studentPage);
+  const openGroup = view.page.items.find(group=>group.student.id===openStudentId);
+  const periods = sentPeriodSummaryPage(openGroup?.rows || [], periodPage, 5);
+  useEffect(()=>{
+    if (studentPage !== view.page.index) setStudentPage(view.page.index);
+    if (openStudentId !== null && !openGroup) { setOpenStudentId(null); setPeriodPage(0); }
+    else if (periodPage !== periods.index) setPeriodPage(periods.index);
+  },[studentPage,view.page.index,openStudentId,openGroup?.student.id,periodPage,periods.index]);
+  const resetPages = () => { setStudentPage(0); setOpenStudentId(null); setPeriodPage(0); };
+  const pageButton = { border:"1px solid #d8b4fe", borderRadius:8, padding:"8px 10px", background:"#fff", color:"#7e22ce", fontWeight:700, fontSize:12, fontFamily:"inherit" };
+  return <Sheet title="Gönderilmiş Özetler" subtitle={(search.trim() || year ? "Bulunan: " : "")+view.studentCount+" öğrenci · "+view.summaryCount+" dönem özeti"} onClose={onClose}>
+    <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:14 }}>
+      <label style={{ flex:"1 1 220px", minWidth:0, fontSize:12, color:"#7e22ce", fontWeight:700 }}>
+        Öğrenci ara
+        <input type="search" aria-label="Öğrenci ara" placeholder="Öğrenci adı veya soyadı" value={search} onChange={event=>{ setSearch(event.target.value); resetPages(); }} style={{ ...INP, fontSize:16, marginTop:5 }} />
+      </label>
+      <label style={{ flex:"1 1 160px", minWidth:0, fontSize:12, color:"#7e22ce", fontWeight:700 }}>
+        Dönemin bittiği yıl
+        <select aria-label="Dönemin bittiği yıl" value={year} onChange={event=>{ setYear(event.target.value); resetPages(); }} style={{ ...INP, fontSize:16, marginTop:5 }}>
+          <option value="">Tüm yıllar</option>
+          {view.years.map(value=><option key={value} value={value}>{value}</option>)}
+        </select>
+      </label>
+    </div>
+    {!view.studentCount ? <p role="status" style={{ color:"#64748b", fontSize:13, lineHeight:1.6 }}>Aramanıza ve yıl seçimine uygun gönderilmiş özet bulunamadı.</p> : null}
+    {view.page.items.map(group => {
       const open = openStudentId === group.student.id;
       return <div key={group.student.id} style={{ border:"1px solid #e9d5ff", borderRadius:12, marginBottom:10, overflow:"hidden" }}>
-        <button type="button" aria-expanded={open} onClick={()=>setOpenStudentId(open ? null : group.student.id)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, width:"100%", padding:"12px 13px", border:0, background:"#faf5ff", color:"#7e22ce", textAlign:"left", fontWeight:700, fontSize:13, fontFamily:"inherit", cursor:"pointer" }}>
+        <button type="button" aria-expanded={open} onClick={()=>{ setOpenStudentId(open ? null : group.student.id); setPeriodPage(0); }} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, width:"100%", padding:"12px 13px", border:0, background:"#faf5ff", color:"#7e22ce", textAlign:"left", fontWeight:700, fontSize:13, fontFamily:"inherit", cursor:"pointer" }}>
           <span style={{ minWidth:0, overflowWrap:"anywhere" }}>{group.student.name} · {group.rows.length} özet</span>
           <span aria-hidden="true">{open ? "▲" : "▼"}</span>
         </button>
         {open ? <div style={{ padding:"0 13px" }}>
           <button type="button" onClick={()=>onStudentClick(group.student)} style={{ marginTop:10, padding:"6px 9px", border:"1px solid #d8b4fe", borderRadius:8, background:"#fff", color:"#7e22ce", fontWeight:700, fontSize:12, fontFamily:"inherit", cursor:"pointer" }}>Öğrenci Kartını Aç</button>
-          {group.rows.map(({ student, info }) => {
+          {periods.items.map(({ student, info }) => {
           const key = packageSummaryKey(info);
           const log = periodEvaluationInfo(student, info);
           const busy = busyStudentId === student.id;
@@ -5568,9 +5612,20 @@ function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, bu
             </div>
             <button type="button" disabled={busy} onClick={()=>onSummary(student.id,key)} style={{ background:"#25D366", color:"#fff", border:0, borderRadius:8, padding:"7px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>Dönem Özetini Aç</button>
           </div>;
-        })}</div> : null}
+        })}
+          {periods.pageCount>1 ? <nav aria-label="Dönem sayfaları" style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:8, padding:"12px 0" }}>
+            <button type="button" aria-label="Önceki dönem sayfası" disabled={periods.index===0} onClick={()=>setPeriodPage(periods.index-1)} style={{ ...pageButton, opacity:periods.index===0 ? .5 : 1 }}>← Önceki</button>
+            <span aria-live="polite" style={{ fontSize:12, color:"#64748b" }}>{periods.index*5+1}–{Math.min((periods.index+1)*5,periods.total)} / {periods.total} özet</span>
+            <button type="button" aria-label="Sonraki dönem sayfası" disabled={periods.index===periods.pageCount-1} onClick={()=>setPeriodPage(periods.index+1)} style={{ ...pageButton, opacity:periods.index===periods.pageCount-1 ? .5 : 1 }}>Sonraki →</button>
+          </nav> : null}
+        </div> : null}
       </div>;
     })}
+    {view.page.pageCount>1 ? <nav aria-label="Öğrenci sayfaları" style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:8, margin:"14px 0" }}>
+      <button type="button" aria-label="Önceki öğrenci sayfası" disabled={view.page.index===0} onClick={()=>{ setStudentPage(view.page.index-1); setOpenStudentId(null); setPeriodPage(0); }} style={{ ...pageButton, opacity:view.page.index===0 ? .5 : 1 }}>← Önceki</button>
+      <span aria-live="polite" style={{ fontSize:12, color:"#64748b" }}>{view.page.index*20+1}–{Math.min((view.page.index+1)*20,view.page.total)} / {view.page.total} öğrenci</span>
+      <button type="button" aria-label="Sonraki öğrenci sayfası" disabled={view.page.index===view.page.pageCount-1} onClick={()=>{ setStudentPage(view.page.index+1); setOpenStudentId(null); setPeriodPage(0); }} style={{ ...pageButton, opacity:view.page.index===view.page.pageCount-1 ? .5 : 1 }}>Sonraki →</button>
+    </nav> : null}
     <Btn bg="#111" outline onClick={onClose}>Kapat</Btn>
   </Sheet>;
 }
