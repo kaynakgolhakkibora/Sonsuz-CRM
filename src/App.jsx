@@ -2086,6 +2086,26 @@ function paymentNoticeRows(students, reference = new Date()) {
   return rows;
 }
 
+function paymentDayReminderTarget(student, info, reference = new Date(), upcomingOnly = true) {
+  if (!student || student.frozen || isStudentLeft(student) || isStudentDeleted(student)
+    || !info?.complete || !Array.isArray(student.schedule) || !Array.isArray(info.lessonIds)
+    || turkeyDateKey(info.start)!==turkeyDateKey(reference)) return null;
+  const start = new Date(info.start).getTime();
+  if (!Number.isFinite(start)) return null;
+  const matches = student.schedule.filter(lesson=>lesson?.id && info.lessonIds.includes(lesson.id)
+    && (!upcomingOnly || lesson.status==="upcoming") && new Date(lesson.date).getTime()===start);
+  if (matches.length!==1 || student.schedule.filter(lesson=>lesson?.id===matches[0].id).length!==1) return null;
+  return matches[0];
+}
+
+function paymentDayReminderInfo(student, lesson, paymentKey = null) {
+  if (!lesson?.id || !Number.isFinite(new Date(lesson.date).getTime())) return null;
+  return [...(student.lesson_reminder_logs || [])].reverse().find(log=>log?.source==="payment_day" && log.id
+    && log.lessonKey===reminderKey(lesson.id) && log.paymentKey && (paymentKey===null || log.paymentKey===paymentKey)
+    && log.date===turkeyDateKey(lesson.date)
+    && new Date(log.lessonDate).getTime()===new Date(lesson.date).getTime()) || null;
+}
+
 function paymentNoticePeriodLabel(info) {
   const format = value => new Date(value).toLocaleDateString("tr-TR", { day:"numeric", month:"long", year:"numeric" });
   return format(info.start)+" – "+format(info.end);
@@ -3155,7 +3175,12 @@ function packageStatusText(student, info) {
 
 function lessonReminderSentInfo(student, lesson) {
   const key = reminderKey(lesson?.id || dateKey(lesson?.date));
-  return (student.lesson_reminder_logs || []).find(log => log.lessonKey === key) || null;
+  return (student.lesson_reminder_logs || []).find(log => {
+    if (log.lessonKey!==key) return false;
+    if (log.source!=="payment_day") return true;
+    const targets=(student.schedule || []).filter(item=>item?.id && reminderKey(item.id)===key);
+    return targets.length===1 && paymentDayReminderInfo({lesson_reminder_logs:[log]},targets[0])!==null;
+  }) || null;
 }
 
 function telafiReminderRef(record) {
@@ -7121,7 +7146,7 @@ function BekleyenTelafiler({ students, onStudentClick }) {
   );
 }
 
-function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, onStudentClick }) {
+function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, onStudentClick, onPaymentNoticeConfirmed, paymentNoticeScopeKey="" }) {
   const [odemeModal, setÖdemeModal] = useState(null);
   const [odemeDate, setÖdemeDate] = useState(turkeyDateKey());
   const [mesajModal, setMesajModal] = useState(null);
@@ -7136,11 +7161,16 @@ function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, o
   const modalRow = odemeModal ? rows.find(row => row.key === odemeModal.key) : null;
   const modalValid = !!modalRow && firstKeys.get(modalRow.student.id) === modalRow.key;
   const busy = !!paymentSavingId;
-  const sendMessage = (row, kind) => {
+  const sendMessage = async (row, kind) => {
     const text = paymentNoticeMessage(row.student, row.info, kind);
     const phone = row.student.phone ? row.student.phone.replace(/[^0-9]/g, "") : "";
+    const lesson = kind==="today" && onPaymentNoticeConfirmed ? paymentDayReminderTarget(row.student,row.info) : null;
+    const noticeIntent = lesson ? { operationId:uid(), studentId:row.student.id, lessonId:lesson.id,
+      lessonDate:new Date(lesson.date).toISOString(), dayKey:turkeyDateKey(), paymentKey:row.key,
+      text, phone, scopeKey:paymentNoticeScopeKey, name:row.student.name } : null;
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
     else { setCopyError(""); setMesajModal({ name:row.student.name, text }); }
+    if (noticeIntent) await onPaymentNoticeConfirmed(noticeIntent);
   };
   const openPayment = row => {
     if (busy || firstKeys.get(row.student.id) !== row.key) return;
@@ -8553,6 +8583,12 @@ export default function App() {
   const googleReviewReady = !!(giris && authSession?.user?.id && currentBranch?.id && loadedSources.students
     && browserOnline && !connectionRevalidationRequired && !accessContextLoading && !loading);
   googleReviewScopeRef.current = { key:googleReviewScopeKey, ready:googleReviewReady, branchId:currentBranch?.id };
+  const paymentReminderWritingRef=useRef(false);
+  const paymentReminderScopeRef=useRef(null);
+  const paymentReminderScopeKey=JSON.stringify([authSession?.user?.id,currentBranch?.id,protectedDataLoadGenerationRef.current]);
+  paymentReminderScopeRef.current={key:paymentReminderScopeKey,actorUserId:authSession?.user?.id,branchId:currentBranch?.id,
+    ready:!!(giris && authSession?.user?.id && currentBranch?.id && loadedSources.students && browserOnline
+      && !connectionRevalidationRequired && !accessContextLoading && !loading)};
   const [filter, setFilter] = useState("all");
   const [mainTab, setMainTab] = useState("bugün");
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
@@ -14173,7 +14209,67 @@ export default function App() {
     pop("Ek ders durumu güncellendi");
   };
 
+  const handlePaymentDayReminder = async (intent, undo=false) => {
+    const scope=paymentReminderScopeRef.current;
+    if(!scope?.ready || intent?.scopeKey!==scope.key || paymentReminderWritingRef.current
+      || !requireProtectedSources(["students"],"Ödeme günü bilgilendirmesi")) return false;
+    const matchesScope=()=>paymentReminderScopeRef.current?.key===scope.key && paymentReminderScopeRef.current?.ready;
+    const valid=s=>s?.id===intent.studentId && s.branch_id===scope.branchId && Number.isInteger(s.record_version) && s.record_version>=0
+      && Array.isArray(s.schedule) && (s.lesson_reminder_logs==null || Array.isArray(s.lesson_reminder_logs));
+    const read=()=>timedSingleLessonRequest(()=>supabase.from("students").select("*").eq("id",intent.studentId).eq("branch_id",scope.branchId).single());
+    const show=s=>{if(matchesScope() && valid(s))setStudents(previous=>!matchesScope()?previous:previous.map(item=>item.id===s.id && item.branch_id===scope.branchId && Number(item.record_version || 0)<=s.record_version?s:item));};
+    const sameMarker=log=>log?.source==="payment_day" && log.id===intent.operationId && log.lessonKey===reminderKey(intent.lessonId)
+      && log.paymentKey===intent.paymentKey && log.lessonDate===intent.lessonDate;
+    paymentReminderWritingRef.current=true;
+    try {
+      return await runBranchScopedWrite(async()=>{
+        const before=await read();if(!matchesScope())return false;
+        const current=before.data;
+        if(before.error || !valid(current)){pop("Bilgilendirme kaydı doğrulanamadı. Sayfayı yenileyip dersin hatırlatma durumunu kontrol edin.",9000);return false;}
+        const logs=current.lesson_reminder_logs || [];
+        const targets=current.schedule.filter(l=>l.id===intent.lessonId);
+        if(targets.length!==1 || new Date(targets[0].date).toISOString()!==intent.lessonDate){show(current);pop("Dersin tarih veya kimliği değişti. Bilgilendirme işaretlenmedi.",8000);return false;}
+        if(!undo){
+          if(logs.some(log=>log?.id===intent.operationId && !sameMarker(log))){
+            show(current);pop("Bu işlem kimliği farklı bir bilgilendirmede kullanılmış. Yeni kayıt gönderilmedi.",9000);return false;
+          }
+          const recorded=paymentDayReminderInfo(current,targets[0],intent.paymentKey);
+          if(recorded?.paymentKey===intent.paymentKey){show(current);return true;}
+          const row=paymentNoticeRows([current]).find(row=>row.today && row.key===intent.paymentKey);
+          if(!row || paymentDayReminderTarget(current,row.info)?.id!==intent.lessonId || intent.dayKey!==turkeyDateKey()
+            || intent.text!==paymentNoticeMessage(current,row.info,"today")
+            || intent.phone!==(current.phone ? current.phone.replace(/[^0-9]/g,"") : "")) {
+            show(current);pop("Ders, dönem veya alıcı bilgisi değişti. Mesajı tekrar göndermeyin; güncel bilgiyi kontrol edin.",9000);return false;
+          }
+        } else if(!logs.some(sameMarker)){show(current);return true;}
+        const at=new Date().toISOString(),writeId=undo?uid():intent.operationId;
+        const nextLogs=undo?logs.filter(log=>!sameMarker(log)):[...logs,{id:intent.operationId,source:"payment_day",actorUserId:scope.actorUserId,
+          sourceRecordVersion:current.record_version,lessonKey:reminderKey(intent.lessonId),lessonDate:intent.lessonDate,
+          paymentKey:intent.paymentKey,sentAt:intent.sentAt || at,date:intent.dayKey}];
+        const payload={lesson_reminder_logs:nextLogs,record_version:current.record_version+1,last_write_id:writeId,last_saved_at:at};
+        const confirmed=s=>valid(s) && s.record_version>=payload.record_version
+          && (undo?!(s.lesson_reminder_logs || []).some(sameMarker):(s.lesson_reminder_logs || []).some(sameMarker));
+        if(!matchesScope())return false;
+        const result=await timedSingleLessonRequest(()=>supabase.from("students").update(payload).eq("id",intent.studentId)
+          .eq("branch_id",scope.branchId).eq("record_version",current.record_version).select("*").single());
+        if(!matchesScope())return false;
+        if(!result.error && confirmed(result.data) && result.data.record_version===payload.record_version && result.data.last_write_id===writeId){show(result.data);pop(undo?"Bilgilendirme işareti kaldırıldı":"Ödeme mesajı ve bugünkü ders bilgilendirmesi işaretlendi");return true;}
+        const checked=await read();if(!matchesScope())return false;
+        if(!checked.error && valid(checked.data)){show(checked.data);if(confirmed(checked.data)){pop(undo?"Bilgilendirme işareti kaldırıldı":"Bilgilendirme veritabanından doğrulandı");return true;}}
+        pop("Bilgilendirme işareti henüz doğrulanamadı. Mesajı tekrar göndermeyin; sayfayı yenileyip dersin hatırlatma durumunu kontrol edin.",10000);return false;
+      });
+    } catch {if(matchesScope())pop("Bilgilendirme doğrulanamadı; mesajı tekrar göndermeyin. Sayfayı yenileyip dersin hatırlatma durumunu kontrol edin.",9000);return false;}
+    finally {paymentReminderWritingRef.current=false;}
+  };
+
   const handleReminderToggle = async (sid, lessonRef, sent) => {
+    const reminderStudent=students.find(s=>s.id===sid),reminderLesson=(reminderStudent?.schedule || []).find(l=>l.id===lessonRef);
+    const paymentMarker=reminderLesson && paymentDayReminderInfo(reminderStudent,reminderLesson);
+    if(paymentMarker){
+      if(sent) return true;
+      return handlePaymentDayReminder({studentId:sid,lessonId:reminderLesson.id,lessonDate:paymentMarker.lessonDate,
+        paymentKey:paymentMarker.paymentKey,operationId:paymentMarker.id,scopeKey:paymentReminderScopeRef.current?.key},true);
+    }
     const key = reminderKey(lessonRef);
     const updated = students.map(s => {
       if (s.id!==sid) return s;
@@ -15049,7 +15145,7 @@ export default function App() {
                 })}
               </AçılırBugünBölümü>
             ) : null}
-            <BugünÖdemeleri students={operationalStudents} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
+            <BugünÖdemeleri students={operationalStudents} onPaymentNoticeConfirmed={handlePaymentDayReminder} paymentNoticeScopeKey={paymentReminderScopeKey} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
             {pendingGoogleReviews.length===0 && pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && pendingWeeklyReports.length===0 && !weeklyVisibleState.error && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(record=>isCurrentTelafi(record) && !telafiPlannedAt(record))) && !operationalStudents.some(s=>!s.frozen&&!isStudentLeft(s)&&(s.telafi_records||[]).some(isTodayPlannedTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
