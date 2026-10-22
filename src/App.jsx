@@ -5406,6 +5406,69 @@ function msgDonemDegerlendirmesi(student, info, log) {
   return lines.join("\n");
 }
 
+function paymentReceiptDate(value) {
+  if (!isValidLocalDateInput(value)) return "";
+  return new Date(value+"T12:00:00+03:00").toLocaleDateString("tr-TR",{timeZone:"Europe/Istanbul",day:"numeric",month:"long",year:"numeric"});
+}
+
+function paymentReceivedReceipt(kind, row, operationId) {
+  try {
+    if (!row?.id || !row.branch_id || !operationId || !Number.isInteger(row.record_version) || row.record_version<0) return null;
+    const clean=value=>typeof value==="string" ? value.trim().replace(/\s+/g," ") : "";
+    const amount=value=>["number","string"].includes(typeof value) && String(value).trim()!=="" && Number.isFinite(Number(value)) && Number(value)>=0 ? Number(value) : null;
+    const money=value=>value.toLocaleString("tr-TR",{maximumFractionDigits:2});
+    let name,phone,body,paidOn;
+    if (kind==="single") {
+      const fee=amount(row.fee),day=turkeyDateKey(row.starts_at),instrument=clean(row.instrument);
+      name=clean(row.participant_name);phone=row.participant_phone || "";paidOn=paymentReceiptDate(row.paid_on);
+      if (row.deleted_at || row.billing_status!=="paid" || row.last_write_id!==operationId || isTrialSingleLesson(row)
+        || !fee || !paymentReceiptDate(day) || !paidOn || !instrument || !Number.isFinite(new Date(row.payment_recorded_at || "").getTime())) return null;
+      body=name+" için "+paymentReceiptDate(day)+" tarihli "+instrument+" dersine ait "+money(fee)+" TL ödemeniz alınmıştır.";
+    } else {
+      if (!["package","extra"].includes(kind) || !Array.isArray(row.odemeler) || !Array.isArray(row.ek_dersler || [])) return null;
+      const payments=row.odemeler.filter(payment=>payment?.operationId===operationId);
+      if (payments.length!==1) return null;
+      const payment=payments[0],total=amount(payment.tutar),packageFee=amount(payment.paketUcret),extraFee=amount(payment.ekTutar);
+      const count=payment.ekDersSayisi,refs=payment.ekDersIds;
+      name=clean(row.name);phone=row.phone || "";paidOn=paymentReceiptDate(payment.tarih);
+      if (payment.odendi!==true || !total || packageFee===null || extraFee===null || !paidOn
+        || !Number.isInteger(count) || count<0 || !Array.isArray(refs) || refs.length!==count || new Set(refs).size!==count
+        || Math.abs(packageFee+extraFee-total)>0.000001) return null;
+      const extras=refs.map(ref=>{const matches=(row.ek_dersler || []).filter(extra=>extraLessonPaymentRef(extra)===ref);return matches.length===1 && matches[0].odendi===true ? matches[0] : null;});
+      if (extras.some(extra=>!extra)) return null;
+      if (kind==="extra") {
+        const instrument=clean(row.instrument),day=extras[0] && turkeyDateKey(extras[0].date);
+        if (payment.sadeceEkDers!==true || count!==1 || packageFee!==0 || !instrument || !paymentReceiptDate(day)) return null;
+        body=name+" için "+paymentReceiptDate(day)+" tarihli "+instrument+" ek dersine ait "+money(total)+" TL ödemeniz alınmıştır.";
+      } else {
+        const start=paymentReceiptDate(payment.packageStart),end=paymentReceiptDate(payment.packageEnd);
+        if (payment.sadeceEkDers===true || !start || !end || payment.packageEnd<payment.packageStart
+          || ![4,8,12,16].includes(payment.packageLessonCount) || !packageFee || (count===0 ? extraFee!==0 : extraFee<=0)) return null;
+        const period=start+" – "+end;
+        body=count>0
+          ? name+" için "+period+" dönemine ait "+money(packageFee)+" TL ders ücreti ve devreden "+count+" ek ders için "+money(extraFee)+" TL olmak üzere toplam "+money(total)+" TL ödemeniz alınmıştır."
+          : name+" için "+period+" dönemine ait "+money(total)+" TL ödemeniz alınmıştır.";
+      }
+    }
+    if (!name || typeof phone!=="string") return null;
+    const text=["Merhaba,",body,"Ödeme tarihi: "+paidOn,"Teşekkür ederiz.","Bodrum Sonsuz Sanat"].join("\n");
+    const recipient={name,phone:phone.replace(/[^0-9]/g,"")};
+    return {key:kind+"|"+operationId,kind,operationId,recordId:row.id,branchId:row.branch_id,recipient,text,
+      signature:JSON.stringify([kind,row.id,row.branch_id,operationId,recipient,text])};
+  } catch { return null; }
+}
+
+function PaymentReceivedSheet({ receipt, onOpen, onClose }) {
+  const [busy,setBusy]=useState(false);
+  return <Sheet title="Ödemeniz Alındı" subtitle={receipt.recipient.name} onClose={onClose}>
+    <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+      <p style={{margin:0,fontSize:13,color:"#475569",lineHeight:1.65,whiteSpace:"pre-line",overflowWrap:"anywhere"}}>{receipt.text}</p>
+    </div>
+    <Btn bg="#25D366" disabled={busy} onClick={async()=>{if(busy)return;setBusy(true);try{await onOpen(receipt);}finally{setBusy(false);}}}>{busy ? "Hazırlanıyor…" : receipt.recipient.phone ? "WhatsApp'ta Aç" : "Mesajı Kopyala"}</Btn>
+    <Btn bg="#111" outline onClick={onClose}>Kapat</Btn>
+  </Sheet>;
+}
+
 function WhatsAppPreviewSheet({ title, subtitle, text, onClose, onSent }) {
   const send = async () => {
     const phone = subtitle?.phone ? subtitle.phone.replace(/[^0-9]/g, "") : "";
@@ -8589,6 +8652,15 @@ export default function App() {
   paymentReminderScopeRef.current={key:paymentReminderScopeKey,actorUserId:authSession?.user?.id,branchId:currentBranch?.id,
     ready:!!(giris && authSession?.user?.id && currentBranch?.id && loadedSources.students && browserOnline
       && !connectionRevalidationRequired && !accessContextLoading && !loading)};
+  const [paymentReceiptPrompts,setPaymentReceiptPrompts]=useState([]);
+  const paymentReceiptSeenRef=useRef({key:"",ids:new Set()});
+  const paymentReceiptScopeRef=useRef(null);
+  const paymentReceiptScopeKey=JSON.stringify([authSession?.user?.id,currentBranch?.id,protectedDataLoadGenerationRef.current]);
+  paymentReceiptScopeRef.current={key:paymentReceiptScopeKey,actorUserId:authSession?.user?.id,branchId:currentBranch?.id,
+    ready:!!(giris && authSession?.user?.id && currentBranch?.id && browserOnline && !connectionRevalidationRequired && !accessContextLoading && !loading)};
+  useEffect(()=>{setPaymentReceiptPrompts(previous=>previous.filter(receipt=>receipt.scopeKey===paymentReceiptScopeKey));},[paymentReceiptScopeKey]);
+  const activePaymentReceipt=paymentReceiptScopeRef.current.ready ? paymentReceiptPrompts.find(receipt=>receipt.scopeKey===paymentReceiptScopeKey
+    && (receipt.kind==="single" ? singleLessonsLoaded && singleLessonSecurityReady : loadedSources.students)) : null;
   const [filter, setFilter] = useState("all");
   const [mainTab, setMainTab] = useState("bugün");
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
@@ -9094,6 +9166,41 @@ export default function App() {
 
   const pop = (msg, ms=3000) => { setToast(msg); setTimeout(()=>setToast(null), ms); };
 
+  const queuePaymentReceipt = (kind,row,intent,scopeKey) => {
+    try {
+      const scope=paymentReceiptScopeRef.current;
+      if (!scope?.actorUserId || !scope.branchId || scope.key!==scopeKey || intent?.paymentReceipt!==true
+        || intent.paymentReceiptActorId!==scope.actorUserId || intent.branchId!==scope.branchId
+        || row?.branch_id!==scope.branchId || (kind==="single" ? intent.lessonId!==row.id : intent.studentId!==row.id)) return false;
+      const receipt=paymentReceivedReceipt(kind,row,intent.operationId);
+      if (!receipt) {pop("Ödeme kaydedildi; mesaj bilgileri doğrulanamadı.",7000);return false;}
+      if (paymentReceiptSeenRef.current.key!==scopeKey) paymentReceiptSeenRef.current={key:scopeKey,ids:new Set()};
+      if (paymentReceiptSeenRef.current.ids.has(receipt.key)) return true;
+      paymentReceiptSeenRef.current.ids.add(receipt.key);
+      setPaymentReceiptPrompts(previous=>[...previous,{...receipt,scopeKey}]);
+      return true;
+    } catch { return false; }
+  };
+
+  const handlePaymentReceiptMessage = async receipt => {
+    const scope=paymentReceiptScopeRef.current;
+    const current=()=>paymentReceiptScopeRef.current?.ready && paymentReceiptScopeRef.current.key===receipt.scopeKey;
+    if (!scope?.ready || !current() || receipt.branchId!==scope.branchId) return false;
+    const row=receipt.kind==="single" ? singleLessons.find(item=>item.id===receipt.recordId && item.branch_id===scope.branchId)
+      : students.find(item=>item.id===receipt.recordId && item.branch_id===scope.branchId);
+    const verified=paymentReceivedReceipt(receipt.kind,row,receipt.operationId);
+    if (!verified || verified.signature!==receipt.signature) {pop("Ödeme veya alıcı bilgisi değişti. Mesajı göndermeden önce kaydı kontrol edin.",8000);return false;}
+    try {
+      if (receipt.recipient.phone) {
+        if (!window.open("https://wa.me/"+receipt.recipient.phone+"?text="+encodeURIComponent(receipt.text),"_blank")) {
+          pop("WhatsApp penceresi açılamadı. Ödeme kaydı korunuyor; yeniden deneyebilirsiniz.",7000);return false;
+        }
+      } else await navigator.clipboard.writeText(receipt.text);
+      if (current()) pop(receipt.recipient.phone ? "Ödeme mesajı WhatsApp'ta hazırlandı" : "Ödeme mesajı kopyalandı");
+      return true;
+    } catch {if(current())pop("Mesaj hazırlanamadı. Ödeme kaydı korunuyor; yeniden deneyebilirsiniz.",7000);return false;}
+  };
+
   const runBranchScopedWrite = async task => {
     if(programChangeIssueRef.current || programChangeWritingRef.current || readProgramChangeIssue(programChangeActorRef.current)) throw new Error("PROGRAM_CHANGE_PENDING");
     // Do not let a legacy full-row writer race an unresolved single move.
@@ -9287,6 +9394,7 @@ export default function App() {
       branchId:issue.branchId || "",
       label:issue.label || "",
       createdAt:issue.createdAt || new Date().toISOString(),
+      ...(issue.paymentReceipt===true ? {paymentReceipt:true,paymentReceiptActorId:issue.paymentReceiptActorId || ""} : {}),
     };
     singleLessonIssueRef.current = stored;
     setSingleLessonIssue(stored);
@@ -9314,6 +9422,7 @@ export default function App() {
       amount:Number(issue.amount) || 0,
       state:issue.state || "unknown",
       createdAt:issue.createdAt || new Date().toISOString(),
+      ...(issue.paymentReceipt===true ? {paymentReceipt:true,paymentReceiptActorId:issue.paymentReceiptActorId || ""} : {}),
     };
     if (!writeExtraLessonPaymentIssue(stored)) return false;
     extraLessonPaymentIssueRef.current = stored;
@@ -9339,6 +9448,7 @@ export default function App() {
       paidOn:issue.paidOn || "",
       state:issue.state || "unknown",
       createdAt:issue.createdAt || new Date().toISOString(),
+      ...(issue.paymentReceipt===true ? {paymentReceipt:true,paymentReceiptActorId:issue.paymentReceiptActorId || ""} : {}),
     };
     if (!writePackagePaymentIssue(stored)) return false;
     packagePaymentIssueRef.current = stored;
@@ -11111,6 +11221,7 @@ export default function App() {
   }, [giris,activeOrganization?.id,currentBranch?.id]);
 
   const reconcileSingleLessonOperation = async (operation, attempts=1) => {
+    const receiptScopeKey=paymentReceiptScopeRef.current?.key;
     if (!operation?.operationId) return { state:"unknown", data:null };
     const operationBranchId = operation.branchId || currentBranch?.id;
     if (!operationBranchId) {
@@ -11148,6 +11259,7 @@ export default function App() {
           const exists = current.some(item=>item.id===lessonResult.data.id);
           return exists ? current.map(item=>item.id===lessonResult.data.id?lessonResult.data:item) : [...current,lessonResult.data];
         });
+        if(operation.paymentReceipt===true)queuePaymentReceipt("single",lessonResult.data,operation,receiptScopeKey);
         clearSingleLessonIssue(issue=>issue.kind === "operation" && issue.operationId === operation.operationId);
         pop("Tek Ders işlemi Supabase kaydından doğrulandı.",6000);
         return { state:"applied", data:lessonResult.data };
@@ -11164,7 +11276,7 @@ export default function App() {
     }
   };
 
-  const persistSingleLessonUpdate = async (lesson, changes, successMessage) => {
+  const persistSingleLessonUpdate = async (lesson, changes, successMessage, paymentReceipt=false) => {
     if (!lesson?.id) return null;
     const branchId = currentBranch?.id;
     if (!branchId || lesson.branch_id !== branchId) {
@@ -11186,7 +11298,7 @@ export default function App() {
       pop("Önce sonucu belirsiz Tek Ders işlemini yeniden kontrol edin.",8000);
       return null;
     }
-    const operation = { kind:"operation", operationType:"update", operationId:uid(), lessonId:lesson.id, branchId:currentBranch.id, label:successMessage || "Tek Ders değişikliği" };
+    const operation = { kind:"operation", operationType:"update", operationId:uid(), lessonId:lesson.id, branchId:currentBranch.id, label:successMessage || "Tek Ders değişikliği", ...(paymentReceipt ? {paymentReceipt:true,paymentReceiptActorId:paymentReceiptScopeRef.current?.actorUserId || ""} : {}) };
     setSingleLessonRecordBusy(lesson.id,true);
     try {
       const result = await timedSingleLessonRequest(() => supabase
@@ -11341,12 +11453,15 @@ export default function App() {
 
   const handleSingleLessonPayment = async (lesson, status) => {
     const paid = status==="paid";
+    const receiptScope=paymentReceiptScopeRef.current;
     if (!paid && typeof window!=="undefined" && !window.confirm(lesson.participant_name+" için alınmış Tek Ders ödemesini geri almak istiyor musunuz?")) return;
-    await persistSingleLessonUpdate(lesson,{
+    const saved=await persistSingleLessonUpdate(lesson,{
       billing_status:status,
       paid_on:paid?localDateKey():null,
       payment_recorded_at:paid?new Date().toISOString():null,
-    },paid?"Tek Ders ödemesi alındı":"Tek Ders ödemesi geri alındı");
+    },paid?"Tek Ders ödemesi alındı":"Tek Ders ödemesi geri alındı",paid);
+    if(paid && saved)queuePaymentReceipt("single",saved,{operationId:saved.last_write_id,lessonId:saved.id,branchId:saved.branch_id,
+      paymentReceipt:true,paymentReceiptActorId:receiptScope?.actorUserId || ""},receiptScope?.key);
   };
 
   const handleSingleLessonReminderToggle = async (lesson, sent) => {
@@ -13427,6 +13542,7 @@ export default function App() {
   };
 
   const reconcilePackagePaymentOperation = async (issue=packagePaymentIssueRef.current, options={}) => {
+    const receiptScopeKey=paymentReceiptScopeRef.current?.key;
     if (!issue?.operationId) return { state:"none" };
     if (packagePaymentCheckingRef.current) return { state:"checking" };
     if (!browserOnline) {
@@ -13460,6 +13576,7 @@ export default function App() {
           return { state:"applied_pending_refresh", error:studentResult.error };
         }
         setStudents(current=>current.map(student=>student.id===studentResult.data.id?studentResult.data:student));
+        queuePaymentReceipt("package",studentResult.data,issue,receiptScopeKey);
         clearPackagePaymentIssue(issue.operationId);
         if (options.announce !== false) pop("Paket ödemesi Supabase kaydından doğrulandı.",7000);
         return { state:"applied" };
@@ -13475,6 +13592,7 @@ export default function App() {
   };
 
   const handleÖdemeKaydet = async (sid, tarih, expectedNoticeKey = null) => {
+    const receiptScope=paymentReceiptScopeRef.current;
     if (!requireProtectedSources(["students"],"Paket ödemesi")) return false;
     if (!isValidLocalDateInput(tarih)) {
       pop("Geçerli bir ödeme tarihi seçin",5000);
@@ -13508,6 +13626,7 @@ export default function App() {
       paidOn:tarih,
       state:"pending",
       createdAt:new Date().toISOString(),
+      paymentReceipt:true,paymentReceiptActorId:receiptScope?.actorUserId || "",
     };
     if (!rememberPackagePaymentIssue(operation)) {
       pop("Tarayıcı işlem güvenliği hazırlanamadı; paket ödemesi gönderilmedi.",8000);
@@ -13540,6 +13659,7 @@ export default function App() {
           setStudents(prev=>prev.map(item=>item.id===savedStudent.id?savedStudent:item));
           clearPackagePaymentIssue(operationId);
           pop("Ödeme kaydedildi");
+          queuePaymentReceipt("package",savedStudent,operation,receiptScope?.key);
           return true;
         }
       }
@@ -14004,6 +14124,7 @@ export default function App() {
   };
 
   const reconcileExtraLessonPaymentOperation = async (issue=extraLessonPaymentIssueRef.current, options={}) => {
+    const receiptScopeKey=paymentReceiptScopeRef.current?.key;
     if (!issue?.operationId) return { state:"none" };
     if (extraLessonPaymentCheckingRef.current) return { state:"checking" };
     if (!browserOnline) {
@@ -14038,6 +14159,7 @@ export default function App() {
           return { state:"applied_pending_refresh", error:studentResult.error };
         }
         setStudents(current=>current.map(student=>student.id===studentResult.data.id?studentResult.data:student));
+        queuePaymentReceipt("extra",studentResult.data,issue,receiptScopeKey);
         clearExtraLessonPaymentIssue(issue.operationId);
         if (options.announce !== false) pop("Ek Ders ödemesi Supabase kaydından doğrulandı.",7000);
         return { state:"applied" };
@@ -14053,6 +14175,7 @@ export default function App() {
   };
 
   const handleEkDersOdeme = async (sid, selectedExtra, tarih) => {
+    const receiptScope=paymentReceiptScopeRef.current;
     if (!requireProtectedSources(["students"],"Ek Ders ödemesi")) return false;
     if (!isValidLocalDateInput(tarih)) {
       pop("Geçerli bir ödeme tarihi seçin",5000);
@@ -14090,6 +14213,7 @@ export default function App() {
       amount:tutar,
       state:"pending",
       createdAt:new Date().toISOString(),
+      paymentReceipt:true,paymentReceiptActorId:receiptScope?.actorUserId || "",
     };
     if (!rememberExtraLessonPaymentIssue(operation)) {
       pop("Tarayıcı işlem güvenliği hazırlanamadı; Ek Ders ödemesi gönderilmedi.",8000);
@@ -14115,6 +14239,7 @@ export default function App() {
           setStudents(prev=>prev.map(item=>item.id===savedStudent.id?savedStudent:item));
           clearExtraLessonPaymentIssue(operationId);
           pop("Ek ders ödemesi kaydedildi");
+          queuePaymentReceipt("extra",savedStudent,operation,receiptScope?.key);
           return true;
         }
       }
@@ -15349,6 +15474,8 @@ export default function App() {
           </div>
         </Sheet>
       ) : null}
+
+      {activePaymentReceipt ? <PaymentReceivedSheet key={activePaymentReceipt.scopeKey+activePaymentReceipt.key} receipt={activePaymentReceipt} onOpen={handlePaymentReceiptMessage} onClose={()=>setPaymentReceiptPrompts(previous=>previous.filter(receipt=>receipt!==activePaymentReceipt))} /> : null}
 
       {toast ? (
         <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"#111", color:"#fff", padding:"12px 20px", borderRadius:14, fontSize:14, fontWeight:600, zIndex:100, boxShadow:"0 4px 20px rgba(0,0,0,.3)", maxWidth:"90vw", textAlign:"center" }}>
