@@ -8252,6 +8252,43 @@ function msgTrialAppointment(lesson) {
     "","Bodrum Sonsuz Sanat"].join("\n");
 }
 
+function guestSingleLessonAppointmentEligible(lesson) {
+  const fee = typeof lesson?.fee === "number" || (typeof lesson?.fee === "string" && lesson.fee.trim()) ? Number(lesson.fee) : NaN;
+  return !!(lesson?.lesson_purpose === "single" && lesson.participant_kind === "guest" && !lesson.student_id
+    && lesson.id && lesson.branch_id && lesson.lesson_status === "planned" && !lesson.deleted_at
+    && ["unpaid","paid","free"].includes(lesson.billing_status) && Number.isFinite(fee) && fee >= 0 && fee <= 9999999999.99
+    && Math.abs(Math.round(fee*100)-fee*100) < 0.000001 && (lesson.billing_status === "free" ? fee === 0 : fee > 0)
+    && typeof lesson.instrument === "string" && lesson.instrument.trim()
+    && typeof lesson.starts_at === "string" && lesson.starts_at.trim() && Number.isFinite(new Date(lesson.starts_at).getTime())
+    && [30,45,60,90].includes(Number(lesson.duration_minutes))
+    && typeof lesson.teacher_name === "string" && lesson.teacher_name.trim()
+    && Number.isInteger(lesson.record_version) && lesson.record_version >= 0);
+}
+
+function singleLessonAppointmentEligible(lesson) {
+  return trialAppointmentEligible(lesson) || guestSingleLessonAppointmentEligible(lesson);
+}
+
+function singleLessonAppointmentSignature(lesson) {
+  return isTrialSingleLesson(lesson) ? trialAppointmentSignature(lesson) : JSON.stringify([trialAppointmentSignature(lesson),lesson?.instrument]);
+}
+
+function msgGuestSingleLessonAppointment(lesson) {
+  if (!guestSingleLessonAppointmentEligible(lesson)) return "";
+  const date = new Date(lesson.starts_at);
+  const day = new Intl.DateTimeFormat("tr-TR",{ timeZone:"Europe/Istanbul",weekday:"long",day:"numeric",month:"long",year:"numeric" }).format(date);
+  const time = new Intl.DateTimeFormat("tr-TR",{ timeZone:"Europe/Istanbul",hour:"2-digit",minute:"2-digit",hourCycle:"h23" }).format(date);
+  const instrument = lesson.instrument.trim().replace(/\s+/g," ");
+  const instrumentText = instrument.charAt(0).toLocaleLowerCase("tr-TR")+instrument.slice(1);
+  return ["Merhaba, "+instrumentText+" dersi randevunuz oluşturuldu.","Tarih: "+day,"Saat: "+time,
+    "Süre: "+Number(lesson.duration_minutes)+" dakika","Ücret: "+Number(lesson.fee).toLocaleString("tr-TR",{maximumFractionDigits:2})+" TL",
+    "Öğretmen: "+lesson.teacher_name.trim().replace(/\s+/g," "),"","Bodrum Sonsuz Sanat"].join("\n");
+}
+
+function msgSingleLessonAppointment(lesson) {
+  return isTrialSingleLesson(lesson) ? msgTrialAppointment(lesson) : msgGuestSingleLessonAppointment(lesson);
+}
+
 function TrialAppointmentSheet({ lesson, onVerify, onClose }) {
   const [busy,setBusy] = useState(false);
   const [used,setUsed] = useState(false);
@@ -8265,7 +8302,7 @@ function TrialAppointmentSheet({ lesson, onVerify, onClose }) {
     return ()=>{ aliveRef.current = false; try { popupRef.current?.close(); } catch {} };
   },[]);
   const phone = calendarAvailabilityPhone(lesson.participant_phone);
-  const text = msgTrialAppointment(lesson);
+  const text = msgSingleLessonAppointment(lesson);
   const send = async () => {
     if (busyRef.current || usedRef.current || !text) return;
     busyRef.current = true; setBusy(true); setFeedback("");
@@ -8279,10 +8316,10 @@ function TrialAppointmentSheet({ lesson, onVerify, onClose }) {
       const result = await onVerify();
       if (!aliveRef.current) return;
       if (!result?.data) throw new Error(result?.message || "Randevu doğrulanamadı. Pencereyi kapatıp karttan tekrar açın.");
-      if (trialAppointmentSignature(result.data) !== trialAppointmentSignature(lesson)) {
+      if (singleLessonAppointmentSignature(result.data) !== singleLessonAppointmentSignature(lesson)) {
         throw new Error("Randevu bilgileri değişmiş. Pencereyi kapatıp karttan tekrar açın.");
       }
-      const verifiedText = msgTrialAppointment(result.data);
+      const verifiedText = msgSingleLessonAppointment(result.data);
       if (!verifiedText) throw new Error("Bu kayıt için randevu mesajı hazırlanamaz.");
       if (phone) {
         if (popupRef.current.closed) throw new Error("WhatsApp penceresi kapatıldı. Lütfen tekrar deneyin.");
@@ -8305,7 +8342,7 @@ function TrialAppointmentSheet({ lesson, onVerify, onClose }) {
       if (aliveRef.current) setBusy(false);
     }
   };
-  return <Sheet title="Deneme Dersi Randevusu" subtitle={lesson.participant_name} onClose={onClose}>
+  return <Sheet title={isTrialSingleLesson(lesson) ? "Deneme Dersi Randevusu" : "Tek Ders Randevusu"} subtitle={lesson.participant_name} onClose={onClose}>
     <div aria-label="Randevu mesajı" style={{ background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:12,padding:"12px 14px",marginBottom:12 }}>
       <p style={{ margin:0,fontSize:13,color:"#475569",lineHeight:1.65,whiteSpace:"pre-line",overflowWrap:"anywhere" }}>{text}</p>
     </div>
@@ -8711,7 +8748,7 @@ function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayme
             </div>
             <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginTop:13 }}>
               <button disabled={busy} onClick={()=>onEdit(lesson)} style={{ border:"1px solid #ddd6fe", background:"#faf5ff", color:"#6d28d9", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Düzenle</button>
-              {trialAppointmentEligible(lesson) ? <button type="button" disabled={busy || !!trialAppointmentOpeningId} onClick={()=>onTrialAppointment(lesson)} style={{ border:0,background:"#25D366",color:"#fff",borderRadius:9,padding:"7px 10px",fontSize:11,fontWeight:800,cursor:trialAppointmentOpeningId?"wait":"pointer" }}>{trialAppointmentOpeningId===lesson.id ? "Kontrol Ediliyor..." : "Randevu Mesajı"}</button> : null}
+              {singleLessonAppointmentEligible(lesson) ? <button type="button" disabled={busy || !!trialAppointmentOpeningId} onClick={()=>onTrialAppointment(lesson)} style={{ border:0,background:"#25D366",color:"#fff",borderRadius:9,padding:"7px 10px",fontSize:11,fontWeight:800,cursor:trialAppointmentOpeningId?"wait":"pointer" }}>{trialAppointmentOpeningId===lesson.id ? "Kontrol Ediliyor..." : "Randevu Mesajı"}</button> : null}
               {lesson.lesson_status==="planned" ? <><button disabled={busy} onClick={()=>onStatus(lesson,"completed")} style={{ border:"none", background:"#dcfce7", color:"#166534", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Yapıldı</button><button disabled={busy} onClick={()=>onStatus(lesson,"no_show")} style={{ border:"none", background:"#fee2e2", color:"#991b1b", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Gelmedi</button><button disabled={busy} onClick={()=>onStatus(lesson,"cancelled")} style={{ border:"none", background:"#f3f4f6", color:"#475569", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>İptal</button></> : <button disabled={busy} onClick={()=>onStatus(lesson,"planned")} style={{ border:"none", background:"#dbeafe", color:"#1d4ed8", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Planlandıya Geri Al</button>}
               {payable ? <button disabled={busy} onClick={()=>onPayment(lesson,"paid")} style={{ border:"none", background:"#10b981", color:"#fff", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Ödeme Al</button> : paid ? <button disabled={busy} onClick={()=>onPayment(lesson,"unpaid")} style={{ border:"1px solid #fca5a5", background:"#fff", color:"#b91c1c", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Ödemeyi Geri Al</button> : null}
               <button disabled={busy} onClick={()=>onDelete(lesson)} style={{ marginLeft:"auto", border:"none", background:"#fff1f2", color:"#be123c", borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>Sil</button>
@@ -11607,16 +11644,16 @@ export default function App() {
       && protectedDataLoadGenerationRef.current === scope.generation
       && typeof navigator !== "undefined" && navigator.onLine !== false
       && !(singleLessonIssueRef.current?.kind === "operation" && singleLessonIssueRef.current.state !== "not_applied");
-    if (!current() || !trialAppointmentEligible(lesson) || lesson.branch_id !== scope.branchId) {
+    if (!current() || !singleLessonAppointmentEligible(lesson) || lesson.branch_id !== scope.branchId) {
       return { data:null,message:"Randevu veya şube bilgisi doğrulanamadı. Pencereyi kapatıp tekrar açın." };
     }
     try {
       const result = await timedSingleLessonRequest(()=>supabase.from("single_lessons")
-        .select("id,branch_id,record_version,last_write_id,lesson_purpose,participant_kind,student_id,lesson_status,deleted_at,billing_status,fee,paid_on,payment_recorded_at,participant_name,participant_phone,starts_at,duration_minutes,teacher_name")
+        .select("id,branch_id,record_version,last_write_id,lesson_purpose,participant_kind,student_id,lesson_status,deleted_at,billing_status,fee,paid_on,payment_recorded_at,participant_name,participant_phone,starts_at,duration_minutes,teacher_name,instrument")
         .eq("id",lesson.id).eq("branch_id",scope.branchId).single());
       if (!current()) return { data:null,message:"Çalışma alanı değişti. Randevuyu güncel şubeden tekrar açın." };
-      if (result.error || result.data?.id !== lesson.id || result.data?.branch_id !== scope.branchId || !trialAppointmentEligible(result.data)) {
-        return { data:null,message:"Planlanan deneme randevusu doğrulanamadı. Kaydı kontrol edip tekrar açın." };
+      if (result.error || result.data?.id !== lesson.id || result.data?.branch_id !== scope.branchId || !singleLessonAppointmentEligible(result.data)) {
+        return { data:null,message:isTrialSingleLesson(lesson) ? "Planlanan deneme randevusu doğrulanamadı. Kaydı kontrol edip tekrar açın." : "Planlanan ders randevusu doğrulanamadı. Kaydı kontrol edip tekrar açın." };
       }
       return { data:result.data };
     } catch {
@@ -11625,7 +11662,7 @@ export default function App() {
   };
 
   const openTrialAppointment = async (lesson, scopeKey=trialAppointmentContextRef.current.key) => {
-    if (!trialAppointmentEligible(lesson) || trialAppointmentOpeningRef.current) return;
+    if (!singleLessonAppointmentEligible(lesson) || trialAppointmentOpeningRef.current) return;
     const sequence = ++trialAppointmentReadSequenceRef.current;
     trialAppointmentOpeningRef.current = true;
     setTrialAppointmentOpeningId(lesson.id);
@@ -15733,7 +15770,7 @@ export default function App() {
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mainTab==='tekders' && showSinglePeople ? <SingleLessonPeopleSheet key={paymentReceiptScopeKey} scope={paymentReceiptScopeRef.current} isCurrent={key=>paymentReceiptScopeRef.current.key===key && paymentReceiptScopeRef.current.ready} teachers={teachers} lessons={singleLessons} onBusy={busy=>{branchScopedWriteCountRef.current=Math.max(0,branchScopedWriteCountRef.current+(busy?1:-1));}} onClose={()=>setShowSinglePeople(false)} onChoose={person=>{setShowSinglePeople(false);setSingleLessonSheet({mode:'add',person});}} onOpenLesson={lesson=>{setShowSinglePeople(false);setSingleLessonSheet({mode:'edit',lesson});}} />:null}
       {singleLessonSheet ? <SingleLessonSheet key={singleLessonSheet.person?.id || 'default'} prefillPerson={singleLessonSheet.person || null} peopleScope={paymentReceiptScopeRef.current} peopleCurrent={key=>paymentReceiptScopeRef.current.key===key && paymentReceiptScopeRef.current.ready} onPeopleBusy={busy=>{branchScopedWriteCountRef.current=Math.max(0,branchScopedWriteCountRef.current+(busy?1:-1));}} peopleLessons={singleLessons} lesson={singleLessonSheet.lesson || null} students={students} teachers={teachers} saving={singleLessonSaving} onClose={()=>{ if(singleLessonSheet.mode==="add") pendingSingleLessonCreateRef.current=null; setSingleLessonSheet(null); }} onSave={handleSingleLessonSave} /> : null}
-      {trialAppointmentPrompt && trialAppointmentReady && trialAppointmentPrompt.scopeKey===trialAppointmentScopeKey ? <TrialAppointmentSheet key={trialAppointmentPrompt.scopeKey+trialAppointmentSignature(trialAppointmentPrompt.lesson)} lesson={trialAppointmentPrompt.lesson} onVerify={()=>readTrialAppointment(trialAppointmentPrompt.lesson,trialAppointmentPrompt.scopeKey)} onClose={()=>setTrialAppointmentPrompt(null)} /> : null}
+      {trialAppointmentPrompt && trialAppointmentReady && trialAppointmentPrompt.scopeKey===trialAppointmentScopeKey ? <TrialAppointmentSheet key={trialAppointmentPrompt.scopeKey+singleLessonAppointmentSignature(trialAppointmentPrompt.lesson)} lesson={trialAppointmentPrompt.lesson} onVerify={()=>readTrialAppointment(trialAppointmentPrompt.lesson,trialAppointmentPrompt.scopeKey)} onClose={()=>setTrialAppointmentPrompt(null)} /> : null}
       {welcomeStudentId && students.find(student=>student.id===welcomeStudentId) ? <YeniÖğrenciİletişimSheet student={students.find(student=>student.id===welcomeStudentId)} onClose={()=>setWelcomeStudentId(null)} onMessage={handleCommunicationMessage} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {periodEvaluationModal ? <DonemDegerlendirmeSheet student={students.find(student=>student.id===periodEvaluationModal.student.id) || periodEvaluationModal.student} info={periodEvaluationModal.info} onClose={()=>setPeriodEvaluationModal(null)} onSave={evaluation=>handleDonemDegerlendirmeKaydet(periodEvaluationModal.student.id, periodEvaluationModal.info, evaluation)} /> : null}
