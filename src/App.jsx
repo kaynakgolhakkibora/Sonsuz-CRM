@@ -5145,7 +5145,7 @@ function msgEkDersHatirlatma(extra) {
 function msgTekDersHatirlatma(lesson) {
   const mode = lesson?.lesson_mode === "online" ? "online " : "";
   if (isTrialSingleLesson(lesson)) return "Günaydın :) Bugünkü "+mode+"deneme dersinizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
-  return "Günaydın :) Bugünkü "+mode+(lesson?.instrument || "müzik")+" tek dersimizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
+  return "Günaydın :) Bugünkü "+mode+(lesson?.instrument || "müzik")+(lesson?.participant_kind === "guest" ? " dersinizin saati " : " tek dersimizin saati ")+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
 }
 function msgTelafiHakki(student, record) {
   const lessonText = record?.lessonDate ? fmtMed(record.lessonDate)+" tarihli dersiniz" : "Dersiniz";
