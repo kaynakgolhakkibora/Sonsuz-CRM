@@ -3484,6 +3484,11 @@ const INP = { width:"100%", border:"1px solid #ded9d3", borderRadius:11, padding
 const LBL = { display:"block", fontSize:11, fontWeight:750, color:"#756f7a", letterSpacing:.3, marginBottom:6, marginTop:15 };
 
 
+const PHONE_INPUT_PLACEHOLDER = "05xx xxx xx xx";
+function PhoneInputHint({ id }) {
+  return <p id={id} style={{ margin:"6px 0 12px",fontSize:12,lineHeight:1.55,color:"#64748b",overflowWrap:"anywhere" }}>Türkiye numaralarında başına 90 eklemeniz gerekmez. Yurt dışı için +ülke kodunu ekleyin.</p>;
+}
+
 function TechnicalAssessmentSheet({ instrument, answers, onChange, onClose }) {
   const questions=technicalQuestionsForInstrument(instrument);
   const answerSelect=(label,question,key,index=null)=>{
@@ -4260,7 +4265,8 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram 
       <label style={LBL}>Derse Başlama Tarihi</label>
       <input style={INP} type="date" value={f.lesson_start_date||""} onChange={e=>s("lesson_start_date",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
-      <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
+      <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder={PHONE_INPUT_PLACEHOLDER} aria-describedby="student-edit-phone-help" type="tel" />
+      <PhoneInputHint id="student-edit-phone-help" />
       <label style={LBL}>4 Ders Ücreti (TL)</label>
       <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="5600" type="number" />
       <label style={LBL}>Son Zam Tarihi</label>
@@ -5074,7 +5080,8 @@ function AddSheet({ teachers, onClose, onAdd }) {
       <label style={LBL}>Derse Başlama Tarihi</label>
       <input style={INP} type="date" value={f.lesson_start_date||""} onChange={e=>s("lesson_start_date",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
-      <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder="905xxxxxxxxx" type="tel" />
+      <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder={PHONE_INPUT_PLACEHOLDER} aria-describedby="student-add-phone-help" type="tel" />
+      <PhoneInputHint id="student-add-phone-help" />
       <label style={LBL}>4 Ders Ücreti (TL)</label>
       <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="5600" type="number" />
       <label style={LBL}>Son Zam Tarihi</label>
@@ -6693,7 +6700,7 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
           <div className="crm-program-recipient-fields"><label>Öğrenci ara<input value={recipientSearch} onChange={event=>setRecipientSearch(event.target.value)} placeholder="Öğrenci veya veli adı" disabled={copyBusy} /></label><label>Öğrenci seç<select value={recipientId} onChange={event=>{setRecipientId(event.target.value);setFeedback("");}} disabled={copyBusy}><option value="">Öğrenci seçin</option>{matchingRecipients.map(item=><option key={item.id} value={item.id}>{item.name}{item.guardian?" — "+item.guardian:""}</option>)}</select></label></div>
           {!recipients.length ? <p className="crm-program-recipient-info">Seçili şubede mevcut öğrenci yok. Numara yaz seçeneğini kullanabilirsiniz.</p> : null}
           {recipient ? <p className={"crm-program-recipient-info"+(recipientPhone?"":" crm-program-recipient-error")}>{recipient.name}{recipient.guardian?" · Veli: "+recipient.guardian:""}<br/>{recipientPhone?"WhatsApp numarası: +"+recipientPhone:"Kayıtlı telefon yok veya biçimi geçersiz. Numara yaz seçeneğini kullanabilirsiniz."}</p> : null}
-        </> : <><label>WhatsApp numarası<input type="tel" inputMode="tel" autoComplete="off" value={manualPhone} onChange={event=>{setManualPhone(event.target.value);setFeedback("");}} placeholder="05xx xxx xx xx" disabled={copyBusy} /></label><p className={"crm-program-recipient-info"+(manualPhone && !recipientPhone?" crm-program-recipient-error":"")}>{recipientPhone?"Alıcı: +"+recipientPhone:manualPhone?"Geçerli bir numara girin. Yurt dışı için +ülke kodunu ekleyin.":"Bu numara öğrenci kaydına kaydedilmez."}</p></>}
+        </> : <><label>WhatsApp numarası<input type="tel" inputMode="tel" autoComplete="off" value={manualPhone} onChange={event=>{setManualPhone(event.target.value);setFeedback("");}} placeholder={PHONE_INPUT_PLACEHOLDER} aria-describedby="program-phone-help" disabled={copyBusy} /></label><PhoneInputHint id="program-phone-help" /><p className={"crm-program-recipient-info"+(manualPhone && !recipientPhone?" crm-program-recipient-error":"")}>{recipientPhone?"Alıcı: +"+recipientPhone:manualPhone?"Geçerli bir numara girin. Yurt dışı için +ülke kodunu ekleyin.":"Bu numara öğrenci kaydına kaydedilmez."}</p></>}
         <p className="crm-program-share-note">Yalnız aşağıdaki ders programı metni paylaşılır. WhatsApp açılır; son Gönder onayı sizdedir.</p>
         <label>Mesaj önizlemesi<textarea readOnly value={calendarProgramWhatsAppText(exportModel)} /></label>
         <div className="crm-program-actions"><button className="crm-program-send" onClick={send} disabled={!recipientPhone || copyBusy || whatsAppOpened}>{whatsAppOpened?"WhatsApp açıldı":"WhatsApp'ta Aç"}</button></div>
@@ -6868,7 +6875,7 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
           <div className="crm-availability-recipient-fields"><label>Öğrenci ara<input value={recipientSearch} onChange={event=>setRecipientSearch(event.target.value)} placeholder="Öğrenci veya veli adı" disabled={copyBusy} /></label><label>Öğrenci seç<select value={recipientId} onChange={event=>{setRecipientId(event.target.value);setFeedback("");}} disabled={copyBusy}><option value="">Öğrenci seçin</option>{matchingRecipients.map(item=><option key={item.id} value={item.id}>{item.name}{item.guardian?" — "+item.guardian:""}</option>)}</select></label></div>
           {!recipients.length ? <p className="crm-availability-recipient-info">Seçili şubede mevcut öğrenci yok. Numara yaz seçeneğini kullanabilirsiniz.</p> : null}
           {recipient ? <p className={"crm-availability-recipient-info"+(recipientPhone?"":" crm-availability-recipient-error")}>{recipient.name}{recipient.guardian?" · Veli: "+recipient.guardian:""}<br/>{recipientPhone?"WhatsApp numarası: +"+recipientPhone:"Kayıtlı telefon yok veya biçimi geçersiz. Numara yaz seçeneğini kullanabilirsiniz."}</p> : null}
-        </> : <><label>WhatsApp numarası<input type="tel" inputMode="tel" autoComplete="off" value={manualPhone} onChange={event=>{setManualPhone(event.target.value);setFeedback("");}} placeholder="05xx xxx xx xx" disabled={copyBusy} /></label><p className={"crm-availability-recipient-info"+(manualPhone && !recipientPhone?" crm-availability-recipient-error":"")}>{recipientPhone?"Alıcı: +"+recipientPhone:manualPhone?"Geçerli bir numara girin. Yurt dışı için +ülke kodunu ekleyin.":"Bu numara öğrenci kaydına kaydedilmez."}</p></>}
+        </> : <><label>WhatsApp numarası<input type="tel" inputMode="tel" autoComplete="off" value={manualPhone} onChange={event=>{setManualPhone(event.target.value);setFeedback("");}} placeholder={PHONE_INPUT_PLACEHOLDER} aria-describedby="availability-phone-help" disabled={copyBusy} /></label><PhoneInputHint id="availability-phone-help" /><p className={"crm-availability-recipient-info"+(manualPhone && !recipientPhone?" crm-availability-recipient-error":"")}>{recipientPhone?"Alıcı: +"+recipientPhone:manualPhone?"Geçerli bir numara girin. Yurt dışı için +ülke kodunu ekleyin.":"Bu numara öğrenci kaydına kaydedilmez."}</p></>}
         <p className="crm-availability-share-note">Yalnız aşağıdaki uygun saatler metni paylaşılır. WhatsApp açılır; son Gönder onayı sizdedir.</p>
         <label>Mesaj önizlemesi<textarea readOnly value={calendarAvailabilityWhatsAppText(model)} /></label>
         <div className="crm-availability-actions"><button className="crm-availability-send" onClick={send} disabled={!recipientPhone || copyBusy || whatsAppOpened}>{whatsAppOpened?"WhatsApp açıldı":"WhatsApp'ta Aç"}</button></div>
@@ -8432,7 +8439,8 @@ function SingleLessonPersonForm({person=null,teachers,onSave,onBack,busy}) {
     <p style={{fontWeight:800}}>{person?'Kişi Bilgilerini Düzenle':'Yeni Kişi'}</p>
     <p style={{color:'#64748b',fontSize:12}}>Bu bilgiler yeni derslerde hazır gelir. Önceki derslerin bilgileri korunur.</p>
     <label style={LBL}>Ad Soyad</label><input aria-label="Kişi ad soyad" style={INP} value={form.name} maxLength={160} disabled={busy} onChange={e=>set('name',e.target.value)}/>
-    <label style={LBL}>Telefon (opsiyonel)</label><input aria-label="Kişi telefonu" style={INP} type="tel" value={form.phone} maxLength={80} disabled={busy} onChange={e=>set('phone',e.target.value)}/>
+    <label style={LBL}>Telefon (opsiyonel)</label><input aria-label="Kişi telefonu" style={INP} type="tel" value={form.phone} maxLength={80} disabled={busy} onChange={e=>set('phone',e.target.value)} placeholder={PHONE_INPUT_PLACEHOLDER} aria-describedby="single-person-phone-help"/>
+    <PhoneInputHint id="single-person-phone-help" />
     <label style={LBL}>Varsayılan öğretmen</label><select aria-label="Kişi öğretmeni" style={INP} value={form.teacher_id} disabled={busy} onChange={e=>set('teacher_id',e.target.value)}><option value="">Öğretmen seçin</option>{teachers.map(t=><option key={t.id} value={t.id} disabled={!t.active}>{t.name}{!t.active?' · Pasif':''}</option>)}</select>
     <label style={LBL}>Enstrüman</label><input aria-label="Kişi enstrümanı" style={INP} value={form.instrument} maxLength={120} disabled={busy} onChange={e=>set('instrument',e.target.value)}/>
     <label style={LBL}>Varsayılan ders süresi</label><select aria-label="Kişi ders süresi" style={INP} value={form.duration_minutes} disabled={busy} onChange={e=>set('duration_minutes',Number(e.target.value))}>{[30,45,60,90].map(n=><option key={n} value={n}>{n} dakika</option>)}</select>
@@ -8666,7 +8674,8 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
           <label style={LBL}>Ad Soyad</label>
           <input style={INP} value={participantName} maxLength={160} onChange={event=>{ setParticipantName(event.target.value); setError(""); }} placeholder="Derse katılacak kişi" disabled={saving || (!lesson && !!personId)} />
           <label style={LBL}>Telefon (opsiyonel)</label>
-          <input style={INP} type="tel" value={participantPhone} onChange={event=>setParticipantPhone(event.target.value)} placeholder="905xxxxxxxxx" disabled={saving || (!lesson && !!personId)} />
+          <input style={INP} type="tel" value={participantPhone} onChange={event=>setParticipantPhone(event.target.value)} placeholder={PHONE_INPUT_PLACEHOLDER} aria-describedby="single-lesson-phone-help" disabled={saving || (!lesson && !!personId)} />
+          <PhoneInputHint id="single-lesson-phone-help" />
         </>
       )}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
