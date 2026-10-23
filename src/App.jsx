@@ -7138,7 +7138,7 @@ function BugünEkDersleri({ students, onWA, onReminderToggle, onOpen }) {
   );
 }
 
-function BugünTekDersleri({ lessons, onWA, onReminderToggle, onOpen }) {
+function BugünTekDersleri({ lessons, onWA, onReminderToggle, onOpen, onAction, busyIds={}, actionsDisabled=false }) {
   const todayLessons = (lessons || [])
     .filter(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at))
     .sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at) || a.participant_name.localeCompare(b.participant_name,"tr"));
@@ -7148,20 +7148,66 @@ function BugünTekDersleri({ lessons, onWA, onReminderToggle, onOpen }) {
       {todayLessons.map(lesson=>{
         const sent = !!lesson.reminder_sent_at;
         const trial = isTrialSingleLesson(lesson);
-        return <div key={lesson.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #ede9fe" }}>
-          <div onClick={()=>onOpen(lesson)} style={{ cursor:"pointer", minWidth:0 }}>
+        const busy = !!busyIds[lesson.id];
+        return <div key={lesson.id} style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #ede9fe" }}>
+          <div onClick={()=>{ if (!busy) onOpen(lesson); }} style={{ cursor:busy?"wait":"pointer", minWidth:0, flex:"1 1 160px" }}>
             <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}><p style={{ margin:0, fontWeight:750, fontSize:14, color:"#111" }}>{lesson.participant_name}</p><TonePill tone="special">{singleLessonTypeLabel(lesson)}</TonePill>{lesson.participant_kind==="guest" && !trial?<TonePill>Misafir</TonePill>:null}</div>
             <p style={{ margin:"3px 0 0", fontSize:12, color:"#6d28d9", fontWeight:700 }}>{timeFromISO(lesson.starts_at)} · {lesson.instrument} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent?"Hatırlatma gönderildi":"Hatırlatma bekliyor"} · {singleLessonBillingLabel(lesson.billing_status)}</p>
           </div>
-          <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-            {lesson.participant_phone ? <button onClick={()=>onWA(lesson)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:10, padding:"7px 12px", fontSize:13, fontWeight:700, cursor:"pointer" }}>WA</button> : null}
-            <button onClick={()=>onReminderToggle(lesson,!sent)} style={{ background:sent?"#dcfce7":"#fff", color:sent?"#166534":"#475569", border:"1px solid #ddd6fe", borderRadius:10, padding:"7px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>{sent?"Geri Al":"İşaretle"}</button>
+          <div style={{ display:"flex", flexWrap:"wrap", justifyContent:"flex-end", gap:6, marginLeft:"auto" }}>
+            {lesson.participant_phone ? <button disabled={busy} onClick={()=>onWA(lesson)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:10, padding:"7px 12px", fontSize:13, fontWeight:700, cursor:busy?"wait":"pointer", opacity:busy?.6:1 }}>WA</button> : null}
+            {onAction ? <button type="button" disabled={busy || actionsDisabled} onClick={()=>onAction(lesson)} aria-label={lesson.participant_name+" için işlem"} style={{ background:"#fff", color:"#6d28d9", border:"1px solid #ddd6fe", borderRadius:10, padding:"7px 10px", fontSize:12, fontWeight:800, cursor:busy?"wait":"pointer", opacity:busy || actionsDisabled?.6:1 }}>İşlem</button> : null}
+            <button disabled={busy} onClick={()=>onReminderToggle(lesson,!sent)} style={{ background:sent?"#dcfce7":"#fff", color:sent?"#166534":"#475569", border:"1px solid #ddd6fe", borderRadius:10, padding:"7px 10px", fontSize:12, fontWeight:700, cursor:busy?"wait":"pointer", opacity:busy?.6:1 }}>{sent?"Geri Al":"İşaretle"}</button>
           </div>
         </div>;
       })}
     </AçılırBugünBölümü>
   );
+}
+
+function dailySingleLessonActionRecord(lessons, selection, scope, now = new Date()) {
+  if (!selection?.id || !scope?.ready || selection.scopeKey !== scope.key) return null;
+  const lesson = (lessons || []).find(row=>row.id===selection.id && row.branch_id===scope.branchId);
+  const today = singleLessonTurkeyDay(now);
+  return lesson && !lesson.deleted_at && Number.isInteger(lesson.record_version) && lesson.record_version >= 0
+    && ["planned","completed","no_show","cancelled"].includes(lesson.lesson_status)
+    && today && singleLessonTurkeyDay(lesson.starts_at)===today ? lesson : null;
+}
+
+function DailySingleLessonActionsSheet({ lesson, busy=false, blocked=false, onAction, onClose }) {
+  const payable = isPayableSingleLesson(lesson);
+  const paid = lesson.billing_status === "paid";
+  const disabled = busy || blocked;
+  return <Sheet title="Tek Ders İşlemleri" subtitle={lesson.participant_name} onClose={onClose}>
+    <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+      <TonePill tone="special">{singleLessonTypeLabel(lesson)}</TonePill>
+      {lesson.participant_kind==="student" ? <TonePill tone="info">Kayıtlı</TonePill> : lesson.participant_kind==="guest" && !isTrialSingleLesson(lesson) ? <TonePill>Misafir</TonePill> : null}
+    </div>
+    <p style={{ margin:"0 0 5px", color:"#475569", fontSize:13, fontWeight:750 }}>{fmtDate(lesson.starts_at)} · {timeFromISO(lesson.starts_at)} · {lesson.duration_minutes} dk</p>
+    <p style={{ margin:"0 0 18px", color:"#64748b", fontSize:12, overflowWrap:"anywhere" }}>{lesson.instrument} · {lesson.teacher_name} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
+    <div style={{ padding:12, border:"1px solid #e5e7eb", borderRadius:12, marginBottom:12 }}>
+      <p style={{ margin:"0 0 10px", fontWeight:800, color:"#334155", fontSize:13 }}>Ders sonucu</p>
+      <TonePill tone={lesson.lesson_status==="planned"?"info":lesson.lesson_status==="completed"?"good":lesson.lesson_status==="no_show"?"danger":"neutral"}>{singleLessonStatusLabel(lesson.lesson_status)}</TonePill>
+      {lesson.lesson_status==="planned" ? <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:12 }}>
+        {[["completed","Yapıldı","#dcfce7","#166534"],["no_show","Gelmedi","#fee2e2","#991b1b"],["cancelled","İptal","#f3f4f6","#475569"]].map(([status,label,bg,color])=>{
+          const forbidden = !!singleLessonTransitionError(lesson,{lesson_status:status});
+          return <button key={status} type="button" disabled={disabled || forbidden} onClick={()=>onAction(lesson,status)} style={{ flex:"1 1 80px", border:0, borderRadius:10, padding:"12px 10px", background:bg, color, fontSize:13, fontWeight:800, cursor:disabled?"wait":"pointer", opacity:disabled || forbidden?.5:1 }}>{label}</button>;
+        })}
+      </div> : null}
+      {paid && lesson.lesson_status==="planned" ? <p style={{ margin:"10px 0 0", color:"#92400e", fontSize:12 }}>Gelmedi veya İptal için önce Tek Ders ekranından ödemeyi geri alın.</p> : null}
+    </div>
+    <div style={{ padding:12, border:"1px solid #e5e7eb", borderRadius:12 }}>
+      <div style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", gap:8 }}>
+        <strong style={{ color:"#334155", fontSize:13 }}>Ödeme</strong>
+        <strong style={{ color:paid?"#059669":"#6d28d9", fontSize:13 }}>{lesson.billing_status==="free"?"0 TL":Number(lesson.fee).toLocaleString("tr-TR")+" TL"}</strong>
+      </div>
+      <p style={{ margin:"7px 0 0", color:"#64748b", fontSize:13 }}>{singleLessonBillingLabel(lesson.billing_status)}</p>
+      {payable ? <button type="button" disabled={disabled} onClick={()=>onAction(lesson,"paid")} style={{ width:"100%", border:0, borderRadius:10, padding:"13px 12px", marginTop:12, background:"#10b981", color:"#fff", fontSize:14, fontWeight:800, cursor:disabled?"wait":"pointer", opacity:disabled?.6:1 }}>Ödeme Al</button> : null}
+    </div>
+    {busy ? <p role="status" style={{ fontSize:12, color:"#6d28d9", fontWeight:750 }}>İşlem doğrulanıyor...</p> : blocked ? <p role="status" style={{ fontSize:12, color:"#92400e" }}>Önce sonucu belirsiz Tek Ders işlemini yeniden kontrol edin.</p> : null}
+    <div style={{ marginTop:16 }}><Btn bg="#111" outline onClick={onClose}>Kapat</Btn></div>
+  </Sheet>;
 }
 
 function singleLessonTurkeyDay(value) {
@@ -8837,6 +8883,8 @@ export default function App() {
   const [singleLessonsLoaded, setSingleLessonsLoaded] = useState(false);
   const [singleLessonSheet, setSingleLessonSheet] = useState(null);
   const [showSinglePeople,setShowSinglePeople] = useState(false);
+  const [dailySingleLessonActions,setDailySingleLessonActions] = useState(null);
+  const dailySingleLessonActionContextRef = useRef({});
   const [trialAppointmentPrompt,setTrialAppointmentPrompt] = useState(null);
   const [trialAppointmentOpeningId,setTrialAppointmentOpeningId] = useState("");
   const trialAppointmentContextRef = useRef({});
@@ -9054,6 +9102,16 @@ export default function App() {
     setTrialAppointmentOpeningId("");
     setTrialAppointmentPrompt(null);
   },[trialAppointmentScopeKey,trialAppointmentReady]);
+  const dailySingleLessonActionScopeKey = JSON.stringify([authSession?.user?.id,activeOrganization?.id,currentBranch?.id,protectedDataLoadGenerationRef.current]);
+  const dailySingleLessonActionReady = trialAppointmentReady && !loading && mainTab==="bugün";
+  const dailySingleLessonActionBlocked = singleLessonIssueChecking || (singleLessonIssue?.kind==="operation" && singleLessonIssue.state!=="not_applied");
+  dailySingleLessonActionContextRef.current = { key:dailySingleLessonActionScopeKey,branchId:currentBranch?.id,
+    generation:protectedDataLoadGenerationRef.current,ready:dailySingleLessonActionReady,blocked:dailySingleLessonActionBlocked,
+    lessons:singleLessons,selection:dailySingleLessonActions,receiptActive:!!activePaymentReceipt };
+  const dailySingleLessonActionLesson = dailySingleLessonActionRecord(singleLessons,dailySingleLessonActions,dailySingleLessonActionContextRef.current,singleLessonResultClock);
+  useEffect(()=>{
+    if (dailySingleLessonActions && !dailySingleLessonActionLesson) setDailySingleLessonActions(null);
+  },[dailySingleLessonActions,dailySingleLessonActionLesson]);
   // V195: isolated weekly report state and scope.
   const [weeklyReportClock,setWeeklyReportClock]=useState(()=>new Date());
   const [weeklyReportState,setWeeklyReportState]=useState({scopeKey:"",reports:[],current:null,error:"",loading:false});
@@ -11816,6 +11874,36 @@ export default function App() {
     },paid?"Tek Ders ödemesi alındı":"Tek Ders ödemesi geri alındı",paid);
     if(paid && saved)queuePaymentReceipt("single",saved,{operationId:saved.last_write_id,lessonId:saved.id,branchId:saved.branch_id,
       paymentReceipt:true,paymentReceiptActorId:receiptScope?.actorUserId || ""},receiptScope?.key);
+  };
+
+  const openDailySingleLessonActions = lesson => {
+    const scope = dailySingleLessonActionContextRef.current;
+    const current = dailySingleLessonActionRecord(scope.lessons,{id:lesson?.id,scopeKey:dailySingleLessonActionScopeKey},scope);
+    if (!current || current.lesson_status!=="planned" || scope.blocked || scope.receiptActive
+      || scope.generation!==protectedDataLoadGenerationRef.current || singleLessonBusyIdsRef.current[current.id]
+      || (typeof navigator!=="undefined" && navigator.onLine===false)) return;
+    setDailySingleLessonActions({id:current.id,scopeKey:scope.key});
+  };
+
+  const handleDailySingleLessonAction = async (lesson, action, scopeKey) => {
+    const scope = dailySingleLessonActionContextRef.current;
+    const current = dailySingleLessonActionRecord(scope.lessons,scope.selection,scope);
+    if (!current || scope.key!==scopeKey || current.id!==lesson?.id || scope.blocked || scope.receiptActive
+      || scope.generation!==protectedDataLoadGenerationRef.current || singleLessonBusyIdsRef.current[current.id]
+      || (typeof navigator!=="undefined" && navigator.onLine===false)) return;
+    if (current.record_version!==lesson.record_version || current.last_write_id!==lesson.last_write_id) {
+      pop("Ders bilgileri değişti. Güncel bilgileri kontrol edip tekrar deneyin.",7000);
+      return;
+    }
+    if (action==="paid" ? !isPayableSingleLesson(current) : current.lesson_status!=="planned" || !["completed","no_show","cancelled"].includes(action)) return;
+    const transitionError = action==="paid" ? "" : singleLessonTransitionError(current,{lesson_status:action});
+    if (transitionError) { pop(transitionError,9000); return; }
+    try {
+      if (action==="paid") await handleSingleLessonPayment(current,"paid");
+      else await handleSingleLessonStatus(current,action);
+    } catch {
+      pop("Tek Ders işlemi doğrulanamadı. Güncel kaydı ve işlem uyarısını kontrol edin.",8000);
+    }
   };
 
   const handleSingleLessonReminderToggle = async (lesson, sent) => {
@@ -15602,7 +15690,7 @@ export default function App() {
             })()}
             <BugünDersleri students={operationalStudents} onWA={handleWADers} onWATelafi={handleWATelafi} onReminderToggle={handleReminderToggle} onStudentClick={setDetailSt} onTelafiClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} onLessonAction={(student,lesson)=>{ if(lesson?.id) setActionModal({student,lessonId:lesson.id}); }} onTelafiAction={(student,record)=>{ if(record?.id) setActionModal({student,kind:"telafi",makeupRecordId:record.id}); }} />
             <BugünEkDersleri students={operationalStudents} onWA={handleWAExtraLesson} onReminderToggle={handleExtraLessonReminderToggle} onOpen={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} />
-            <BugünTekDersleri lessons={singleLessons} onWA={handleWASingleLesson} onReminderToggle={handleSingleLessonReminderToggle} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
+            <BugünTekDersleri lessons={singleLessons} onWA={handleWASingleLesson} onReminderToggle={handleSingleLessonReminderToggle} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onAction={openDailySingleLessonActions} busyIds={singleLessonBusyIds} actionsDisabled={!dailySingleLessonActionReady || dailySingleLessonActionBlocked || !!activePaymentReceipt} />
             <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
             <GecikenTekDersÖdemeleri lessons={overdueSinglePayments} now={singleLessonResultClock} busyIds={singleLessonBusyIds} onPayment={handleSingleLessonPayment} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <BekleyenTelafiler students={operationalStudents} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
@@ -15811,6 +15899,7 @@ export default function App() {
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mainTab==='tekders' && showSinglePeople ? <SingleLessonPeopleSheet key={paymentReceiptScopeKey} scope={paymentReceiptScopeRef.current} isCurrent={key=>paymentReceiptScopeRef.current.key===key && paymentReceiptScopeRef.current.ready} teachers={teachers} lessons={singleLessons} onBusy={busy=>{branchScopedWriteCountRef.current=Math.max(0,branchScopedWriteCountRef.current+(busy?1:-1));}} onClose={()=>setShowSinglePeople(false)} onChoose={person=>{setShowSinglePeople(false);setSingleLessonSheet({mode:'add',person});}} onOpenLesson={lesson=>{setShowSinglePeople(false);setSingleLessonSheet({mode:'edit',lesson});}} />:null}
+      {dailySingleLessonActions && dailySingleLessonActionLesson && !activePaymentReceipt ? <DailySingleLessonActionsSheet key={dailySingleLessonActions.scopeKey+dailySingleLessonActions.id} lesson={dailySingleLessonActionLesson} busy={!!singleLessonBusyIds[dailySingleLessonActionLesson.id]} blocked={!!dailySingleLessonActionBlocked} onAction={(lesson,action)=>handleDailySingleLessonAction(lesson,action,dailySingleLessonActions.scopeKey)} onClose={()=>setDailySingleLessonActions(null)} /> : null}
       {singleLessonSheet ? <SingleLessonSheet key={singleLessonSheet.person?.id || 'default'} prefillPerson={singleLessonSheet.person || null} peopleScope={paymentReceiptScopeRef.current} peopleCurrent={key=>paymentReceiptScopeRef.current.key===key && paymentReceiptScopeRef.current.ready} onPeopleBusy={busy=>{branchScopedWriteCountRef.current=Math.max(0,branchScopedWriteCountRef.current+(busy?1:-1));}} peopleLessons={singleLessons} lesson={singleLessonSheet.lesson || null} students={students} teachers={teachers} saving={singleLessonSaving} onClose={()=>{ if(singleLessonSheet.mode==="add") pendingSingleLessonCreateRef.current=null; setSingleLessonSheet(null); }} onSave={handleSingleLessonSave} /> : null}
       {trialAppointmentPrompt && trialAppointmentReady && trialAppointmentPrompt.scopeKey===trialAppointmentScopeKey ? <TrialAppointmentSheet key={trialAppointmentPrompt.scopeKey+singleLessonAppointmentSignature(trialAppointmentPrompt.lesson)} lesson={trialAppointmentPrompt.lesson} onVerify={()=>readTrialAppointment(trialAppointmentPrompt.lesson,trialAppointmentPrompt.scopeKey)} onClose={()=>setTrialAppointmentPrompt(null)} /> : null}
       {welcomeStudentId && students.find(student=>student.id===welcomeStudentId) ? <YeniÖğrenciİletişimSheet student={students.find(student=>student.id===welcomeStudentId)} onClose={()=>setWelcomeStudentId(null)} onMessage={handleCommunicationMessage} /> : null}
