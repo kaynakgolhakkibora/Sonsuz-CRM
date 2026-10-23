@@ -8799,7 +8799,7 @@ function isPayableSingleLesson(lesson) {
   return Number.isFinite(fee) && fee > 0;
 }
 
-function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayment, onDelete, busyIds={}, onTrialAppointment=()=>{}, trialAppointmentOpeningId="", onPeople=()=>{} }) {
+function SingleLessonsPanel({ lessons, loading, onEdit, onStatus, onPayment, onDelete, busyIds={}, onTrialAppointment=()=>{}, trialAppointmentOpeningId="" }) {
   const [filter, setFilter] = useState("active");
   const visible = lessons
     .filter(lesson=>!lesson.deleted_at)
@@ -8811,10 +8811,6 @@ function SingleLessonsPanel({ lessons, loading, onAdd, onEdit, onStatus, onPayme
     <div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:14 }}>
         {[{key:"active",label:"Planlanan",value:activeCount,color:"#6d28d9"},{key:"unpaid",label:"Ödeme Bekleyen",value:unpaidCount,color:"#c2410c"},{key:"all",label:"Tüm Kayıtlar",value:lessons.filter(item=>!item.deleted_at).length,color:"#111827"}].map(item=><button key={item.key} onClick={()=>setFilter(item.key)} style={{ border:filter===item.key?"2px solid "+item.color:"2px solid transparent", borderRadius:13, padding:"10px 8px", background:"#fff", cursor:"pointer" }}><strong style={{ display:"block", fontSize:22, color:item.color }}>{item.value}</strong><span style={{ fontSize:10, color:"#64748b", fontWeight:800 }}>{item.label}</span></button>)}
-      </div>
-      <div style={{display:'flex',gap:8,marginBottom:14}}>
-        <button onClick={onAdd} style={{flex:1,border:'none',borderRadius:13,padding:'12px 15px',background:'#6d28d9',color:'#fff',fontWeight:850,cursor:'pointer'}}>＋ Tek Ders Ekle</button>
-        <button type="button" onClick={onPeople} style={{border:'1px solid #ddd6fe',borderRadius:13,padding:'12px 15px',background:'#faf5ff',color:'#6d28d9',fontWeight:850,cursor:'pointer'}}>Kişiler</button>
       </div>
       {loading ? <div style={{ textAlign:"center", padding:40, color:"#94a3b8", fontWeight:700 }}>Tek ders kayıtları yükleniyor...</div> : null}
       {!loading && visible.length===0 ? <div style={{ ...CARD, padding:"38px 20px", textAlign:"center", color:"#94a3b8" }}><p style={{ margin:"0 0 5px", fontSize:30 }}>◇</p><p style={{ margin:0, fontWeight:750 }}>Bu görünümde tek ders kaydı yok.</p></div> : null}
@@ -15333,13 +15329,14 @@ export default function App() {
       </aside>
 
       <main className="crm-content">
-        <header className="crm-topbar" style={mainTab==="takvim"?{flexWrap:"wrap"}:undefined}>
+        <header className="crm-topbar" style={["takvim","tekders"].includes(mainTab)?{flexWrap:"wrap"}:undefined}>
           <div><p className="crm-eyebrow">{viewMeta.eyebrow}</p></div>
-          <div className="crm-header-actions" style={mainTab==="takvim"?{flexWrap:"wrap",maxWidth:"100%"}:undefined}>
+          <div className="crm-header-actions" style={["takvim","tekders"].includes(mainTab)?{flexWrap:"wrap",maxWidth:"100%"}:undefined}>
             {canManageBranches && mainTab!=="subeler" ? <button type="button" className="crm-owner-branches" title="Şubeleri yönet" onClick={()=>setMainTab("subeler")}>Şubeler</button> : null}
             {hasMultipleSelectableBranches ? <button type="button" className="crm-branch-switch" title="Aktif şubeyi değiştir" onClick={()=>setShowBranchMenu(true)}>⌄ {currentBranch.name}</button> : null}
             {mainTab==="takvim" ? <button type="button" data-calendar-program-open disabled={!calendarProgramReady} onClick={()=>{if(calendarProgramReady)setCalendarProgramOpenScope(calendarProgramScopeKey);}} style={{border:"1px solid #ded6ec",borderRadius:12,padding:"10px 14px",background:"#fff",color:"#60468c",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:calendarProgramReady?"pointer":"not-allowed",opacity:calendarProgramReady?1:0.5,whiteSpace:"nowrap"}}>Ders Programı</button> : null}
             {["liste","subeler","personel","tekders","takvim"].includes(mainTab) ? <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="personel"?openStaffInvite():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):mainTab==="takvim"?setShowCalendarAvailability(true):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="personel"?"＋ Personel Davet Et":mainTab==="tekders"?"＋ Tek Ders Ekle":mainTab==="takvim"?"Uygun Saatler":"＋ Öğrenci ekle"}</button> : null}
+            {mainTab==="tekders" ? <button type="button" onClick={()=>setShowSinglePeople(true)} style={{border:'1px solid #ddd6fe',borderRadius:13,padding:'12px 15px',background:'#faf5ff',color:'#6d28d9',fontWeight:850,cursor:'pointer'}}>Kişiler</button> : null}
           </div>
         </header>
         <section className="crm-page">
@@ -15725,7 +15722,7 @@ export default function App() {
         {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} availabilityOpen={showCalendarAvailability} onAvailabilityClose={()=>setShowCalendarAvailability(false)} /> : null}
         {mainTab==="takvim" && calendarProgramReady && calendarProgramOpenScope===calendarProgramScopeKey ? <CalendarProgramSheet key={calendarProgramScopeKey} students={operationalStudents} branchId={currentBranch.id} branchName={currentBranch.name} onClose={()=>setCalendarProgramOpenScope(null)} /> : null}
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} /> : null}
-        {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onAdd={()=>setSingleLessonSheet({mode:"add"})} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} onTrialAppointment={lesson=>openTrialAppointment(lesson)} trialAppointmentOpeningId={trialAppointmentOpeningId} onPeople={()=>setShowSinglePeople(true)} /> : null}
+        {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} onTrialAppointment={lesson=>openTrialAppointment(lesson)} trialAppointmentOpeningId={trialAppointmentOpeningId} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
         {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /></> : null}
         {mainTab === "liste" ? (
