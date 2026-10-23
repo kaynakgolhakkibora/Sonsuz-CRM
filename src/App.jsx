@@ -3475,7 +3475,7 @@ async function shareSvgAsPng(svgId, filename, student) {
     return;
   }
   savePngBlob(blob, filename);
-  const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+  const phone = calendarAvailabilityPhone(student.phone);
   if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text+"\n\nYüksek kaliteli grafik görselini bu mesaja ekleyebilirsiniz."), "_blank");
   else alert("Görsel indirildi. Öğrencinin WhatsApp telefon numarası kayıtlı değil.");
 }
@@ -5452,7 +5452,7 @@ function paymentReceivedReceipt(kind, row, operationId) {
     }
     if (!name || typeof phone!=="string") return null;
     const text=["Merhaba,",body,"Ödeme tarihi: "+paidOn,"Teşekkür ederiz.","Bodrum Sonsuz Sanat"].join("\n");
-    const recipient={name,phone:phone.replace(/[^0-9]/g,"")};
+    const recipient={name,phone:calendarAvailabilityPhone(phone)};
     return {key:kind+"|"+operationId,kind,operationId,recordId:row.id,branchId:row.branch_id,recipient,text,
       signature:JSON.stringify([kind,row.id,row.branch_id,operationId,recipient,text])};
   } catch { return null; }
@@ -5471,7 +5471,7 @@ function PaymentReceivedSheet({ receipt, onOpen, onClose }) {
 
 function WhatsAppPreviewSheet({ title, subtitle, text, onClose, onSent }) {
   const send = async () => {
-    const phone = subtitle?.phone ? subtitle.phone.replace(/[^0-9]/g, "") : "";
+    const phone = calendarAvailabilityPhone(subtitle?.phone);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
     else await navigator.clipboard.writeText(text);
     if (onSent) await onSent(phone ? "whatsapp" : "copied");
@@ -5481,7 +5481,7 @@ function WhatsAppPreviewSheet({ title, subtitle, text, onClose, onSent }) {
     <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
       <p style={{ margin:0, fontSize:12, color:"#475569", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
     </div>
-    <Btn bg="#25D366" onClick={send}>{subtitle?.phone ? "WhatsApp'ta Aç" : "Mesajı Kopyala"}</Btn>
+    <Btn bg="#25D366" onClick={send}>{calendarAvailabilityPhone(subtitle?.phone) ? "WhatsApp'ta Aç" : "Mesajı Kopyala"}</Btn>
     <Btn bg="#111" outline onClick={onClose}>Kapat</Btn>
   </Sheet>;
 }
@@ -5668,7 +5668,7 @@ function MesajSheet({ student, onClose, initialKey = "" }) {
   ];
   const visibleMsgs = initialKey ? msgs.filter(m => m.key === initialKey) : msgs;
   const send = (text) => {
-    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    const phone = calendarAvailabilityPhone(student.phone);
     const encoded = encodeURIComponent(text);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encoded, "_blank");
     else navigator.clipboard.writeText(text);
@@ -5681,7 +5681,7 @@ function MesajSheet({ student, onClose, initialKey = "" }) {
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #f0f0f0" }}>
               <span style={{ fontWeight:700, fontSize:14, color:"#111" }}>{m.label}</span>
               <button onClick={() => send(m.text)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"5px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
-                {student.phone ? "WhatsApp" : "Kopyala"}
+                {calendarAvailabilityPhone(student.phone) ? "WhatsApp" : "Kopyala"}
               </button>
             </div>
             <div style={{ padding:"10px 14px" }}><p style={{ margin:0, fontSize:12, color:"#555", lineHeight:1.6, whiteSpace:"pre-line" }}>{m.text}</p></div>
@@ -5695,7 +5695,7 @@ function MesajSheet({ student, onClose, initialKey = "" }) {
 function TelafiHakkiMesajSheet({ student, record, onClose, onSent }) {
   const text = msgTelafiHakki(student, record);
   const send = async () => {
-    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    const phone = calendarAvailabilityPhone(student.phone);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
     else await navigator.clipboard.writeText(text);
     await onSent(phone ? "whatsapp" : "copied");
@@ -5706,7 +5706,7 @@ function TelafiHakkiMesajSheet({ student, record, onClose, onSent }) {
         <p style={{ margin:0, fontSize:12, color:"#1e3a8a", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
       </div>
       <p style={{ margin:"0 0 12px", fontSize:12, color:"#64748b" }}>Telafi hakkı veritabanına kaydedildi. Mesajı şimdi veliye gönderebilirsiniz.</p>
-      <Btn bg="#25D366" onClick={send}>{student.phone ? "WhatsApp'tan Gönder" : "Mesajı Kopyala"}</Btn>
+      <Btn bg="#25D366" onClick={send}>{calendarAvailabilityPhone(student.phone) ? "WhatsApp'tan Gönder" : "Mesajı Kopyala"}</Btn>
       <Btn bg="#111" outline onClick={onClose}>Şimdi Değil</Btn>
     </Sheet>
   );
@@ -5715,7 +5715,7 @@ function TelafiHakkiMesajSheet({ student, record, onClose, onSent }) {
 function TelafiPlanMesajSheet({ student, record, onClose, onSent }) {
   const text = msgTelafiPlanlandi(student, record);
   const send = async () => {
-    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    const phone = calendarAvailabilityPhone(student.phone);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
     else await navigator.clipboard.writeText(text);
     await onSent(phone ? "whatsapp" : "copied");
@@ -5726,7 +5726,7 @@ function TelafiPlanMesajSheet({ student, record, onClose, onSent }) {
         <p style={{ margin:0, fontSize:12, color:"#581c87", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
       </div>
       <p style={{ margin:"0 0 12px", fontSize:12, color:"#64748b" }}>Telafi günü ve saati veritabanına kaydedildi. Plan bilgisini şimdi veliye gönderebilirsiniz.</p>
-      <Btn bg="#25D366" onClick={send}>{student.phone ? "WhatsApp'tan Gönder" : "Mesajı Kopyala"}</Btn>
+      <Btn bg="#25D366" onClick={send}>{calendarAvailabilityPhone(student.phone) ? "WhatsApp'tan Gönder" : "Mesajı Kopyala"}</Btn>
       <Btn bg="#111" outline onClick={onClose}>Şimdi Değil</Btn>
     </Sheet>
   );
@@ -6182,6 +6182,7 @@ function calendarAvailabilityPhone(value) {
   else if (/^05\d{9}$/.test(compact)) phone="90"+compact.slice(1);
   else if (/^5\d{9}$/.test(compact)) phone="90"+compact;
   else if (/^90\d{10}$/.test(compact)) phone=compact;
+  else if (/^[1-9]\d{6,14}$/.test(compact)) phone=compact;
   if (!/^[1-9]\d{6,14}$/.test(phone) || (phone.startsWith("90") && !/^90\d{10}$/.test(phone))) return "";
   return phone;
 }
@@ -7296,7 +7297,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, o
   const busy = !!paymentSavingId;
   const sendMessage = async (row, kind) => {
     const text = paymentNoticeMessage(row.student, row.info, kind);
-    const phone = row.student.phone ? row.student.phone.replace(/[^0-9]/g, "") : "";
+    const phone = calendarAvailabilityPhone(row.student.phone);
     const lesson = kind==="today" && onPaymentNoticeConfirmed ? paymentDayReminderTarget(row.student,row.info) : null;
     const noticeIntent = lesson ? { operationId:uid(), studentId:row.student.id, lessonId:lesson.id,
       lessonDate:new Date(lesson.date).toISOString(), dayKey:turkeyDateKey(), paymentKey:row.key,
@@ -11789,7 +11790,7 @@ export default function App() {
 
   const handleWASingleLesson = async lesson => {
     const text = msgTekDersHatirlatma(lesson);
-    const phone = lesson.participant_phone ? lesson.participant_phone.replace(/[^0-9]/g,"") : "";
+    const phone = calendarAvailabilityPhone(lesson.participant_phone);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text),"_blank");
     else {
       try {
@@ -13706,7 +13707,7 @@ export default function App() {
   };
 
   const handleCommunicationMessage = async (student, text, successText) => {
-    const phone = student.phone ? student.phone.replace(/[^0-9]/g,"") : "";
+    const phone = calendarAvailabilityPhone(student.phone);
     try {
       if (phone) {
         if (!window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text),"_blank")) {
@@ -14675,7 +14676,7 @@ export default function App() {
           const row=paymentNoticeRows([current]).find(row=>row.today && row.key===intent.paymentKey);
           if(!row || paymentDayReminderTarget(current,row.info)?.id!==intent.lessonId || intent.dayKey!==turkeyDateKey()
             || intent.text!==paymentNoticeMessage(current,row.info,"today")
-            || intent.phone!==(current.phone ? current.phone.replace(/[^0-9]/g,"") : "")) {
+            || intent.phone!==calendarAvailabilityPhone(current.phone)) {
             show(current);pop("Ders, dönem veya alıcı bilgisi değişti. Mesajı tekrar göndermeyin; güncel bilgiyi kontrol edin.",9000);return false;
           }
         } else if(!logs.some(sameMarker)){show(current);return true;}
@@ -14726,7 +14727,7 @@ export default function App() {
 
   const handleWAExtraLesson = async (student, extra) => {
     const text = msgEkDersHatirlatma(extra);
-    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    const phone = calendarAvailabilityPhone(student.phone);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
     else {
       try {
@@ -14742,7 +14743,7 @@ export default function App() {
 
   const handleWADers = async (student, lesson) => {
     const text = msgDersHatirlatma(student);
-    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    const phone = calendarAvailabilityPhone(student.phone);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
     else { navigator.clipboard.writeText(text); pop("Mesaj kopyalandı"); }
     if (lesson) await handleReminderToggle(student.id, lesson.id || dateKey(lesson.date), true);
@@ -14750,7 +14751,7 @@ export default function App() {
 
   const handleWATelafi = async (student, record) => {
     const text = msgTelafiDersHatirlatma(student, record);
-    const phone = student.phone ? student.phone.replace(/[^0-9]/g, "") : "";
+    const phone = calendarAvailabilityPhone(student.phone);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
     else { await navigator.clipboard.writeText(text); pop("Telafi hatırlatma mesajı kopyalandı"); }
     await handleReminderToggle(student.id, telafiReminderRef(record), true);
