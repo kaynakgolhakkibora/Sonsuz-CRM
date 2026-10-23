@@ -8119,6 +8119,8 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
   const [savingExpense, setSavingExpense] = useState(false);
   const [expenseError, setExpenseError] = useState("");
   const [expenseForm, setExpenseForm] = useState({ category:"Kira", amount:"", expense_date:localDateKey(), is_recurring:false });
+  const [expenseHeaderTarget, setExpenseHeaderTarget] = useState(null);
+  useEffect(()=>{ setExpenseHeaderTarget(document.getElementById("crm-finance-header-action")); },[]);
   const simdi = new Date();
   const hedefAy = new Date(simdi.getFullYear(), simdi.getMonth() + ayOffset, 1);
   const ayAdi = hedefAy.toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
@@ -8178,6 +8180,7 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
 
   return (
     <div>
+      {expenseHeaderTarget ? createPortal(<button type="button" className="crm-primary" onClick={openExpenseForm} style={{ background:"#dc2626" }}>＋ Gider Ekle</button>,expenseHeaderTarget) : null}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
         <button onClick={()=>setAyOffset(o=>o-1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>‹</button>
         <div style={{ textAlign:"center" }}>
@@ -8221,10 +8224,7 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
       </div>
 
       <div style={{ background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 3px rgba(0,0,0,.05)", marginBottom:14 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
-          <button type="button" aria-expanded={expensesOpen} onClick={()=>setExpensesOpen(value=>!value)} style={{ flex:1, minWidth:0, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, margin:0, padding:0, background:"transparent", border:"none", color:"#111", fontWeight:800, fontSize:13, textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}><span>Bu Ayki Giderler</span><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>{expensesOpen ? "▲" : "▼"}</span></button>
-          <button onClick={openExpenseForm} style={{ background:"#dc2626", color:"#fff", border:"none", borderRadius:9, padding:"7px 10px", fontSize:12, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>＋ Gider Ekle</button>
-        </div>
+        <button type="button" aria-expanded={expensesOpen} onClick={()=>setExpensesOpen(value=>!value)} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, margin:0, padding:0, background:"transparent", border:"none", color:"#111", fontWeight:700, fontSize:13, textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}><span>Bu Ayki Giderler</span><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>{expensesOpen ? "▲" : "▼"}</span></button>
         {expensesOpen ? <div style={{ marginTop:12 }}>
         {ayGiderleri.length === 0 ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay gider yok</p> : ayGiderleri.map((expense,index) => {
           const canStopRecurring = expense.is_recurring && !expense.recurring_until && hedefAyBaslangici >= buAyBaslangici;
@@ -15333,13 +15333,14 @@ export default function App() {
       </aside>
 
       <main className="crm-content">
-        <header className="crm-topbar" style={["takvim","tekders"].includes(mainTab)?{flexWrap:"wrap"}:undefined}>
+        <header className="crm-topbar" style={["takvim","tekders","gelir"].includes(mainTab)?{flexWrap:"wrap"}:undefined}>
           <div><p className="crm-eyebrow">{viewMeta.eyebrow}</p></div>
-          <div className="crm-header-actions" style={["takvim","tekders"].includes(mainTab)?{flexWrap:"wrap",maxWidth:"100%"}:undefined}>
+          <div className="crm-header-actions" style={["takvim","tekders","gelir"].includes(mainTab)?{flexWrap:"wrap",maxWidth:"100%",...(mainTab==="gelir"?{marginLeft:"auto"}:{})}:undefined}>
             {canManageBranches && mainTab!=="subeler" ? <button type="button" className="crm-owner-branches" title="Şubeleri yönet" onClick={()=>setMainTab("subeler")}>Şubeler</button> : null}
             {hasMultipleSelectableBranches ? <button type="button" className="crm-branch-switch" title="Aktif şubeyi değiştir" onClick={()=>setShowBranchMenu(true)}>⌄ {currentBranch.name}</button> : null}
             {mainTab==="takvim" ? <button type="button" data-calendar-program-open disabled={!calendarProgramReady} onClick={()=>{if(calendarProgramReady)setCalendarProgramOpenScope(calendarProgramScopeKey);}} style={{border:"1px solid #ded6ec",borderRadius:12,padding:"10px 14px",background:"#fff",color:"#60468c",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:calendarProgramReady?"pointer":"not-allowed",opacity:calendarProgramReady?1:0.5,whiteSpace:"nowrap"}}>Ders Programı</button> : null}
             {["liste","subeler","personel","tekders","takvim"].includes(mainTab) ? <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="personel"?openStaffInvite():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):mainTab==="takvim"?setShowCalendarAvailability(true):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="personel"?"＋ Personel Davet Et":mainTab==="tekders"?"＋ Tek Ders Ekle":mainTab==="takvim"?"Uygun Saatler":"＋ Öğrenci ekle"}</button> : null}
+            {mainTab==="gelir" ? <div id="crm-finance-header-action" /> : null}
             {mainTab==="tekders" ? <button type="button" onClick={()=>setShowSinglePeople(true)} style={{border:'1px solid #ddd6fe',borderRadius:13,padding:'12px 15px',background:'#faf5ff',color:'#6d28d9',fontWeight:850,cursor:'pointer'}}>Kişiler</button> : null}
           </div>
         </header>
