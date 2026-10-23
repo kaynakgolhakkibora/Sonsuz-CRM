@@ -5145,6 +5145,11 @@ function msgEkDersHatirlatma(extra) {
 function msgTekDersHatirlatma(lesson) {
   const mode = lesson?.lesson_mode === "online" ? "online " : "";
   if (isTrialSingleLesson(lesson)) return "Günaydın :) Bugünkü "+mode+"deneme dersinizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
+  if (lesson?.participant_kind === "student") {
+    const instrument = String(lesson?.instrument || "müzik").trim().replace(/\s+/g," ") || "müzik";
+    const instrumentText = instrument.charAt(0).toLocaleLowerCase("tr-TR")+instrument.slice(1);
+    return "Günaydın :) Bugünkü "+mode+instrumentText+" dersinizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
+  }
   return "Günaydın :) Bugünkü "+mode+(lesson?.instrument || "müzik")+(lesson?.participant_kind === "guest" ? " dersinizin saati " : " tek dersimizin saati ")+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
 }
 function msgTelafiHakki(student, record) {
@@ -8273,8 +8278,22 @@ function guestSingleLessonAppointmentEligible(lesson) {
     && Number.isInteger(lesson.record_version) && lesson.record_version >= 0);
 }
 
+function studentSingleLessonAppointmentEligible(lesson) {
+  const fee = typeof lesson?.fee === "number" || (typeof lesson?.fee === "string" && lesson.fee.trim()) ? Number(lesson.fee) : NaN;
+  return !!(lesson?.lesson_purpose === "single" && lesson.participant_kind === "student"
+    && typeof lesson.student_id === "string" && lesson.student_id.trim()
+    && lesson.id && lesson.branch_id && lesson.lesson_status === "planned" && !lesson.deleted_at
+    && ["unpaid","paid","free"].includes(lesson.billing_status) && Number.isFinite(fee) && fee >= 0 && fee <= 9999999999.99
+    && Math.abs(Math.round(fee*100)-fee*100) < 0.000001 && (lesson.billing_status === "free" ? fee === 0 : fee > 0)
+    && typeof lesson.instrument === "string" && lesson.instrument.trim()
+    && typeof lesson.starts_at === "string" && lesson.starts_at.trim() && Number.isFinite(new Date(lesson.starts_at).getTime())
+    && [30,45,60,90].includes(Number(lesson.duration_minutes))
+    && typeof lesson.teacher_name === "string" && lesson.teacher_name.trim()
+    && Number.isInteger(lesson.record_version) && lesson.record_version >= 0);
+}
+
 function singleLessonAppointmentEligible(lesson) {
-  return trialAppointmentEligible(lesson) || guestSingleLessonAppointmentEligible(lesson);
+  return trialAppointmentEligible(lesson) || guestSingleLessonAppointmentEligible(lesson) || studentSingleLessonAppointmentEligible(lesson);
 }
 
 function singleLessonAppointmentSignature(lesson) {
@@ -8293,8 +8312,21 @@ function msgGuestSingleLessonAppointment(lesson) {
     "Öğretmen: "+lesson.teacher_name.trim().replace(/\s+/g," "),"","Bodrum Sonsuz Sanat"].join("\n");
 }
 
+function msgStudentSingleLessonAppointment(lesson) {
+  if (!studentSingleLessonAppointmentEligible(lesson)) return "";
+  const date = new Date(lesson.starts_at);
+  const day = new Intl.DateTimeFormat("tr-TR",{ timeZone:"Europe/Istanbul",weekday:"long",day:"numeric",month:"long",year:"numeric" }).format(date);
+  const time = new Intl.DateTimeFormat("tr-TR",{ timeZone:"Europe/Istanbul",hour:"2-digit",minute:"2-digit",hourCycle:"h23" }).format(date);
+  const instrument = lesson.instrument.trim().replace(/\s+/g," ");
+  const instrumentText = instrument.charAt(0).toLocaleLowerCase("tr-TR")+instrument.slice(1);
+  return ["Merhaba, "+instrumentText+" dersi randevunuz oluşturuldu.","Tarih: "+day,"Saat: "+time,
+    "Süre: "+Number(lesson.duration_minutes)+" dakika","Ücret: "+Number(lesson.fee).toLocaleString("tr-TR",{maximumFractionDigits:2})+" TL",
+    "Öğretmen: "+lesson.teacher_name.trim().replace(/\s+/g," "),"","Bodrum Sonsuz Sanat"].join("\n");
+}
+
 function msgSingleLessonAppointment(lesson) {
-  return isTrialSingleLesson(lesson) ? msgTrialAppointment(lesson) : msgGuestSingleLessonAppointment(lesson);
+  if (isTrialSingleLesson(lesson)) return msgTrialAppointment(lesson);
+  return lesson?.participant_kind === "student" ? msgStudentSingleLessonAppointment(lesson) : msgGuestSingleLessonAppointment(lesson);
 }
 
 function TrialAppointmentSheet({ lesson, onVerify, onClose }) {
