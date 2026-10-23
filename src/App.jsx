@@ -8113,6 +8113,8 @@ function singleLessonPaymentsForMonth(singleLessons, targetMonth) {
 
 function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onExpenseRemove }) {
   const [ayOffset, setAyOffset] = useState(0);
+  const [expensesOpen, setExpensesOpen] = useState(false);
+  const [paymentsOpen, setPaymentsOpen] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [savingExpense, setSavingExpense] = useState(false);
   const [expenseError, setExpenseError] = useState("");
@@ -8219,10 +8221,11 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
       </div>
 
       <div style={{ background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 3px rgba(0,0,0,.05)", marginBottom:14 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:12 }}>
-          <div style={{ textAlign:"left" }}><p style={{ margin:0, fontSize:13, fontWeight:800, color:"#111" }}>Bu Ayki Giderler</p><p style={{ margin:"3px 0 0", fontSize:11, color:"#888" }}>Sabit giderler başlangıç ayından itibaren otomatik görünür.</p></div>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+          <button type="button" aria-expanded={expensesOpen} onClick={()=>setExpensesOpen(value=>!value)} style={{ flex:1, minWidth:0, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, margin:0, padding:0, background:"transparent", border:"none", color:"#111", fontWeight:800, fontSize:13, textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}><span>Bu Ayki Giderler</span><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>{expensesOpen ? "▲" : "▼"}</span></button>
           <button onClick={openExpenseForm} style={{ background:"#dc2626", color:"#fff", border:"none", borderRadius:9, padding:"7px 10px", fontSize:12, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>＋ Gider Ekle</button>
         </div>
+        {expensesOpen ? <div style={{ marginTop:12 }}>
         {ayGiderleri.length === 0 ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay gider yok</p> : ayGiderleri.map((expense,index) => {
           const canStopRecurring = expense.is_recurring && !expense.recurring_until && hedefAyBaslangici >= buAyBaslangici;
           return (
@@ -8238,10 +8241,12 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
             </div>
           );
         })}
+        </div> : null}
       </div>
 
       <div style={{ background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
-        <p style={{ margin:"0 0 12px", fontSize:13, fontWeight:700, color:"#111" }}>Bu Ayki Ödemeler</p>
+        <button type="button" aria-expanded={paymentsOpen} onClick={()=>setPaymentsOpen(value=>!value)} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, margin:0, padding:0, background:"transparent", border:"none", color:"#111", fontWeight:700, fontSize:13, textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}><span>Bu Ayki Ödemeler</span><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>{paymentsOpen ? "▲" : "▼"}</span></button>
+        {paymentsOpen ? <div style={{ marginTop:12 }}>
         {ayÖdemeleri.length === 0
           ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay ödeme yok</p>
           : [...ayÖdemeleri].reverse().map((o, i) => (
@@ -8254,6 +8259,7 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
               </div>
             ))
         }
+        </div> : null}
       </div>
 
       {showExpenseForm ? (
