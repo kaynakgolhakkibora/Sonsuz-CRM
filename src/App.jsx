@@ -3202,7 +3202,7 @@ function isPaymentDue(student) {
 const INSTRUMENTS = ["Davul","Piyano","Gitar"];
 const DAYS = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"];
 const FOCUS_SECTIONS = ["Teknik çalışma","Ritim","Nota okuma","Parça çalışması","Doğaçlama","Teori","Tekrar"];
-const EXPENSE_CATEGORIES = ["Kira","Elektrik","Su","İnternet","Öğretmen/Personel","Muhasebe/Vergi","Malzeme","Reklam","Diğer"];
+const EXPENSE_CATEGORIES = ["Kira","Elektrik","Su","İnternet","Öğretmen/Personel","Muhasebe/Vergi","Malzeme","Reklam","Yemek/İçecek","Hizmet","Diğer"];
 const TIMES = [];
 for (let h=10;h<=19;h++) for (let m=0;m<60;m+=15) TIMES.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
@@ -8116,7 +8116,7 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [savingExpense, setSavingExpense] = useState(false);
   const [expenseError, setExpenseError] = useState("");
-  const [expenseForm, setExpenseForm] = useState({ title:"", category:"Kira", amount:"", expense_date:localDateKey(), is_recurring:false });
+  const [expenseForm, setExpenseForm] = useState({ category:"Kira", amount:"", expense_date:localDateKey(), is_recurring:false });
   const simdi = new Date();
   const hedefAy = new Date(simdi.getFullYear(), simdi.getMonth() + ayOffset, 1);
   const ayAdi = hedefAy.toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
@@ -8147,20 +8147,20 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
 
   const openExpenseForm = () => {
     const sameMonth = hedefAy.getFullYear() === simdi.getFullYear() && hedefAy.getMonth() === simdi.getMonth();
-    setExpenseForm({ title:"", category:"Kira", amount:"", expense_date:sameMonth ? localDateKey(simdi) : localDateKey(hedefAy), is_recurring:false });
+    setExpenseForm({ category:"Kira", amount:"", expense_date:sameMonth ? localDateKey(simdi) : localDateKey(hedefAy), is_recurring:false });
     setExpenseError("");
     setShowExpenseForm(true);
   };
 
   const submitExpense = async () => {
     const amount = Number(String(expenseForm.amount).replace(",","."));
-    if (!expenseForm.title.trim() || !expenseForm.expense_date || !Number.isFinite(amount) || amount <= 0) {
-      setExpenseError("Gider adı, tarih ve sıfırdan büyük tutar girin.");
+    if (!EXPENSE_CATEGORIES.includes(expenseForm.category) || !expenseForm.expense_date || !Number.isFinite(amount) || amount <= 0) {
+      setExpenseError("Kategori, tarih ve sıfırdan büyük tutar girin.");
       return;
     }
     setExpenseError("");
     setSavingExpense(true);
-    const saved = await onExpenseAdd({ ...expenseForm, title:expenseForm.title.trim(), amount });
+    const saved = await onExpenseAdd({ ...expenseForm, title:expenseForm.category, amount });
     setSavingExpense(false);
     if (saved) setShowExpenseForm(false);
   };
@@ -8258,8 +8258,6 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
 
       {showExpenseForm ? (
         <Sheet title="Gider Ekle" subtitle={ayAdi} onClose={()=>{ if(!savingExpense) setShowExpenseForm(false); }}>
-          <label style={LBL}>Gider Adı</label>
-          <input style={INP} value={expenseForm.title} onChange={e=>setExpenseForm(f=>({...f,title:e.target.value}))} placeholder="Örn. Atölye kirası" />
           <label style={LBL}>Kategori</label>
           <select style={INP} value={expenseForm.category} onChange={e=>setExpenseForm(f=>({...f,category:e.target.value}))}>{EXPENSE_CATEGORIES.map(category=><option key={category}>{category}</option>)}</select>
           <label style={LBL}>Tutar</label>
