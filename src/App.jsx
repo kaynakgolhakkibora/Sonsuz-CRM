@@ -8220,14 +8220,14 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
 
       <div style={{ background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 3px rgba(0,0,0,.05)", marginBottom:14 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:12 }}>
-          <div><p style={{ margin:0, fontSize:13, fontWeight:800, color:"#111" }}>Bu Ayki Giderler</p><p style={{ margin:"3px 0 0", fontSize:11, color:"#888" }}>Sabit giderler başlangıç ayından itibaren otomatik görünür.</p></div>
+          <div style={{ textAlign:"left" }}><p style={{ margin:0, fontSize:13, fontWeight:800, color:"#111" }}>Bu Ayki Giderler</p><p style={{ margin:"3px 0 0", fontSize:11, color:"#888" }}>Sabit giderler başlangıç ayından itibaren otomatik görünür.</p></div>
           <button onClick={openExpenseForm} style={{ background:"#dc2626", color:"#fff", border:"none", borderRadius:9, padding:"7px 10px", fontSize:12, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>＋ Gider Ekle</button>
         </div>
         {ayGiderleri.length === 0 ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay gider yok</p> : ayGiderleri.map((expense,index) => {
           const canStopRecurring = expense.is_recurring && !expense.recurring_until && hedefAyBaslangici >= buAyBaslangici;
           return (
             <div key={expense.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"10px 0", borderBottom:index<ayGiderleri.length-1?"1px solid #f0f0f0":"none" }}>
-              <div>
+              <div style={{ textAlign:"left" }}>
                 <p style={{ margin:0, fontSize:14, fontWeight:750, color:"#111" }}>{expense.title}</p>
                 <p style={{ margin:"2px 0 0", fontSize:11, color:"#888" }}>{expense.category} · {expense.is_recurring ? `Her ay · ${fmtMed(expense.expense_date)} başlangıç` : fmtMed(expense.expense_date)}</p>
               </div>
