@@ -8246,7 +8246,7 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
           ? <p style={{ textAlign:"center", color:"#bbb", padding:"20px 0", fontWeight:600 }}>Bu ay ödeme yok</p>
           : [...ayÖdemeleri].reverse().map((o, i) => (
               <div key={o.id || i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom: i < ayÖdemeleri.length-1 ? "1px solid #f0f0f0" : "none" }}>
-                <div>
+                <div style={{ textAlign:"left" }}>
                   <p style={{ margin:0, fontSize:14, fontWeight:700, color:"#111" }}>{o.ogrenci}</p>
                   <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{fmtMed(o.tarih)}{o.ekDersSayisi > 0 ? " +" + o.ekDersSayisi + " ek ders" : ""}{o.ödemeTürü ? " · "+o.ödemeTürü : ""}</p>
                 </div>
