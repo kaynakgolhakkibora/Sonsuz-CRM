@@ -8080,7 +8080,7 @@ function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMon
       <div style={{ ...SECTION, padding:"15px 16px" }}>
         <AçılırBugünBölümü title="Ders Dağılımı" color="#111">
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
-          <TonePill>{normalCount} Normal</TonePill><TonePill tone="info">{telafiCount} Telafi</TonePill><TonePill tone="special">{ekCount} Ek ders</TonePill><TonePill tone="warn">{singleCount} Tek Ders</TonePill>
+          <TonePill>{normalCount} Normal</TonePill><TonePill tone="info">{telafiCount} Telafi</TonePill><TonePill tone="special">{ekCount} Ek Ders</TonePill><TonePill tone="warn">{singleCount} Tek Ders</TonePill>
         </div>
         {teacherRows.length === 0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Bu ay yapılmış ders yok.</p> : teacherRows.map(([name,count]) => {
           const pct = totalLessonCount ? Math.round(count / totalLessonCount * 100) : 0;
