@@ -8026,6 +8026,7 @@ function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMon
   const singleCount = singleTeacherCounts.reduce((sum,item)=>sum+item.count,0);
   const totalLessonCount = yapilanDersler.length + singleCount;
   const yeniKayitlar = students.filter(student => inMonth(student.lesson_start_date || student.lessonStartDate, hedefAy));
+  ayOdemeleri.push(...singleLessonPaymentsForMonth(singleLessons,hedefAy));
   const toplamGelir = ayOdemeleri.reduce((sum,payment)=>sum+(payment.tutar||0),0);
   const normalCount = yapilanDersler.filter(x=>x.type==="Normal").length;
   const telafiCount = yapilanDersler.filter(x=>x.type==="Telafi").length;
