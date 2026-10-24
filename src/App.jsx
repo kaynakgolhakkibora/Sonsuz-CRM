@@ -8061,12 +8061,18 @@ function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMon
         <button onClick={()=>setAyOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
       </div>
 
-      <div tabIndex={0} aria-label="Aylık özet göstergeleri" style={{ display:"grid", gridTemplateColumns:"repeat(5,minmax(130px,1fr))", gap:8, marginBottom:14, overflowX:"auto", overflowWrap:"anywhere" }}>
+      <div className="crm-monthly-summary-metrics" tabIndex={0} aria-label="Aylık özet göstergeleri" style={{ display:"grid", gridTemplateColumns:"repeat(5,minmax(130px,1fr))", gap:8, marginBottom:14, overflowX:"auto", overflowWrap:"anywhere" }}>
         <MiniMetric label="Yapılan Ders" value={totalLessonCount} tone="info" />
         <MiniMetric label="Ciro" value={toplamGelir.toLocaleString("tr-TR")+" TL"} tone="good" />
         <MiniMetric label="Yeni Kayıt" value={yeniKayitlar.length} tone="special" />
         <MiniMetric label="Donduran" value={lifecycleKnown ? donduranIds.size : "—"} tone="warn" />
         <MiniMetric label="Ayrılan" value={lifecycleKnown ? ayrilanIds.size : "—"} tone="danger" />
+        <style>{`
+          .crm-monthly-summary-metrics > div { display:flex; flex-direction:column; }
+          .crm-monthly-summary-metrics > div > p:first-child { min-height:21px; }
+          .crm-monthly-summary-metrics > div > p:last-child { margin-top:auto !important; padding-top:5px; }
+          .crm-monthly-summary-metrics > div:nth-child(2) > p:first-child { font-size:16px !important; }
+        `}</style>
       </div>
 
       {!lifecycleKnown ? <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:12, padding:"10px 12px", marginBottom:14 }}><p style={{ margin:0, fontSize:12, color:"#92400e", fontWeight:700 }}>Dondurma ve ayrılma tarihçesi Ağustos 2026 itibarıyla kesin tutulur; önceki aylar tahmin edilmez.</p></div> : null}
