@@ -3823,6 +3823,7 @@ function ResumeProgramSheet({ student, onClose, onResume }) {
 }
 
 function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvaluationMessage }) {
+  const [rightMessageOpen, setRightMessageOpen] = useState(false);
   const plannedAt = telafiPlannedAt(record);
   const telafiCheckRef = homeworkCheckRef("telafi", record?.id);
   const previousHomework = homeworkForTelafiCheck(student, record);
@@ -3904,6 +3905,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
   };
 
   return (
+    rightMessageOpen ? <TelafiHakkiMesajSheet student={student} record={record} onClose={()=>setRightMessageOpen(false)} onSent={()=>setRightMessageOpen(false)} /> :
     <Sheet title="Telafi Dersi" subtitle={student?.name} onClose={()=>{ if (!savingPlan && !savingCompletion) onClose(); }}>
       <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
         <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#0369a1", letterSpacing:1 }}>İptal Edilen Ders</p>
@@ -3921,6 +3923,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
           </div>
         </div>
       </div>
+      <Btn bg="#25D366" disabled={savingPlan || savingCompletion} onClick={()=>{ if (!savingPlan && !savingCompletion) setRightMessageOpen(true); }}>Telafi Hakkı Mesajı</Btn>
       {plannedAt ? (
         <div style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
           <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#7e22ce", letterSpacing:1 }}>Planlanan Telafi</p>
