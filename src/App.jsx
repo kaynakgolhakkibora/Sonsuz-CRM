@@ -8061,9 +8061,9 @@ function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMon
         <button onClick={()=>setAyOffset(o=>o+1)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"6px 14px", fontWeight:700, cursor:"pointer", fontFamily:"inherit", fontSize:18 }}>›</button>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))", gap:8, marginBottom:14 }}>
+      <div tabIndex={0} aria-label="Aylık özet göstergeleri" style={{ display:"grid", gridTemplateColumns:"repeat(5,minmax(130px,1fr))", gap:8, marginBottom:14, overflowX:"auto", overflowWrap:"anywhere" }}>
         <MiniMetric label="Yapılan Ders" value={totalLessonCount} tone="info" />
-        <MiniMetric label="Tahsilat" value={toplamGelir.toLocaleString("tr-TR")+" TL"} tone="good" />
+        <MiniMetric label="Ciro" value={toplamGelir.toLocaleString("tr-TR")+" TL"} tone="good" />
         <MiniMetric label="Yeni Kayıt" value={yeniKayitlar.length} tone="special" />
         <MiniMetric label="Donduran" value={lifecycleKnown ? donduranIds.size : "—"} tone="warn" />
         <MiniMetric label="Ayrılan" value={lifecycleKnown ? ayrilanIds.size : "—"} tone="danger" />
