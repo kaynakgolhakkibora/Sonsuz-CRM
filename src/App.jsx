@@ -7982,7 +7982,7 @@ function MonthlyReportsArchive({ reports, onDownload, downloadingId }) {
   </div>;
 }
 
-function AylikOzet({ students, teachers, monthlyReports, onMonthlyReportDownload, downloadingReportId, onTeacherAdd, onTeacherToggle }) {
+function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMonthlyReportDownload, downloadingReportId, onTeacherAdd, onTeacherToggle }) {
   const [ayOffset, setAyOffset] = useState(0);
   const [yeniOgretmen, setYeniOgretmen] = useState("");
   const simdi = new Date();
@@ -8022,6 +8022,9 @@ function AylikOzet({ students, teachers, monthlyReports, onMonthlyReportDownload
     });
   });
 
+  const singleTeacherCounts = teachers.map(teacher => ({ name:teacher.name || "Öğretmen belirtilmemiş", count:teacherSingleLessonCount(singleLessons,teacher,hedefAy) }));
+  const singleCount = singleTeacherCounts.reduce((sum,item)=>sum+item.count,0);
+  const totalLessonCount = yapilanDersler.length + singleCount;
   const yeniKayitlar = students.filter(student => inMonth(student.lesson_start_date || student.lessonStartDate, hedefAy));
   const toplamGelir = ayOdemeleri.reduce((sum,payment)=>sum+(payment.tutar||0),0);
   const normalCount = yapilanDersler.filter(x=>x.type==="Normal").length;
@@ -8032,6 +8035,9 @@ function AylikOzet({ students, teachers, monthlyReports, onMonthlyReportDownload
     acc[name] = (acc[name] || 0) + 1;
     return acc;
   }, {});
+  singleTeacherCounts.forEach(({name,count}) => {
+    if (count > 0) teacherCounts[name] = (teacherCounts[name] || 0) + count;
+  });
   const teacherRows = Object.entries(teacherCounts).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],"tr"));
   const trackingStart = new Date(LIFECYCLE_TRACKING_START+"T00:00:00");
   const lifecycleKnown = hedefAy.getTime() >= new Date(trackingStart.getFullYear(), trackingStart.getMonth(), 1).getTime();
@@ -8055,7 +8061,7 @@ function AylikOzet({ students, teachers, monthlyReports, onMonthlyReportDownload
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))", gap:8, marginBottom:14 }}>
-        <MiniMetric label="Yapılan Ders" value={yapilanDersler.length} tone="info" />
+        <MiniMetric label="Yapılan Ders" value={totalLessonCount} tone="info" />
         <MiniMetric label="Tahsilat" value={toplamGelir.toLocaleString("tr-TR")+" TL"} tone="good" />
         <MiniMetric label="Yeni Kayıt" value={yeniKayitlar.length} tone="special" />
         <MiniMetric label="Donduran" value={lifecycleKnown ? donduranIds.size : "—"} tone="warn" />
@@ -8065,17 +8071,18 @@ function AylikOzet({ students, teachers, monthlyReports, onMonthlyReportDownload
       {!lifecycleKnown ? <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:12, padding:"10px 12px", marginBottom:14 }}><p style={{ margin:0, fontSize:12, color:"#92400e", fontWeight:700 }}>Dondurma ve ayrılma tarihçesi Ağustos 2026 itibarıyla kesin tutulur; önceki aylar tahmin edilmez.</p></div> : null}
 
       <div style={{ ...SECTION, padding:"15px 16px" }}>
-        <p style={{ margin:"0 0 10px", fontSize:13, fontWeight:700, color:"#111", textAlign:"left", fontFamily:"inherit" }}>Ders Dağılımı</p>
+        <AçılırBugünBölümü title="Ders Dağılımı" color="#111">
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
-          <TonePill>{normalCount} Normal</TonePill><TonePill tone="info">{telafiCount} Telafi</TonePill><TonePill tone="special">{ekCount} Ek ders</TonePill>
+          <TonePill>{normalCount} Normal</TonePill><TonePill tone="info">{telafiCount} Telafi</TonePill><TonePill tone="special">{ekCount} Ek ders</TonePill><TonePill tone="warn">{singleCount} Tek Ders</TonePill>
         </div>
         {teacherRows.length === 0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Bu ay yapılmış ders yok.</p> : teacherRows.map(([name,count]) => {
-          const pct = yapilanDersler.length ? Math.round(count / yapilanDersler.length * 100) : 0;
+          const pct = totalLessonCount ? Math.round(count / totalLessonCount * 100) : 0;
           return <div key={name} style={{ marginBottom:10 }}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:12, marginBottom:4 }}><strong style={{ fontSize:13 }}>{name}</strong><span style={{ fontSize:12, color:"#475569", fontWeight:700 }}>{count} ders · %{pct}</span></div>
             <div style={{ height:7, borderRadius:10, background:"#ede9fe", overflow:"hidden" }}><div style={{ width:pct+"%", height:"100%", background:"#6d28d9", borderRadius:10 }} /></div>
           </div>;
         })}
+        </AçılırBugünBölümü>
       </div>
 
       <div style={{ ...SECTION, padding:"15px 16px" }}>
@@ -15731,7 +15738,7 @@ export default function App() {
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} onTrialAppointment={lesson=>openTrialAppointment(lesson)} trialAppointmentOpeningId={trialAppointmentOpeningId} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
-        {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /></> : null}
+        {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} singleLessons={singleLessons} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /></> : null}
         {mainTab === "liste" ? (
           <div>
             {telafiWarnList.length > 0 ? (
