@@ -4685,6 +4685,10 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
   const [gelecekAcik, setGelecekAcik] = useState(false);
   const [gecmisAcik, setGecmisAcik] = useState(false);
   const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
+  const [freezeMessageStudentId, setFreezeMessageStudentId] = useState("");
+  const [freezeSaving, setFreezeSaving] = useState(false);
+  const [freezeErrorStudentId, setFreezeErrorStudentId] = useState("");
+  const freezeSavingRef = useRef(false);
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
   const telafiRecords = student.telafi_records || [];
@@ -4709,6 +4713,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
   ].filter(Boolean).join(" · ");
 
   return (
+    freezeMessageStudentId === student.id && student.frozen && !left ? <DondurmaMesajSheet student={student} onClose={()=>setFreezeMessageStudentId("")} onSent={()=>setFreezeMessageStudentId("")} /> :
     <>
       <Sheet title={student.name} onClose={onClose}>
         <div style={SECTION}>
@@ -5019,12 +5024,28 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
             </div>
           ) : null}
           <div style={{ background:left?"#fff1f2":student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(left?"#fecdd3":student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
-            <button onClick={() => {
-              if (student.frozen && !left) setShowResumeProgram(true);
-              else onToggleFreeze(student.id, left ? false : true);
-            }} style={{ width:"100%", background:left||student.frozen?"#2563eb":"#f59e0b", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>
-              {left ? "Öğrenciyi Yeniden Aktif Et" : student.frozen ? "Programı Devam Ettir" : "Programı Dondur"}
+            <button disabled={freezeSaving} onClick={async() => {
+              if (freezeSavingRef.current) return;
+              if (student.frozen && !left) { setShowResumeProgram(true); return; }
+              if (left) { onToggleFreeze(student.id, false); return; }
+              freezeSavingRef.current = true;
+              setFreezeSaving(true);
+              setFreezeErrorStudentId("");
+              try {
+                const savedStudent = await onToggleFreeze(student.id, true);
+                if (savedStudent?.id === student.id && savedStudent.frozen && !isStudentLeft(savedStudent)) setFreezeMessageStudentId(savedStudent.id);
+                else setFreezeErrorStudentId(student.id);
+              } catch {
+                setFreezeErrorStudentId(student.id);
+              } finally {
+                freezeSavingRef.current = false;
+                setFreezeSaving(false);
+              }
+            }} style={{ width:"100%", background:left||student.frozen?"#2563eb":"#f59e0b", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:freezeSaving?"wait":"pointer", fontFamily:"inherit" }}>
+              {freezeSaving ? "Kaydediliyor…" : left ? "Öğrenciyi Yeniden Aktif Et" : student.frozen ? "Programı Devam Ettir" : "Programı Dondur"}
             </button>
+            {student.frozen && !left ? <Btn bg="#25D366" disabled={freezeSaving} onClick={()=>{ if (!freezeSavingRef.current) setFreezeMessageStudentId(student.id); }}>Dondurma Mesajı</Btn> : null}
+            {freezeErrorStudentId === student.id ? <p role="alert" style={{ margin:"8px 0 0", fontSize:12, color:"#b91c1c" }}>Program dondurma kaydı doğrulanamadı. Mesaj açılmadı.</p> : null}
             {!left ? <button onClick={() => { if(window.confirm(student.name+" ayrılan öğrenci olarak kaydedilsin mi? Geçmiş kayıtlar korunacaktır.")) onStudentLeft(student.id); }} style={{ width:"100%", marginTop:8, background:"#be123c", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Öğrenci Ayrıldı</button> : null}
           </div>
           <Btn bg="#ef4444" onClick={async() => { if(window.confirm(student.name+" öğrenci ekranlarından kaldırılsın mı? Geçmiş ders ve ödeme kayıtları finans geçmişinde korunacaktır.")){ const deleted=await onDelete(student.id); if(deleted) onClose(); } }}>Öğrenciyi Sil</Btn>
@@ -5229,6 +5250,31 @@ function paymentNoticeMessage(student, info, kind) {
     : kind === "wa3" ? msgÖdemeHatirlatma3(student, info) : msgÖdemeHatirlatma();
   return text.replace("Merhaba,", "Merhaba,\n"+period);
 }
+function msgProgramDondurma(student) {
+  const remaining = calcBalance(student?.schedule || []);
+  const pending = activeTelafiRecords(student?.telafi_records || []);
+  const lines = [];
+  if (remaining > 0) lines.push("• Kalan paket dersi: "+remaining);
+  if (pending.length > 0) {
+    lines.push("• Bekleyen telafi hakkı: "+pending.length);
+    pending.forEach((record,index) => {
+      const expiry = telafiPolicyDate(record.expiry);
+      const recordedDay = String(record.expiry || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const validExpiry = expiry && !isNaN(new Date(record.expiry).getTime()) && (!recordedDay || (expiry.getFullYear() === Number(recordedDay[1]) && expiry.getMonth()+1 === Number(recordedDay[2]) && expiry.getDate() === Number(recordedDay[3])));
+      const expiryText = validExpiry ? expiry.toLocaleDateString("tr-TR", { day:"numeric", month:"long", year:"numeric" }) : "Kayıtta belirtilmemiş";
+      lines.push("• "+(pending.length > 1 ? (index+1)+". telafi hakkının" : "Telafi hakkının")+" son kullanım tarihi: "+expiryText);
+    });
+  }
+  return [
+    "Merhaba,",
+    (student?.name || "Öğrencimiz")+" için ders programımız dondurulmuştur.",
+    ...(lines.length ? ["Güncel kalan ders bilgileriniz:\n\n"+lines.join("\n")] : []),
+    "Dönüş planınız netleştiğinde yeni ders programınızı oluşturmak için bizimle iletişime geçebilirsiniz.",
+    "Program Dondurma\n\n• 2-3 hafta ve üzeri planlı yokluklarda program dondurulabilir veya mevcut haliyle devam ettirilebilir.\n• Programın devam etmesi halinde öğrenciye ayrılan gün ve saat korunur; ders ve ödeme takvimi normal şekilde işlemeye devam eder.\n• Planlı yokluk sırasında derslere katılmasanız bile, size ayırılan gün ve saatin korunması için ödeme günleri gelmeye devam eder ve telafi hakları birikebilir. Bunu istemiyorsanız programı dondurmanızı öneririz.\n• Program dondurulduğunda mevcut gün ve saat korunmaz.\n• Dönüşte aynı gün ve saat garanti edilmez; kontenjan durumuna göre yeniden planlama yapılır.",
+    "Bodrum Sonsuz Sanat"
+  ].join("\n\n");
+}
+
 function msgDondurmaUyarisi(student) {
   const delay = paymentOverdueMessageLine(student);
   return "Merhaba,\n\nÖdeme konusunda daha önce tarafınıza bilgilendirme yapılmış olmasına rağmen ödemeniz henüz tarafımıza ulaşmamıştır."+(delay ? "\n"+delay : "")+"\n\nEğitim programlarımız sabit gün ve saat planlamasıyla yürütüldüğü için, düzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır.\n\nBu nedenle programınızı bugün itibarıyla donduruyoruz. Ayrılan gün ve saat, bekleme listesindeki diğer öğrencilerin kullanımına açılacaktır.\n\nİlerleyen dönemde programa devam etmek istemeniz halinde, o tarihteki uygun kontenjan durumuna göre yeni bir gün ve saat planlaması yapılabilir.\n\nAnlayışınız için teşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
@@ -5705,6 +5751,23 @@ function MesajSheet({ student, onClose, initialKey = "" }) {
       </div>
     </Sheet>
   );
+}
+
+function DondurmaMesajSheet({ student, onClose, onSent }) {
+  const text = msgProgramDondurma(student);
+  const send = async () => {
+    const phone = calendarAvailabilityPhone(student.phone);
+    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
+    else await navigator.clipboard.writeText(text);
+    if (onSent) await onSent(phone ? "whatsapp" : "copied");
+  };
+  return <Sheet title="Program Dondurma Bilgilendirmesi" subtitle={student.name} onClose={onClose}>
+    <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
+      <p style={{ margin:0, fontSize:12, color:"#475569", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
+    </div>
+    <Btn bg="#25D366" onClick={send}>{calendarAvailabilityPhone(student.phone) ? "WhatsApp'ta Aç" : "Mesajı Kopyala"}</Btn>
+    <Btn bg="#111" outline onClick={onClose}>Şimdi Değil</Btn>
+  </Sheet>;
 }
 
 function TelafiHakkiMesajSheet({ student, record, onClose, onSent }) {
