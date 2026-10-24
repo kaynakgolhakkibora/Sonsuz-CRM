@@ -7972,12 +7972,12 @@ function PendingMonthlyReports({ reports, onDownload, downloadingId }) {
 function MonthlyReportsArchive({ reports, onDownload, downloadingId }) {
   const [preview,setPreview] = useState(null);
   return <div style={{ ...SECTION, padding:"15px 16px" }}>
-    <p style={{ margin:"0 0 4px", fontSize:13, fontWeight:800, color:"#111" }}>Ay Sonu Raporları</p>
-    <p style={{ margin:"0 0 10px", fontSize:11, color:"#888" }}>Oluşturulan raporlar burada değişmeden saklanır.</p>
-    {reports.length===0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Henüz aylık rapor oluşmadı.</p> : reports.map((report,index)=><div key={report.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"9px 0", borderBottom:index<reports.length-1?"1px solid #f1f5f9":"none" }}>
-      <div><strong style={{ fontSize:13 }}>{report.label}</strong><p style={{ margin:"2px 0 0", fontSize:11, color:report.downloadedAt?"#059669":"#c2410c", fontWeight:700 }}>{report.downloadedAt?"PDF indirildi · "+fmtMed(report.downloadedAt):"İndirme bekliyor"}</p></div>
+    <AçılırBugünBölümü title="Ay Sonu Raporları" color="#111">
+    {reports.length===0 ? <p style={{ margin:0, color:"#aaa", fontSize:13, textAlign:"left" }}>Henüz aylık rapor oluşmadı.</p> : reports.map((report,index)=><div key={report.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"9px 0", borderBottom:index<reports.length-1?"1px solid #f1f5f9":"none" }}>
+      <div style={{ textAlign:"left" }}><strong style={{ fontSize:13 }}>{report.label}</strong><p style={{ margin:"2px 0 0", fontSize:11, color:report.downloadedAt?"#059669":"#c2410c", fontWeight:700 }}>{report.downloadedAt?"PDF indirildi · "+fmtMed(report.downloadedAt):"İndirme bekliyor"}</p></div>
       <div style={{ display:"flex", gap:6 }}><button onClick={()=>setPreview(report)} style={{ border:"none", borderRadius:8, padding:"6px 8px", background:"#f3f4f6", color:"#374151", fontSize:11, fontWeight:800, cursor:"pointer" }}>Görüntüle</button><button disabled={downloadingId===report.id} onClick={()=>onDownload(report)} style={{ border:"none", borderRadius:8, padding:"6px 9px", background:"#6d28d9", color:"#fff", fontSize:11, fontWeight:800, cursor:downloadingId===report.id?"wait":"pointer" }}>{downloadingId===report.id?"Hazırlanıyor...":"PDF"}</button></div>
     </div>)}
+    </AçılırBugünBölümü>
     {preview ? <MonthlyReportPreviewSheet report={preview} onClose={()=>setPreview(null)} onDownload={onDownload} downloading={downloadingId===preview.id} /> : null}
   </div>;
 }
