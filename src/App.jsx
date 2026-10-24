@@ -8065,9 +8065,9 @@ function AylikOzet({ students, teachers, monthlyReports, onMonthlyReportDownload
       {!lifecycleKnown ? <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:12, padding:"10px 12px", marginBottom:14 }}><p style={{ margin:0, fontSize:12, color:"#92400e", fontWeight:700 }}>Dondurma ve ayrılma tarihçesi Ağustos 2026 itibarıyla kesin tutulur; önceki aylar tahmin edilmez.</p></div> : null}
 
       <div style={{ ...SECTION, padding:"15px 16px" }}>
-        <p style={{ margin:"0 0 10px", fontSize:13, fontWeight:800, color:"#111" }}>Ders Dağılımı</p>
+        <p style={{ margin:"0 0 10px", fontSize:13, fontWeight:700, color:"#111", textAlign:"left", fontFamily:"inherit" }}>Ders Dağılımı</p>
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
-          <TonePill>{normalCount} normal</TonePill><TonePill tone="info">{telafiCount} telafi</TonePill><TonePill tone="special">{ekCount} ek ders</TonePill>
+          <TonePill>{normalCount} Normal</TonePill><TonePill tone="info">{telafiCount} Telafi</TonePill><TonePill tone="special">{ekCount} Ek ders</TonePill>
         </div>
         {teacherRows.length === 0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Bu ay yapılmış ders yok.</p> : teacherRows.map(([name,count]) => {
           const pct = yapilanDersler.length ? Math.round(count / yapilanDersler.length * 100) : 0;
