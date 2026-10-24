@@ -8079,14 +8079,16 @@ function AylikOzet({ students, teachers, monthlyReports, onMonthlyReportDownload
       </div>
 
       <div style={{ ...SECTION, padding:"15px 16px" }}>
-        <p style={{ margin:"0 0 8px", fontSize:13, fontWeight:800, color:"#111" }}>Yeni Kayıtlar</p>
+        <AçılırBugünBölümü title="Yeni Kayıtlar" color="#111">
         {yeniKayitlar.length === 0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Bu ay yeni kayıt yok.</p> : yeniKayitlar.map(student=><div key={student.id} style={{ display:"flex", justifyContent:"space-between", gap:10, padding:"7px 0", borderBottom:"1px solid #f1f5f9" }}><strong style={{ fontSize:13 }}>{student.name}</strong><span style={{ fontSize:12, color:"#64748b" }}>{fmtMed(student.lesson_start_date || student.lessonStartDate)} · {studentTeacherName(student)}</span></div>)}
+        </AçılırBugünBölümü>
       </div>
 
       <div style={{ ...SECTION, padding:"15px 16px" }}>
-        <p style={{ margin:"0 0 10px", fontSize:13, fontWeight:800, color:"#111" }}>Öğretmenler</p>
+        <AçılırBugünBölümü title="Öğretmenler" color="#111">
         {teachers.map(teacher=><div key={teacher.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f1f5f9" }}><div><strong style={{ fontSize:13 }}>{teacher.name}</strong><span style={{ marginLeft:7, fontSize:11, color:teacher.active?"#059669":"#94a3b8", fontWeight:700 }}>{teacher.active?"Aktif":"Pasif"}</span></div><button onClick={()=>onTeacherToggle(teacher)} style={{ border:"none", borderRadius:8, padding:"6px 9px", background:teacher.active?"#fee2e2":"#dcfce7", color:teacher.active?"#991b1b":"#166534", fontSize:11, fontWeight:800, cursor:"pointer" }}>{teacher.active?"Pasife Al":"Aktif Et"}</button></div>)}
         <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8, marginTop:12 }}><input style={INP} value={yeniOgretmen} onChange={e=>setYeniOgretmen(e.target.value)} placeholder="Yeni öğretmen adı" /><button onClick={submitTeacher} style={{ border:"none", borderRadius:10, padding:"0 14px", background:"#111", color:"#fff", fontWeight:800, cursor:"pointer" }}>Ekle</button></div>
+        </AçılırBugünBölümü>
       </div>
     </div>
   );
