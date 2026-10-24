@@ -6983,7 +6983,7 @@ function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentCl
       </section>
 
       <section style={{ ...CARD, padding:"16px 18px", marginBottom:16 }}>
-        <p style={{ margin:"0 0 10px", fontSize:14, fontWeight:850, color:"#111" }}>Öğrenciler ({teacherStudents.length})</p>
+        <AçılırBugünBölümü title={`Öğrenciler (${teacherStudents.length})`} color="#111">
         {teacherStudents.map(student => {
           const age = studentAge(student);
           return <button key={student.id} onClick={()=>onStudentClick(student)} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, padding:"10px 2px", border:"none", borderBottom:"1px solid #eef2f7", background:"transparent", textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}>
@@ -6992,6 +6992,7 @@ function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentCl
           </button>;
         })}
         {teacherStudents.length===0 ? <p style={{ margin:0, color:"#94a3b8", fontSize:13 }}>Bu öğretmene bağlı aktif öğrenci yok.</p> : null}
+        </AçılırBugünBölümü>
       </section>
 
       <section style={{ ...CARD, padding:"16px 18px" }}>
