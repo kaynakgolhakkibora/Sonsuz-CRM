@@ -6147,9 +6147,100 @@ function ZamSheet({ student, onClose, onSave }) {
   );
 }
 
-function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "", calendarMoveReadScope=null, availabilityOpen=false, onAvailabilityClose=()=>{} }) {
-  const moveRequests = calendarMoveReadRequests(students,calendarMoveReadScope,offset);
-  const moveReadKey = JSON.stringify([calendarMoveReadScope,moveRequests]);
+function calendarTeacherChoices(teachers) {
+  const active=(teachers || []).filter(teacher=>teacher?.active);
+  const ids=new Set();
+  for(const teacher of active) {
+    if(!teacher.id || !String(teacher.name || "").trim() || ids.has(teacher.id)) return [];
+    ids.add(teacher.id);
+  }
+  return [...active].sort((a,b)=>a.name.localeCompare(b.name,"tr-TR"));
+}
+
+function calendarTeacherReference(student,date=null,item=null) {
+  const reference=value=>({id:value?.teacher_id || value?.teacherId || "",name:value?.teacherName || value?.teacher_name || ""});
+  const direct=reference(item);
+  if(direct.id || direct.name) return direct;
+  if(date) {
+    const target=new Date(date);
+    if(!isNaN(target.getTime())) {
+      const history=(Array.isArray(student?.teacher_history)?student.teacher_history:[])
+        .filter(entry=>{const ref=reference(entry),at=new Date(entry?.from);return (ref.id || ref.name) && entry?.from && !isNaN(at.getTime()) && dateKey(entry.from)<=dateKey(date);})
+        .sort((a,b)=>dateKey(a.from).localeCompare(dateKey(b.from)));
+      if(history.length) return reference(history[history.length-1]);
+    }
+  }
+  return {id:student?.teacher_id || student?.teacherId || "",name:student ? studentTeacherName(student) : ""};
+}
+
+function calendarTeacherOwner(reference,teachers) {
+  if(reference?.id) return reference.id;
+  if(!reference?.name) return "";
+  const named=(teachers || []).filter(teacher=>teacher?.id && teacher.name===reference?.name);
+  return named.length===1 ? named[0].id : "";
+}
+
+function calendarTeacherProgramStudents(students,teacher,teachers,branchId) {
+  if(!teacher?.id) return null;
+  const visible=[],ids=new Set();
+  for(const student of students) {
+    if(!student?.id || student.branch_id!==branchId || ids.has(student.id)) return null;
+    ids.add(student.id);
+    if(isStudentDeleted(student) || isStudentLeft(student)) continue;
+    const owner=calendarTeacherOwner(calendarTeacherReference(student),teachers);
+    if(!owner) return null;
+    if(owner===teacher.id) visible.push(student);
+  }
+  return visible;
+}
+
+function TeacherCalendarPanel({students,teachers,singleLessons,branchId,branchName,scopeKey,programReady,calendarMoveReadScope,offset,setOffset,availabilityOpen,onAvailabilityOpen,onAvailabilityClose,onStudentClick,onSingleLessonClick,onExtraLessonClick}) {
+  const choices=calendarTeacherChoices(teachers);
+  const preferred=choices.filter(teacher=>teacher.name===DEFAULT_TEACHER_NAME);
+  const initial=preferred.length===1?preferred[0]:choices[0];
+  const [selection,setSelection]=useState(()=>({scope:scopeKey,id:initial?.id || ""}));
+  const branchDataReady=students.every(student=>student.branch_id===branchId) && singleLessons.every(lesson=>lesson.branch_id===branchId);
+  const teacher=branchDataReady && selection.scope===scopeKey ? choices.find(item=>item.id===selection.id) || null : null;
+  const selectionKey=JSON.stringify([scopeKey,teacher?.id,teacher?.name]);
+  const [programScope,setProgramScope]=useState(null);
+  const [availabilityScope,setAvailabilityScope]=useState(null);
+  const [headerHost,setHeaderHost]=useState(null);
+  useEffect(()=>{setHeaderHost(document.getElementById("crm-calendar-header-actions"));},[]);
+  useEffect(()=>{
+    if(selection.scope!==scopeKey || !choices.some(item=>item.id===selection.id)) {
+      setSelection({scope:scopeKey,id:initial?.id || ""});
+      onAvailabilityClose();
+    }
+  },[scopeKey,selection.scope,selection.id,JSON.stringify(choices.map(item=>item.id))]);
+  useEffect(()=>{setProgramScope(null);setAvailabilityScope(null);onAvailabilityClose();},[selectionKey]);
+  useEffect(()=>{if(!programReady)setProgramScope(null);},[programReady]);
+  const choose=event=>{setProgramScope(null);setAvailabilityScope(null);onAvailabilityClose();setSelection({scope:scopeKey,id:event.target.value});};
+  const controls=<>
+    <label className="crm-calendar-teacher-choice">Öğretmen
+      <select aria-label="Takvim öğretmeni" value={teacher?.id || ""} onChange={choose} disabled={!choices.length}>
+        {!teacher ? <option value="">{choices.length?"Öğretmen seçin":"Aktif öğretmen yok"}</option>:null}
+        {choices.map((item,index)=><option key={item.id} value={item.id}>{item.name}{choices.filter(other=>other.name===item.name).length>1?" ("+(index+1)+")":""}</option>)}
+      </select>
+    </label>
+    <button type="button" data-calendar-program-open disabled={!teacher || !programReady} onClick={()=>{if(teacher && programReady)setProgramScope(selectionKey);}} style={{border:"1px solid #ded6ec",borderRadius:12,padding:"10px 14px",background:"#fff",color:"#60468c",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:teacher && programReady?"pointer":"not-allowed",opacity:teacher && programReady?1:0.5,whiteSpace:"nowrap"}}>Ders Programı</button>
+    <button type="button" className="crm-primary crm-calendar-availability" aria-label="Uygun Saatler" disabled={!teacher} onClick={()=>{if(teacher){setAvailabilityScope(selectionKey);onAvailabilityOpen();}}} style={!teacher?{opacity:.5,cursor:"not-allowed"}:undefined}>Uygun Saatler</button>
+  </>;
+  return <>
+    <style>{`.crm-calendar-teacher-choice{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px;font-weight:700;color:#716b7e}.crm-calendar-teacher-choice select{box-sizing:border-box;min-width:0;max-width:230px;border:1px solid #ded6ec;border-radius:12px;padding:10px 12px;background:#fff;color:#292438;font-family:inherit;font-size:13px;font-weight:700}@media(max-width:760px){.crm-primary.crm-calendar-availability{width:auto;height:auto;padding:10px 14px;font-size:13px}.crm-primary.crm-calendar-availability:after{content:none}}@media(max-width:700px){#crm-calendar-header-actions{width:100%}.crm-calendar-teacher-choice{width:100%}.crm-calendar-teacher-choice select{flex:1;max-width:none}}`}</style>
+    {headerHost?createPortal(controls,headerHost):<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>{controls}</div>}
+    {teacher ? <WeekCal key={"week:"+selectionKey} students={students} singleLessons={singleLessons} offset={offset} setOffset={setOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} onExtraLessonClick={onExtraLessonClick} calendarTeacher={teacher} calendarTeachers={teachers} calendarMoveReadScope={calendarMoveReadScope} availabilityOpen={availabilityOpen && availabilityScope===selectionKey} onAvailabilityClose={onAvailabilityClose} /> : <p role="status" style={{padding:16,color:"#716b7e"}}>{branchDataReady ? "Takvimi görüntülemek için aktif bir öğretmen gerekli." : "Takvim verileri seçili şubeyle henüz doğrulanamadı."}</p>}
+    {teacher && programReady && programScope===selectionKey ? <CalendarProgramSheet key={"program:"+selectionKey} students={students} branchId={branchId} branchName={branchName} calendarTeacher={teacher} calendarTeachers={teachers} onClose={()=>setProgramScope(null)} />:null}
+  </>;
+}
+
+function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "", calendarTeacher=null, calendarTeachers=[], calendarMoveReadScope=null, availabilityOpen=false, onAvailabilityClose=()=>{} }) {
+  const ownerFor=(student,date=null,item=null)=>calendarTeacherOwner(calendarTeacherReference(student,date,item),calendarTeachers);
+  const moveRequests = calendarMoveReadRequests(students,calendarMoveReadScope,offset).filter(request=>{
+    if(!calendarTeacher) return true;
+    const student=students.find(item=>item.id===request.studentId),lesson=student?.schedule?.find(item=>item.id===request.lessonId);
+    return ownerFor(student)===calendarTeacher.id || ownerFor(student,lesson?.date,lesson)===calendarTeacher.id;
+  });
+  const moveReadKey = JSON.stringify([calendarMoveReadScope,calendarTeacher?.id,moveRequests]);
   const moveReadKeyRef = useRef(moveReadKey);
   moveReadKeyRef.current = moveReadKey;
   const [moveReadResult,setMoveReadResult] = useState(null);
@@ -6166,8 +6257,8 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   },[moveReadKey,moveReadRetry]);
   const verifiedMoveSources = moveReadResult?.key===moveReadKey && moveReadResult.state==="ready" ? moveReadResult.sources : [];
   const moveReadState = moveRequests.length ? (moveReadResult?.key===moveReadKey ? moveReadResult.state : "loading") : "";
-  const programStudents=students.filter(s=>s.program_operation_id && !s.frozen && !isStudentLeft(s));
-  const programReadKey=JSON.stringify([calendarMoveReadScope,programStudents.map(s=>[s.id,s.branch_id,s.record_version,s.program_operation_id])]);
+  const programStudents=students.filter(s=>s.program_operation_id && !s.frozen && !isStudentLeft(s) && (!calendarTeacher || !ownerFor(s) || ownerFor(s)===calendarTeacher.id));
+  const programReadKey=JSON.stringify([calendarMoveReadScope,calendarTeacher?.id,programStudents.map(s=>[s.id,s.branch_id,s.record_version,s.program_operation_id])]);
   const programReadKeyRef=useRef(programReadKey);
   programReadKeyRef.current=programReadKey;
   const [programReadResult,setProgramReadResult]=useState(null);
@@ -6202,6 +6293,16 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   // Read-only observation: uses the existing source filters, never changes calendar items.
   const availabilityIntervals = [];
   let availabilityInvalid = false;
+  let teacherUnresolved = false;
+  const matchesTeacher=(student,date,item,time,duration,current=false)=>{
+    if(!calendarTeacher) return !teacherName || (current?studentTeacherName(student):teacherForDate(student,date,item))===teacherName;
+    const owner=ownerFor(student,current?null:date,current?null:item);
+    if(!owner && availabilityOpen && !student?.frozen) {
+      const interval=calendarAvailabilityInterval(date,time,duration),weekEnd=new Date(days[6]);weekEnd.setDate(weekEnd.getDate()+1);
+      if(!interval || (interval.start<weekEnd.getTime() && interval.end>start.getTime())) {availabilityInvalid=true;teacherUnresolved=true;}
+    }
+    return owner===calendarTeacher.id;
+  };
   if(programReadState && programReadState!=="ready") availabilityInvalid=true;
   const observeAvailability = (date,time,duration,kind) => {
     if (!availabilityOpen || kind==="telafi-slot") return;
@@ -6257,13 +6358,14 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     }));
 
     schedule.forEach(lesson => {
-      if (teacherName && teacherForDate(student, lesson.date, lesson) !== teacherName) return;
       if (!visibleRecordedDate(lesson.date,lessonTime(student,lesson),["completed","noshow","lastminute","telafi"].includes(lesson.status))) return;
+      const recordedDayIndex=dayKeyToIndex.get(localDateKey(lesson.date));
+      if(recordedDayIndex!==undefined)actualKeys.add(recordedDayIndex+"|"+lessonTime(student,lesson));
+      if (!matchesTeacher(student,lesson.date,lesson,lessonTime(student,lesson),getLessonDuration(student,lesson))) return;
       if (!student.frozen) observeAvailability(lesson.date,lessonTime(student,lesson),getLessonDuration(student,lesson),lesson.status==="telafi"?"telafi-slot":"normal");
       const dayIndex = dayKeyToIndex.get(localDateKey(lesson.date));
       if (dayIndex === undefined) return;
       const time = lessonTime(student, lesson);
-      actualKeys.add(dayIndex+"|"+time);
       addItem({
         key:"lesson-"+student.id+"-"+(lesson.id || localDateKey(lesson.date)+"-"+time),
         student,
@@ -6278,12 +6380,12 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     const visibleProgramSlots=!student.frozen && timeline ? days.flatMap(day=>programSlotsOnDate(student,timeline,day)
       .filter(slot=>slotDayIndex(slot.day)===day.getDay()).map(slot=>({...slot,date:day}))) : [];
     visibleProgramSlots.forEach((slot,slotIndex) => {
-      if (teacherName && studentTeacherName(student) !== teacherName) return;
       const targetDay = slotDayIndex(slot.day);
       const dayIndex = days.findIndex(day=>day.getDay()===targetDay);
       if (dayIndex < 0) return;
       const slotDate = midday(days[dayIndex]);
       if (slotDate < midday(programStart) || slotDate < todayMid) return;
+      if (!matchesTeacher(student,slotDate,null,slot.time,getLessonDuration(student),true)) return;
       if (actualKeys.has(dayIndex+"|"+slot.time)) return;
       if (movedSourceKeys.has(turkeyDateKey(slotDate)+"|"+slot.time)) return;
       if (timeline.sourceKeys.includes(turkeyDateKey(slotDate)+"|"+slot.time)) return;
@@ -6302,8 +6404,8 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     (student.telafi_records || []).forEach(record => {
       const plannedAt = telafiPlannedAt(record);
       if (!plannedAt) return;
-      if (teacherName && teacherForDate(student, plannedAt, record) !== teacherName) return;
       if (!visibleRecordedDate(plannedAt,timeFromISO(plannedAt),!!record.done)) return;
+      if (!matchesTeacher(student,plannedAt,record,timeFromISO(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student))) return;
       if (!student.frozen) observeAvailability(plannedAt,timeFromISO(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student),"planned-telafi");
       const dayIndex = dayKeyToIndex.get(localDateKey(plannedAt));
       if (dayIndex === undefined) return;
@@ -6320,10 +6422,10 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
 
     (student.ek_dersler || []).forEach(extra => {
       if (isStudentDeleted(student) || !extra.date || !shouldShowExtraLessonOnCalendar(extra)) return;
-      if (teacherName && teacherForDate(student, extra.date, extra) !== teacherName) return;
       const startAt = new Date(extra.date);
       if (isNaN(startAt.getTime())) return;
       if (!visibleRecordedDate(startAt,timeFromISO(startAt),extra.status === "done")) return;
+      if (!matchesTeacher(student,startAt,extra,timeFromISO(startAt),getLessonDuration(student,extra))) return;
       if (!student.frozen) observeAvailability(startAt,timeFromISO(startAt),getLessonDuration(student,extra),"extra-lesson");
       const dayIndex = dayKeyToIndex.get(localDateKey(startAt));
       if (dayIndex === undefined) return;
@@ -6342,7 +6444,9 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
 
   singleLessons.forEach(lesson=>{
     if (lesson.deleted_at || !["planned","completed"].includes(lesson.lesson_status) || !lesson.starts_at) return;
-    if (teacherName && lesson.teacher_name!==teacherName) return;
+    if(calendarTeacher) {
+      if(!matchesTeacher(null,lesson.starts_at,lesson,timeFromISO(lesson.starts_at),lesson.duration_minutes || 45)) return;
+    } else if (teacherName && lesson.teacher_name!==teacherName) return;
     const startAt = new Date(lesson.starts_at);
     if (isNaN(startAt.getTime())) return;
     observeAvailability(startAt,timeFromISO(startAt),lesson.duration_minutes || 45,"single-lesson");
@@ -6454,7 +6558,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
           </div>)}
         </div>
       </div>
-      {availabilityOpen ? <CalendarAvailabilitySheet key={JSON.stringify([calendarMoveReadScope,offset])} days={days} intervals={availabilityIntervals} invalid={availabilityInvalid} moveReadState={programReadState && programReadState!=="ready" ? programReadState : moveReadState} onRetry={()=>{setMoveReadRetry(value=>value+1);setProgramReadRetry(value=>value+1);}} onClose={onAvailabilityClose} recipients={calendarAvailabilityRecipients(students,calendarMoveReadScope?.branchId)} /> : null}
+      {availabilityOpen ? <CalendarAvailabilitySheet key={JSON.stringify([calendarMoveReadScope,calendarTeacher?.id,offset])} teacherName={calendarTeacher?.name || ""} teacherIssue={teacherUnresolved} days={days} intervals={availabilityIntervals} invalid={availabilityInvalid} moveReadState={programReadState && programReadState!=="ready" ? programReadState : moveReadState} onRetry={()=>{setMoveReadRetry(value=>value+1);setProgramReadRetry(value=>value+1);}} onClose={onAvailabilityClose} recipients={calendarAvailabilityRecipients(students,calendarMoveReadScope?.branchId)} /> : null}
     </div>
   );
 }
@@ -6477,13 +6581,14 @@ function calendarAvailabilityInterval(date,time,duration) {
   const end=start.getTime()+minutes*60000;
   return Number.isFinite(end) ? {start:start.getTime(),end} : null;
 }
-function calendarAvailabilityModel(days,intervals,generatedAt=new Date()) {
+function calendarAvailabilityModel(days,intervals,generatedAt=new Date(),teacherName="") {
   if (days.length!==7 || days.some(day=>isNaN(new Date(day).getTime())) || intervals.some(item=>!Number.isFinite(item.start)||!Number.isFinite(item.end)||item.end<=item.start)) return null;
   const dayNames=["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"];
   const dates=days.map(day=>new Date(day));
   const weekLabel=dates[0].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})+" - "+dates[6].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"});
   return {
     weekLabel,
+    ...(teacherName?{teacherName:String(teacherName).trim()}:{}),
     generatedLabel:new Date(generatedAt).toLocaleString("tr-TR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}).replace(/\s/g," "),
     days:dates.map((day,index)=>({
       dateKey:localDateKey(day),
@@ -6501,6 +6606,7 @@ function calendarAvailabilityText(model) {
     "BODRUM SONSUZ SANAT",
     model.weekLabel,
     "Uygun Ders Saatleri",
+    ...(model.teacherName?["Öğretmen: "+model.teacherName]:[]),
     "Her ders 45 dakikadır.",
     "",
     ...model.days.map(day=>day.dayName+" ("+day.dateLabel+"): "+(day.times.length?day.times.join(", "):"Uygun saat yok")),
@@ -6536,6 +6642,7 @@ function calendarAvailabilityWhatsAppText(model) {
     "*BODRUM SONSUZ SANAT*",
     model.weekLabel,
     "*Uygun Ders Saatleri*",
+    ...(model.teacherName?["Öğretmen: "+model.teacherName]:[]),
     "Her ders 45 dakikadır.",
     "",
     ...model.days.map(day=>"*"+day.dayName+" · "+day.dateLabel+"*\n"+(day.times.length?day.times.join(" · "):"Uygun saat yok")).join("\n\n").split("\n"),
@@ -6677,8 +6784,14 @@ function calendarAvailabilityPdfBytes(model) {
   const rect=(x,y,w,h,color)=>commands.push(color+" rg "+[x,y,w,h].map(n=>n.toFixed(2)).join(" ")+" re f");
   const line=(x1,y1,x2,y2,color="0.88 0.90 0.93")=>commands.push(color+" RG 0.6 w "+x1+" "+y1+" m "+x2+" "+y2+" l S");
   const pageWidth=841.89,pageHeight=595.28,margin=32,columnWidth=(pageWidth-margin*2)/7;
-  text("BODRUM SONSUZ SANAT",margin,548,13,"0.36 0.24 0.77");
-  text(model.weekLabel,margin,522,13);
+  text("BODRUM SONSUZ SANAT",margin,model.teacherName?552:548,13,"0.36 0.24 0.77");
+  text(model.weekLabel,margin,model.teacherName?532:522,13);
+  if(model.teacherName) {
+    const label="Öğretmen: "+model.teacherName;let size=11;
+    while(size>8 && width(label,size)>pageWidth-margin*2)size-=.5;
+    if(width(label,size)>pageWidth-margin*2)throw new Error("Öğretmen adı PDF alanına sığmadı.");
+    text(label,margin,516,size,"0.40 0.44 0.50");
+  }
   text("Uygun Ders Saatleri",margin,487,27,"0.16 0.13 0.28");
   text("45 dakikalık dersler",margin,464,11,"0.40 0.44 0.50");
   const count=model.days.reduce((sum,day)=>sum+day.times.length,0);
@@ -6776,7 +6889,7 @@ function calendarProgramModel(students,branchId) {
 }
 
 // Anonymous projection of the existing permanent program; no business writes.
-function calendarProgramExportModel(program,branchName,generatedAt=new Date()) {
+function calendarProgramExportModel(program,branchName,generatedAt=new Date(),teacherName="") {
   const names=['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi','Pazar'];
   const date=new Date(generatedAt);
   if(!program || !Array.isArray(program.days) || program.days.length!==7 || isNaN(date.getTime()))return null;
@@ -6787,22 +6900,22 @@ function calendarProgramExportModel(program,branchName,generatedAt=new Date()) {
     return options.some(option=>!option)?null:{dayName:day.dayName,options};
   });
   if(days.some(day=>!day))return null;
-  return {branchName:String(branchName || '').trim(),generatedLabel:date.toLocaleString('tr-TR',{timeZone:'Europe/Istanbul',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).replace(/\s/g,' '),days};
+  return {branchName:String(branchName || '').trim(),...(teacherName?{teacherName:String(teacherName).trim()}:{}),generatedLabel:date.toLocaleString('tr-TR',{timeZone:'Europe/Istanbul',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).replace(/\s/g,' '),days};
 }
 function calendarProgramText(model) {
   if(!model)throw new Error('Ders programı doğrulanamadı.');
-  return ['SONSUZ SANAT',...(model.branchName?[model.branchName]:[]),'Ders Programı','',
+  return ['SONSUZ SANAT',...(model.branchName?[model.branchName]:[]),'Ders Programı',...(model.teacherName?['Öğretmen: '+model.teacherName]:[]),'',
     ...model.days.map(day=>day.dayName+':\n'+day.options.map(option=>option.time+' ('+(option.busy?'Dolu':'Boş')+')').join(' - ')),
     '', 'Kalıcı haftalık program.','Hazırlanma: '+model.generatedLabel].join('\n');
 }
 function calendarProgramWhatsAppText(model) {
   if(!model)throw new Error('Ders programı doğrulanamadı.');
-  return ['*SONSUZ SANAT*',...(model.branchName?[model.branchName]:[]),'*Ders Programı*','',
+  return ['*SONSUZ SANAT*',...(model.branchName?[model.branchName]:[]),'*Ders Programı*',...(model.teacherName?['Öğretmen: '+model.teacherName]:[]),'',
     model.days.map(day=>'*'+day.dayName+'*\n'+day.options.map(option=>option.busy?'~'+option.time+'~':option.time).join(' · ')).join('\n\n'),
     '', 'Kalıcı haftalık program. Üzeri çizili saatler doludur.','Hazırlanma: '+model.generatedLabel].join('\n');
 }
 function calendarProgramPdfBytes(model) {
-  const checked=calendarProgramExportModel(model,model?.branchName);
+  const checked=calendarProgramExportModel(model,model?.branchName,new Date(),model?.teacherName);
   if(!checked || typeof model.generatedLabel!=='string')throw new Error('Ders programı çıktısı doğrulanamadı.');
   const font=CALENDAR_AVAILABILITY_PDF_FONT,encoder=new TextEncoder();
   const encodeText=value=>Array.from(String(value)).map(character=>{
@@ -6832,7 +6945,13 @@ function calendarProgramPdfBytes(model) {
   }
   if(branchLines.length>2)throw new Error('Şube adı PDF alanına sığmadı.');
   branchLines.forEach((value,i)=>text(value,margin,532-i*15,12,'0.40 0.44 0.50'));
-  text('Ders Programı',margin,480,27,'0.16 0.13 0.28');
+  if(model.teacherName) {
+    const label='Öğretmen: '+model.teacherName;let size=12;
+    while(size>8 && width(label,size)>pageWidth-margin*2)size-=.5;
+    if(width(label,size)>pageWidth-margin*2)throw new Error('Öğretmen adı PDF alanına sığmadı.');
+    text(label,margin,499,size,'0.40 0.44 0.50');
+  }
+  text('Ders Programı',margin,model.teacherName?465:480,27,'0.16 0.13 0.28');
   model.days.forEach((day,index)=>{
     const bottom=top-(index+1)*rowHeight;
     rect(margin,bottom,dayWidth,rowHeight,'0.93 0.94 0.95');
@@ -6881,10 +7000,11 @@ function calendarProgramPdfBytes(model) {
 }
 
 
-function CalendarProgramSheet({students,branchId,branchName,onClose}) {
+function CalendarProgramSheet({students,branchId,branchName,calendarTeacher=null,calendarTeachers=[],onClose}) {
   const dialogRef=useRef(null),closeRef=useRef(onClose);
   closeRef.current=onClose;
-  const model=calendarProgramModel(students,branchId);
+  const programStudents=calendarTeacher ? calendarTeacherProgramStudents(students,calendarTeacher,calendarTeachers,branchId) : students;
+  const model=programStudents ? calendarProgramModel(programStudents,branchId) : null;
   const recipients=calendarAvailabilityRecipients(students,branchId);
   const aliveRef=useRef(true);
   const exportBusyRef=useRef(false);
@@ -6902,8 +7022,8 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
   const recipientPhone=calendarAvailabilityPhone(recipientMode==="student"?recipient?.phone:manualPhone);
   const query=recipientSearch.trim().toLocaleLowerCase("tr-TR");
   const matchingRecipients=recipients.filter(item=>[item.name,item.guardian,item.phone].some(value=>String(value).toLocaleLowerCase("tr-TR").includes(query)) || item.id===recipientId);
-  const exportModel=calendarProgramExportModel(model,branchName);
-  const signature=JSON.stringify([branchName,model?.days]);
+  const exportModel=calendarProgramExportModel(model,branchName,new Date(),calendarTeacher?.name);
+  const signature=JSON.stringify([branchName,calendarTeacher?.id,calendarTeacher?.name,model?.days]);
   const currentSignatureRef=useRef(signature);
   currentSignatureRef.current=signature;
   useEffect(()=>{ setFeedback(""); },[signature]);
@@ -6933,7 +7053,7 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
     exportBusyRef.current=true;setCopyBusy(true);setFeedback("");
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(calendarProgramText(calendarProgramExportModel(calendarProgramModel(students,branchId),branchName)));
+      await navigator.clipboard.writeText(calendarProgramText(calendarProgramExportModel(calendarProgramModel(programStudents,branchId),branchName,new Date(),calendarTeacher?.name)));
       if (aliveRef.current && currentSignatureRef.current===startedSignature) setFeedback("Metin kopyalandı.");
     } catch {
       if (aliveRef.current && currentSignatureRef.current===startedSignature) setFeedback("Kopyalama izni alınamadı. PDF'yi indirip gönderebilirsiniz.");
@@ -6945,7 +7065,7 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
     if (!model || exportBusyRef.current) return;
     let url="",link=null;
     try {
-      const freshModel=calendarProgramExportModel(calendarProgramModel(students,branchId),branchName);
+      const freshModel=calendarProgramExportModel(calendarProgramModel(programStudents,branchId),branchName,new Date(),calendarTeacher?.name);
       const bytes=calendarProgramPdfBytes(freshModel);
       url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
       link=document.createElement("a");link.href=url;
@@ -6957,7 +7077,7 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
   const send=()=>{
     if (!shareOpen || !model || !recipientPhone || exportBusyRef.current || sendStartedRef.current) return;
     if (recipientMode==="student" && recipients.filter(item=>item.id===recipientId).length!==1) return;
-    const freshModel=calendarProgramExportModel(calendarProgramModel(students,branchId),branchName);
+    const freshModel=calendarProgramExportModel(calendarProgramModel(programStudents,branchId),branchName,new Date(),calendarTeacher?.name);
     if (!freshModel) return;
     sendStartedRef.current=true;setFeedback("");
     let opened=null;
@@ -7026,10 +7146,10 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
       }
     `}</style>
     <div ref={dialogRef} className="crm-program-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-program-title">
-      <div className="crm-program-header"><div><p className="crm-program-brand">SONSUZ SANAT{branchName?" · "+branchName:""}</p><h2 id="crm-program-title" className="crm-program-title">Ders Programı</h2></div><button type="button" className="crm-program-close" onClick={onClose} aria-label="Ders programını kapat">×</button></div>
+      <div className="crm-program-header"><div><p className="crm-program-brand">SONSUZ SANAT{branchName?" · "+branchName:""}</p><h2 id="crm-program-title" className="crm-program-title">Ders Programı</h2>{calendarTeacher ? <p style={{margin:"9px 0 0",fontSize:13,overflowWrap:"anywhere"}}>Öğretmen: {calendarTeacher.name}</p>:null}</div><button type="button" className="crm-program-close" onClick={onClose} aria-label="Ders programını kapat">×</button></div>
       {model ? <table className="crm-program-table" aria-label="Kalıcı ders programı"><tbody>{model.days.map(day=><tr key={day.dayName}>
         <th scope="row" className="crm-program-day">{day.dayName}</th><td><div className="crm-program-options">{day.options.map(option=><span key={option.time} className={"crm-program-option "+(option.busy?"crm-program-busy":"crm-program-free")} aria-label={day.dayName+" "+option.time+" "+(option.busy?"Dolu":"Boş")}><strong>{option.time}</strong></span>)}</div></td>
-      </tr>)}</tbody></table> : <div className="crm-program-warning" role="status">Program görüntülenemedi.</div>}
+      </tr>)}</tbody></table> : <div className="crm-program-warning" role="status">{programStudents ? "Program görüntülenemedi." : "Öğretmen bağlantısı doğrulanamadığı için program görüntülenemedi."}</div>}
       <div className="crm-program-actions"><button onClick={copy} disabled={!model || copyBusy}>{copyBusy?"Kopyalanıyor…":"Metni Kopyala"}</button><button className="crm-program-pdf" onClick={download} disabled={!model || copyBusy}>PDF İndir</button><button className="crm-program-send" onClick={()=>{setShareOpen(value=>!value);setFeedback("");}} disabled={!model || copyBusy} aria-expanded={shareOpen}>Gönder</button></div>
       {shareOpen && exportModel ? <section ref={sharePanelRef} className="crm-program-share" aria-label="WhatsApp gönderimi">
         <h3>Ders programını WhatsApp'ta paylaş</h3>
@@ -7049,7 +7169,7 @@ function CalendarProgramSheet({students,branchId,branchName,onClose}) {
 }
 
 
-function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry,onClose,recipients=[]}) {
+function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry,onClose,recipients=[],teacherName="",teacherIssue=false}) {
   const dialogRef=useRef(null);
   const aliveRef=useRef(true);
   const exportBusyRef=useRef(false);
@@ -7068,8 +7188,8 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
   const query=recipientSearch.trim().toLocaleLowerCase("tr-TR");
   const matchingRecipients=recipients.filter(item=>[item.name,item.guardian,item.phone].some(value=>String(value).toLocaleLowerCase("tr-TR").includes(query)) || item.id===recipientId);
   const blocked=invalid || ["loading","error"].includes(moveReadState);
-  const model=blocked?null:calendarAvailabilityModel(days,intervals);
-  const signature=JSON.stringify(model?.days || [moveReadState,invalid]);
+  const model=blocked?null:calendarAvailabilityModel(days,intervals,new Date(),teacherName);
+  const signature=JSON.stringify([teacherName,model?.days || [moveReadState,invalid]]);
   const currentSignatureRef=useRef(signature);
   currentSignatureRef.current=signature;
   useEffect(()=>{ setFeedback(""); },[signature]);
@@ -7098,7 +7218,7 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
     exportBusyRef.current=true;setCopyBusy(true);setFeedback("");
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(calendarAvailabilityText(calendarAvailabilityModel(days,intervals)));
+      await navigator.clipboard.writeText(calendarAvailabilityText(calendarAvailabilityModel(days,intervals,new Date(),teacherName)));
       if (aliveRef.current && currentSignatureRef.current===startedSignature) setFeedback("Metin kopyalandı.");
     } catch {
       if (aliveRef.current && currentSignatureRef.current===startedSignature) setFeedback("Kopyalama izni alınamadı. PDF'yi indirip gönderebilirsiniz.");
@@ -7110,7 +7230,7 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
     if (!model || exportBusyRef.current) return;
     let url="",link=null;
     try {
-      const freshModel=calendarAvailabilityModel(days,intervals);
+      const freshModel=calendarAvailabilityModel(days,intervals,new Date(),teacherName);
       const bytes=calendarAvailabilityPdfBytes(freshModel);
       url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
       link=document.createElement("a");link.href=url;
@@ -7122,7 +7242,7 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
   const send=()=>{
     if (!shareOpen || !model || !recipientPhone || exportBusyRef.current || sendStartedRef.current) return;
     if (recipientMode==="student" && recipients.filter(item=>item.id===recipientId).length!==1) return;
-    const freshModel=calendarAvailabilityModel(days,intervals);
+    const freshModel=calendarAvailabilityModel(days,intervals,new Date(),teacherName);
     if (!freshModel) return;
     sendStartedRef.current=true;setFeedback("");
     let opened=null;
@@ -7199,12 +7319,12 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
       }
     `}</style>
     <div ref={dialogRef} className="crm-availability-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-availability-title">
-      <div className="crm-availability-header"><div><p className="crm-availability-brand">BODRUM SONSUZ SANAT</p><p className="crm-availability-subtitle">{days[0].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})} - {days[6].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})}</p><h2 id="crm-availability-title" className="crm-availability-title">Uygun Ders Saatleri</h2></div><button className="crm-availability-close" onClick={onClose} aria-label="Uygun saatleri kapat">×</button></div>
+      <div className="crm-availability-header"><div><p className="crm-availability-brand">BODRUM SONSUZ SANAT</p><p className="crm-availability-subtitle">{days[0].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})} - {days[6].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})}</p><h2 id="crm-availability-title" className="crm-availability-title">Uygun Ders Saatleri</h2>{teacherName ? <p style={{margin:"9px 0 0",fontSize:13,overflowWrap:"anywhere"}}>Öğretmen: {teacherName}</p>:null}</div><button className="crm-availability-close" onClick={onClose} aria-label="Uygun saatleri kapat">×</button></div>
       {model ? <>
         <div className="crm-availability-summary"><span>Her ders 45 dakika</span><span className="crm-availability-count">{model.days.reduce((sum,day)=>sum+day.times.length,0)} uygun saat</span></div>
         <div className="crm-availability-grid">{model.days.map(day=><section className="crm-availability-day" key={day.dateKey} aria-label={day.dayName+" "+day.dateLabel}><div className="crm-availability-day-head"><h3>{day.dayName}</h3><span className="crm-availability-date">{day.dateLabel}</span></div><div className="crm-availability-times">{day.times.length?day.times.map(time=><span key={time} className="crm-availability-time">{time}</span>):<p className="crm-availability-empty">Uygun saat yok</p>}</div></section>)}</div>
         <p className="crm-availability-note">Yukarıda belirtilen ders saatleri şu an için uygundur. Yeni talepler doğrultusunda saatlerin uygunluğu değişebilir. Size uygun gün ve saati kesinleştirmek için lütfen bizimle iletişime geçin.</p>
-      </> : <div className="crm-availability-warning" role="status">{invalid?"Takvimdeki bir dersin tarih, saat veya süresi doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":moveReadState==="error"?"Taşınan derslerin konumları doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":"Taşınan derslerin konumları kontrol ediliyor. Liste doğrulama tamamlanınca açılacak."}{moveReadState==="error"?<button onClick={onRetry}>Yalnız takvimi yeniden kontrol et</button>:null}</div>}
+      </> : <div className="crm-availability-warning" role="status">{teacherIssue?"Bir dersin öğretmen bağlantısı doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":invalid?"Takvimdeki bir dersin tarih, saat veya süresi doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":moveReadState==="error"?"Taşınan derslerin konumları doğrulanamadı. Yanlış boş saat önermemek için liste ve dışa aktarma kapalı.":"Taşınan derslerin konumları kontrol ediliyor. Liste doğrulama tamamlanınca açılacak."}{moveReadState==="error"?<button onClick={onRetry}>Yalnız takvimi yeniden kontrol et</button>:null}</div>}
       <div className="crm-availability-actions"><button onClick={copy} disabled={!model || copyBusy}>{copyBusy?"Kopyalanıyor…":"Metni Kopyala"}</button><button className="crm-availability-pdf" onClick={download} disabled={!model || copyBusy}>PDF İndir</button><button className="crm-availability-send" onClick={()=>{setShareOpen(value=>!value);setFeedback("");}} disabled={!model || copyBusy} aria-expanded={shareOpen}>Gönder</button></div>
       {shareOpen && model ? <section ref={sharePanelRef} className="crm-availability-share" aria-label="WhatsApp gönderimi">
         <h3>Uygun saatleri WhatsApp'ta paylaş</h3>
@@ -7312,7 +7432,7 @@ function ÖğretmenlerPaneli({ students, teachers, singleLessons=[], onStudentCl
 
       <section style={{ marginBottom:20 }}>
         <p style={{ margin:"0 0 9px", fontSize:13, fontWeight:850, color:"#374151" }}>Haftalık ders takvimi</p>
-        <WeekCal students={students} singleLessons={singleLessons} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} onExtraLessonClick={onExtraLessonClick} teacherName={selectedTeacher.name} calendarMoveReadScope={calendarMoveReadScope} />
+        <WeekCal students={students} singleLessons={singleLessons} offset={teacherWeekOffset} setOffset={setTeacherWeekOffset} onStudentClick={onStudentClick} onSingleLessonClick={onSingleLessonClick} onExtraLessonClick={onExtraLessonClick} teacherName={selectedTeacher.name} calendarTeacher={selectedTeacher} calendarTeachers={teachers} calendarMoveReadScope={calendarMoveReadScope} />
       </section>
 
       <section style={{ ...CARD, padding:"16px 18px", marginBottom:16 }}>
@@ -9440,12 +9560,8 @@ export default function App() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [showCalendarAvailability, setShowCalendarAvailability] = useState(false);
   useEffect(()=>{ if (mainTab!=="takvim") setShowCalendarAvailability(false); },[mainTab]);
-  const [calendarProgramOpenScope,setCalendarProgramOpenScope]=useState(null);
   const calendarProgramScopeKey=JSON.stringify([authSession?.user?.id,currentBranch?.id,protectedDataLoadGenerationRef.current]);
-  const calendarProgramReady=!!(giris && authSession?.user?.id && currentBranch?.id && loadedSources.students && browserOnline && !connectionRevalidationRequired && !programChangeIssue && !programChangeWritingRef.current);
-  useEffect(()=>{
-    if(mainTab!=="takvim" || !calendarProgramReady || (calendarProgramOpenScope && calendarProgramOpenScope!==calendarProgramScopeKey)) setCalendarProgramOpenScope(null);
-  },[mainTab,calendarProgramReady,calendarProgramOpenScope,calendarProgramScopeKey]);
+  const calendarProgramReady=!!(giris && authSession?.user?.id && currentBranch?.id && loadedSources.students && loadedSources.teachers && browserOnline && !connectionRevalidationRequired && !programChangeIssue && !programChangeWritingRef.current);
   const [toast, setToast] = useState(null);
   const trialAppointmentScopeKey = JSON.stringify([authSession?.user?.id,currentBranch?.id,protectedDataLoadGenerationRef.current]);
   const trialAppointmentReady = !!(giris && authSession?.user?.id && activeOrganization?.id && currentBranch?.id
@@ -15805,8 +15921,8 @@ export default function App() {
           <div className="crm-header-actions" style={["takvim","tekders","gelir"].includes(mainTab)?{flexWrap:"wrap",maxWidth:"100%",...(mainTab==="gelir"?{marginLeft:"auto"}:{})}:undefined}>
             {canManageBranches && mainTab!=="subeler" ? <button type="button" className="crm-owner-branches" title="Şubeleri yönet" onClick={()=>setMainTab("subeler")}>Şubeler</button> : null}
             {hasMultipleSelectableBranches ? <button type="button" className="crm-branch-switch" title="Aktif şubeyi değiştir" onClick={()=>setShowBranchMenu(true)}>⌄ {currentBranch.name}</button> : null}
-            {mainTab==="takvim" ? <button type="button" data-calendar-program-open disabled={!calendarProgramReady} onClick={()=>{if(calendarProgramReady)setCalendarProgramOpenScope(calendarProgramScopeKey);}} style={{border:"1px solid #ded6ec",borderRadius:12,padding:"10px 14px",background:"#fff",color:"#60468c",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:calendarProgramReady?"pointer":"not-allowed",opacity:calendarProgramReady?1:0.5,whiteSpace:"nowrap"}}>Ders Programı</button> : null}
-            {["liste","subeler","personel","tekders","takvim"].includes(mainTab) ? <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="personel"?openStaffInvite():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):mainTab==="takvim"?setShowCalendarAvailability(true):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="personel"?"＋ Personel Davet Et":mainTab==="tekders"?"＋ Tek Ders Ekle":mainTab==="takvim"?"Uygun Saatler":"＋ Öğrenci ekle"}</button> : null}
+            {mainTab==="takvim" ? <div id="crm-calendar-header-actions" style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",maxWidth:"100%"}} /> : null}
+            {["liste","subeler","personel","tekders"].includes(mainTab) ? <button className="crm-primary" onClick={()=>mainTab==="subeler"?openBranchCreate():mainTab==="personel"?openStaffInvite():mainTab==="tekders"?setSingleLessonSheet({ mode:"add" }):mainTab==="takvim"?setShowCalendarAvailability(true):setShowAdd(true)}>{mainTab==="subeler"?"＋ Yeni Şube":mainTab==="personel"?"＋ Personel Davet Et":mainTab==="tekders"?"＋ Tek Ders Ekle":mainTab==="takvim"?"Uygun Saatler":"＋ Öğrenci ekle"}</button> : null}
             {mainTab==="gelir" ? <div id="crm-finance-header-action" /> : null}
             {mainTab==="tekders" ? <button type="button" onClick={()=>setShowSinglePeople(true)} style={{border:'1px solid #ddd6fe',borderRadius:13,padding:'12px 15px',background:'#faf5ff',color:'#6d28d9',fontWeight:850,cursor:'pointer'}}>Kişiler</button> : null}
           </div>
@@ -16191,8 +16307,7 @@ export default function App() {
           </div>
         ) : null}
 
-        {mainTab === "takvim" ? <WeekCal students={operationalStudents} singleLessons={singleLessons} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} availabilityOpen={showCalendarAvailability} onAvailabilityClose={()=>setShowCalendarAvailability(false)} /> : null}
-        {mainTab==="takvim" && calendarProgramReady && calendarProgramOpenScope===calendarProgramScopeKey ? <CalendarProgramSheet key={calendarProgramScopeKey} students={operationalStudents} branchId={currentBranch.id} branchName={currentBranch.name} onClose={()=>setCalendarProgramOpenScope(null)} /> : null}
+        {mainTab === "takvim" ? <TeacherCalendarPanel key={calendarProgramScopeKey} students={operationalStudents} teachers={teachers} singleLessons={singleLessons} branchId={currentBranch.id} branchName={currentBranch.name} scopeKey={calendarProgramScopeKey} programReady={calendarProgramReady} offset={weekOffset} setOffset={setWeekOffset} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} availabilityOpen={showCalendarAvailability} onAvailabilityOpen={()=>setShowCalendarAvailability(true)} onAvailabilityClose={()=>setShowCalendarAvailability(false)} /> : null}
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} onTrialAppointment={lesson=>openTrialAppointment(lesson)} trialAppointmentOpeningId={trialAppointmentOpeningId} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
