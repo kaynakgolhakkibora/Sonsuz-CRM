@@ -6297,7 +6297,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   const matchesTeacher=(student,date,item,time,duration,current=false)=>{
     if(!calendarTeacher) return !teacherName || (current?studentTeacherName(student):teacherForDate(student,date,item))===teacherName;
     const owner=ownerFor(student,current?null:date,current?null:item);
-    if(!owner && availabilityOpen && !student?.frozen) {
+    if(!owner && availabilityOpen && !student?.frozen && !isStudentLeft(student)) {
       const interval=calendarAvailabilityInterval(date,time,duration),weekEnd=new Date(days[6]);weekEnd.setDate(weekEnd.getDate()+1);
       if(!interval || (interval.start<weekEnd.getTime() && interval.end>start.getTime())) {availabilityInvalid=true;teacherUnresolved=true;}
     }
@@ -6320,19 +6320,38 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   };
 
   students.forEach(student => {
-    if (isStudentLeft(student)) return;
+    const left = isStudentLeft(student);
+    if (left && isStudentDeleted(student)) return;
+    const historyOnly = student.frozen || left;
     const frozenAt = student.frozen ? (Array.isArray(student.status_history) ? student.status_history : []).reduce((latest,event)=>{
       const at = event?.type === "frozen" && event.at ? new Date(event.at).getTime() : NaN;
       return Number.isFinite(at) && at <= now.getTime() && (latest === null || at > latest) ? at : latest;
     },null) : null;
+    let leftAt = null;
+    if (left) {
+      const value = student.left_at || student.leftAt;
+      if (typeof value === "string" && isValidLocalDateInput(value.slice(0,10))
+        && (/^\d{4}-\d{2}-\d{2}$/.test(value) || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value))) {
+        const at = new Date(value + (/^\d{4}-\d{2}-\d{2}$/.test(value) ? "T00:00:00" : "")).getTime();
+        if (Number.isFinite(at) && at <= now.getTime()) leftAt = at;
+      }
+      if (leftAt !== null && frozenAt !== null && frozenAt < leftAt) {
+        const reactivated = (Array.isArray(student.status_history) ? student.status_history : []).some(event=>{
+          const at = event?.type === "active" && event.at ? new Date(event.at).getTime() : NaN;
+          return Number.isFinite(at) && at > frozenAt && at <= leftAt;
+        });
+        if (!reactivated) leftAt = frozenAt;
+      }
+    }
+    const inactiveAt = left ? leftAt : frozenAt;
     const visibleRecordedDate = (date,time,confirmed=false) => {
-      if (!student.frozen) return true;
+      if (!historyOnly) return true;
       const occurrence = new Date(date);
       const clock = /^(\d{2}):(\d{2})$/.exec(String(time || ""));
       if (isNaN(occurrence.getTime()) || !clock || Number(clock[1]) > 23 || Number(clock[2]) > 59) return false;
       occurrence.setHours(Number(clock[1]),Number(clock[2]),0,0);
       const at = occurrence.getTime();
-      return at < now.getTime() && (confirmed || (frozenAt !== null && at < frozenAt));
+      return at < now.getTime() && (confirmed || (inactiveAt !== null && at < inactiveAt));
     };
     const schedule = student.schedule || [];
     const packageEnded = calcBalance(schedule) === 0;
@@ -6362,7 +6381,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       const recordedDayIndex=dayKeyToIndex.get(localDateKey(lesson.date));
       if(recordedDayIndex!==undefined)actualKeys.add(recordedDayIndex+"|"+lessonTime(student,lesson));
       if (!matchesTeacher(student,lesson.date,lesson,lessonTime(student,lesson),getLessonDuration(student,lesson))) return;
-      if (!student.frozen) observeAvailability(lesson.date,lessonTime(student,lesson),getLessonDuration(student,lesson),lesson.status==="telafi"?"telafi-slot":"normal");
+      if (!historyOnly) observeAvailability(lesson.date,lessonTime(student,lesson),getLessonDuration(student,lesson),lesson.status==="telafi"?"telafi-slot":"normal");
       const dayIndex = dayKeyToIndex.get(localDateKey(lesson.date));
       if (dayIndex === undefined) return;
       const time = lessonTime(student, lesson);
@@ -6377,7 +6396,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       });
     });
 
-    const visibleProgramSlots=!student.frozen && timeline ? days.flatMap(day=>programSlotsOnDate(student,timeline,day)
+    const visibleProgramSlots=!historyOnly && timeline ? days.flatMap(day=>programSlotsOnDate(student,timeline,day)
       .filter(slot=>slotDayIndex(slot.day)===day.getDay()).map(slot=>({...slot,date:day}))) : [];
     visibleProgramSlots.forEach((slot,slotIndex) => {
       const targetDay = slotDayIndex(slot.day);
@@ -6406,7 +6425,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       if (!plannedAt) return;
       if (!visibleRecordedDate(plannedAt,timeFromISO(plannedAt),!!record.done)) return;
       if (!matchesTeacher(student,plannedAt,record,timeFromISO(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student))) return;
-      if (!student.frozen) observeAvailability(plannedAt,timeFromISO(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student),"planned-telafi");
+      if (!historyOnly) observeAvailability(plannedAt,timeFromISO(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student),"planned-telafi");
       const dayIndex = dayKeyToIndex.get(localDateKey(plannedAt));
       if (dayIndex === undefined) return;
       addItem({
@@ -6426,7 +6445,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       if (isNaN(startAt.getTime())) return;
       if (!visibleRecordedDate(startAt,timeFromISO(startAt),extra.status === "done")) return;
       if (!matchesTeacher(student,startAt,extra,timeFromISO(startAt),getLessonDuration(student,extra))) return;
-      if (!student.frozen) observeAvailability(startAt,timeFromISO(startAt),getLessonDuration(student,extra),"extra-lesson");
+      if (!historyOnly) observeAvailability(startAt,timeFromISO(startAt),getLessonDuration(student,extra),"extra-lesson");
       const dayIndex = dayKeyToIndex.get(localDateKey(startAt));
       if (dayIndex === undefined) return;
       addItem({
