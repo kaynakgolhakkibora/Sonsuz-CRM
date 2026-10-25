@@ -5595,6 +5595,132 @@ function WhatsAppPreviewSheet({ title, subtitle, text, onClose, onSent }) {
   </Sheet>;
 }
 
+function validPeriodCorrectionLog(log, key=log?.packageKey) {
+  const e=log?.evaluation;
+  return !!log && log.type!=='manual_piece' && typeof key==='string' && key.trim()===key && key.length>0 && key.length<=500
+    && log.packageKey===key && !!log.packageStart && !!log.packageEnd && !!e
+    && ['attendanceScore','lessonAverage'].every(k=>typeof e[k]==='number' && Number.isFinite(e[k]) && e[k]>=0 && e[k]<=100)
+    && typeof e.pieceName==='string' && !!pieceResultOption(e.pieceResult);
+}
+function periodCorrectionEvaluation(log, name, result) {
+  const piece=pieceResultOption(result);
+  if(!validPeriodCorrectionLog(log) || !piece || typeof name!=='string' || !name.trim() || name.trim().length>120) return null;
+  return {...log.evaluation,pieceName:name.trim(),pieceResult:piece.value,pieceLabel:piece.label,pieceScore:piece.score,
+    periodScore:periodEvaluationScore(log.evaluation.attendanceScore,log.evaluation.lessonAverage,piece.score)};
+}
+function validPeriodCorrectionRequest(request) {
+  const p=request?.params,uuid=value=>typeof value==='string' && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(value);
+  return !!p && uuid(request.actorUserId) && uuid(p.studentId) && uuid(p.branchId) && uuid(p.operationId)
+    && Number.isInteger(p.expectedRecordVersion) && p.expectedRecordVersion>=0 && p.expectedRecordVersion<2147483647
+    && validPeriodCorrectionLog(p.sourceLog,p.packageKey) && typeof p.pieceName==='string' && p.pieceName===p.pieceName.trim()
+    && !!periodCorrectionEvaluation(p.sourceLog,p.pieceName,p.pieceResult) && Object.keys(p).length===8;
+}
+function periodCorrectionReceiptMatches(row,request) {
+  if(!validPeriodCorrectionRequest(request) || !row) return false;
+  const p=request.params,same=(a,b)=>JSON.stringify(canonicalJson(a))===JSON.stringify(canonicalJson(b));
+  const {evaluation,sentAt,periodCorrection,...rest}=row.after_log || {};
+  const {evaluation:oldEvaluation,sentAt:oldSentAt,periodCorrection:oldCorrection,...oldRest}=p.sourceLog;
+  return row.operation_id===p.operationId && row.actor_user_id===request.actorUserId && row.student_id===p.studentId
+    && row.branch_id===p.branchId && row.package_key===p.packageKey && row.expected_record_version===p.expectedRecordVersion
+    && row.resulting_record_version===p.expectedRecordVersion+1 && Number.isInteger(row.revision) && row.revision>0
+    && same(row.request_payload,p) && same(row.before_log,p.sourceLog) && same(rest,oldRest) && sentAt===null
+    && same(evaluation,periodCorrectionEvaluation(p.sourceLog,p.pieceName,p.pieceResult))
+    && periodCorrection?.kind==='period_piece_correction_v253' && periodCorrection.operationId===p.operationId && periodCorrection.revision===row.revision
+    && typeof row.recorded_at==='string' && !isNaN(new Date(row.recorded_at).getTime())
+    && new Date(periodCorrection.at).getTime()===new Date(row.recorded_at).getTime();
+}
+function periodCorrectionStorageKey(scope,sid,key) {
+  return 'sonsuz_crm_period_correction_v253_'+scope.actorUserId+'_'+scope.branchId+'_'+sid+'_'+encodeURIComponent(key);
+}
+function readPeriodCorrectionPending(scope,sid,key) {
+  try {
+    const value=JSON.parse(localStorage.getItem(periodCorrectionStorageKey(scope,sid,key)) || 'null');
+    return validPeriodCorrectionRequest(value) && value.actorUserId===scope.actorUserId && value.params.branchId===scope.branchId
+      && value.params.studentId===sid && value.params.packageKey===key ? value : null;
+  } catch {return null;}
+}
+function storePeriodCorrectionPending(scope,request) {
+  try {
+    const p=request.params,previous=readPeriodCorrectionPending(scope,p.studentId,p.packageKey);
+    if((localStorage.getItem(periodCorrectionStorageKey(scope,p.studentId,p.packageKey)) && !previous) || (previous && previous.params.operationId!==p.operationId)) return false;
+    localStorage.setItem(periodCorrectionStorageKey(scope,p.studentId,p.packageKey),JSON.stringify(request));
+    return JSON.stringify(readPeriodCorrectionPending(scope,p.studentId,p.packageKey))===JSON.stringify(request);
+  } catch {return false;}
+}
+function clearPeriodCorrectionPending(scope,request) {
+  try {
+    const p=request.params,previous=readPeriodCorrectionPending(scope,p.studentId,p.packageKey);
+    if((localStorage.getItem(periodCorrectionStorageKey(scope,p.studentId,p.packageKey)) && !previous) || (previous && previous.params.operationId!==p.operationId)) return false;
+    localStorage.removeItem(periodCorrectionStorageKey(scope,p.studentId,p.packageKey));
+    return !localStorage.getItem(periodCorrectionStorageKey(scope,p.studentId,p.packageKey));
+  } catch {return false;}
+}
+function PeriodCorrectionSheet({ context, onOperation, onHistory, onClose }) {
+  const [pending,setPending]=useState(()=>readPeriodCorrectionPending(context.scope,context.student.id,context.key));
+  const original=pending?.params.sourceLog || context.log;
+  const [name,setName]=useState(pending?.params.pieceName || original.evaluation.pieceName);
+  const [result,setResult]=useState(pending?.params.pieceResult || original.evaluation.pieceResult);
+  const [busy,setBusy]=useState(false),busyRef=useRef(false);
+  const [error,setError]=useState(''),[page,setPage]=useState(0),[history,setHistory]=useState([]),[historyState,setHistoryState]=useState('loading'),[more,setMore]=useState(false);
+  useEffect(()=>{
+    let cancelled=false;setHistoryState('loading');
+    Promise.resolve(onHistory(page)).then(reply=>{if(cancelled)return;if(reply.ok){setHistory(reply.rows.slice(0,10));setMore(reply.rows.length>10);setHistoryState('ready');}else{setHistory([]);setMore(false);setHistoryState('error');setError(reply.error);}}).catch(()=>{if(!cancelled){setHistoryState('error');setError('Düzeltme geçmişi okunamadı; kayıt gönderilmedi.');}});
+    return()=>{cancelled=true;};
+  },[page,context.scopeKey,context.student.id,context.key]);
+  const next=periodCorrectionEvaluation(original,name,result);
+  const unchanged=name.trim()===original.evaluation.pieceName && result===original.evaluation.pieceResult;
+  const act=async(mode)=>{
+    if(busyRef.current) return;
+    let request=pending;
+    if(!request){
+      if(!next || unchanged || historyState!=='ready'){setError('Parça adını ve sonucunu kontrol edin; değişiklik yapılmadı.');return;}
+      request={actorUserId:context.scope.actorUserId,params:{studentId:context.student.id,branchId:context.scope.branchId,operationId:uid(),packageKey:context.key,
+        expectedRecordVersion:context.student.record_version,sourceLog:context.log,pieceName:name.trim(),pieceResult:result}};
+      if(!storePeriodCorrectionPending(context.scope,request)){setError('İşlem bilgisi bu cihazda saklanamadı; kayıt gönderilmedi.');return;}
+      setPending(request);
+    }
+    busyRef.current=true;setBusy(true);setError('');
+    try{
+      const reply=await onOperation(request,mode);
+      if(reply.ok && reply.refreshed){
+        if(!clearPeriodCorrectionPending(context.scope,request)){setError('Kayıt doğrulandı; yerel işlem bilgisi temizlenemedi. Aynı kaydı kontrol edin.');return;}
+        setPending(null);onClose();return;
+      }
+      if(reply.rejected){
+        if(clearPeriodCorrectionPending(context.scope,request)) setPending(null);
+        else {setError('Kayıt reddedildi; yerel işlem bilgisi temizlenemedi. Yeni işlem açmadan aynı kaydı kontrol edin.');return;}
+      }
+      setError(reply.error || 'Sonuç henüz doğrulanamadı. Aynı kaydı kontrol edin; yeni düzeltme oluşturmayın.');
+    }catch{setError('Sonuç doğrulanamadı. Aynı kaydı kontrol edin; yeni düzeltme oluşturmayın.');}
+    finally{busyRef.current=false;setBusy(false);}
+  };
+  return <Sheet title="Değerlendirmeyi Düzelt" subtitle={context.student.name+' · '+context.info.donem+' · '+(context.log.packageStart.slice(0,4)===context.log.packageEnd.slice(0,4)?context.log.packageStart.slice(0,4):context.log.packageStart.slice(0,4)+'–'+context.log.packageEnd.slice(0,4))} onClose={()=>{if(!busyRef.current)onClose();}}>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:9,marginBottom:12}}>
+      <MiniMetric label="Katılım" value={fmtNumber(original.evaluation.attendanceScore)+'/100'} tone="info" />
+      <MiniMetric label="Ders Ortalaması" value={fmtNumber(original.evaluation.lessonAverage)+'/100'} tone="special" />
+    </div>
+    <p style={{fontSize:12,color:'#64748b',lineHeight:1.6}}>Katılım ve ders ortalaması kayıtlı değerleriyle korunur. Önceki değerlendirme ve gönderim bilgisi geçmişte saklanır. Düzeltilmiş özet yeniden gönderilmeyi bekler.</p>
+    <label style={LBL} htmlFor="period-correction-name">Parçanın Adı</label>
+    <input id="period-correction-name" style={INP} value={name} maxLength={120} disabled={busy || !!pending} onChange={e=>setName(e.target.value)} />
+    <label style={LBL} htmlFor="period-correction-result">Net Bir Parça Çıktı mı?</label>
+    <select id="period-correction-result" style={INP} value={result} disabled={busy || !!pending} onChange={e=>setResult(e.target.value)}>
+      {PIECE_RESULT_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label} · {option.score}/100</option>)}
+    </select>
+    {next ? <p style={{padding:12,background:'#ecfdf5',borderRadius:10,color:'#065f46',fontWeight:700}}>Dönem puanı: {fmtNumber(next.periodScore)}/100</p>:null}
+    {error?<p role="alert" style={{fontSize:12,color:'#b91c1c',lineHeight:1.6}}>{error}</p>:null}
+    {pending?<><Btn bg="#7e22ce" disabled={busy} onClick={()=>act('check')}>{busy?'Kontrol ediliyor…':'Kaydı Kontrol Et'}</Btn><Btn bg="#111" outline disabled={busy} onClick={()=>act('write')}>Aynı Kaydı Yeniden Dene</Btn></>:<Btn bg="#7e22ce" disabled={busy || historyState!=='ready' || !next || unchanged} onClick={()=>act('write')}>{busy?'Kaydediliyor…':'Düzeltmeyi Kaydet'}</Btn>}
+    <details style={{margin:'12px 0',fontSize:12,color:'#475569'}}><summary style={{cursor:'pointer',fontWeight:700}}>Önceki Değerlendirmeler</summary>
+      {historyState==='loading'?<p>Geçmiş yükleniyor…</p>:historyState==='error'?<p>Geçmiş okunamadı.</p>:!history.length?<p>Bu dönem için önceki bir düzeltme yok.</p>:history.map(row=><div key={row.operation_id} style={{padding:'10px 0',borderBottom:'1px solid #e5e7eb',overflowWrap:'anywhere'}}>
+        <strong>{row.revision}. düzeltme · {fmtMed(row.recorded_at)}</strong>
+        <p>{row.before_log.evaluation.pieceName} · {displayPieceResult(row.before_log.evaluation.pieceResult,row.before_log.evaluation.pieceLabel)} · {fmtNumber(row.before_log.evaluation.periodScore)}/100</p>
+        <p>{row.before_log.sentAt?'Önceki özet gönderildi · '+fmtMed(row.before_log.sentAt):'Önceki özet gönderilmemişti.'}</p>
+      </div>)}
+      <div style={{display:'flex',justifyContent:'space-between',gap:10}}><button type="button" disabled={!page || busy || historyState==='loading'} onClick={()=>setPage(x=>x-1)}>← Önceki</button><span>{page+1}. sayfa</span><button type="button" disabled={!more || busy || historyState==='loading'} onClick={()=>setPage(x=>x+1)}>Sonraki →</button></div>
+    </details>
+    <Btn bg="#111" outline disabled={busy} onClick={()=>{if(!busyRef.current)onClose();}}>Kapat</Btn>
+  </Sheet>;
+}
+
 function DonemDegerlendirmeSheet({ student, info, onClose, onSave }) {
   const stats = packageEvaluationStats(student, info);
   const existing = periodEvaluationInfo(student, info)?.evaluation;
@@ -5669,7 +5795,7 @@ function sentPeriodSummaryArchiveView(rows, search="", year="", studentPage=0) {
   return { years, studentCount:groups.length, summaryCount:matchingRows.length, page:sentPeriodSummaryPage(groups, studentPage, 20) };
 }
 
-function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, busyStudentId }) {
+function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, busyStudentId, onCorrect }) {
   const [search, setSearch] = useState("");
   const [year, setYear] = useState("");
   const [studentPage, setStudentPage] = useState(0);
@@ -5719,7 +5845,10 @@ function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, bu
               <p style={{ margin:0, fontSize:12, color:"#7e22ce", fontWeight:700 }}>{info.donem} · {startYear === endYear ? startYear : startYear+"–"+endYear} · {info.packageSize} ders</p>
               <p style={{ margin:"3px 0 0", fontSize:12, color:"#059669", fontWeight:700 }}>Dönem puanı: {fmtNumber(log.evaluation.periodScore)}/100 · Özet gönderildi · {fmtMed(log.sentAt)}</p>
             </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
             <button type="button" disabled={busy} onClick={()=>onSummary(student.id,key)} style={{ background:"#25D366", color:"#fff", border:0, borderRadius:8, padding:"7px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>Dönem Özetini Aç</button>
+            {onCorrect ? <button type="button" disabled={busy} onClick={()=>onCorrect(student.id,key)} style={{background:"#faf5ff",color:"#7e22ce",border:"1px solid #d8b4fe",borderRadius:8,padding:"7px 10px",fontSize:12,fontWeight:700,fontFamily:"inherit",cursor:busy?"wait":"pointer"}}>Değerlendirmeyi Düzelt</button>:null}
+            </div>
           </div>;
         })}
           {periods.pageCount>1 ? <nav aria-label="Dönem sayfaları" style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:8, padding:"12px 0" }}>
@@ -5739,7 +5868,7 @@ function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, bu
   </Sheet>;
 }
 
-function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEvaluate, onSummary, busyStudentId }) {
+function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEvaluate, onSummary, busyStudentId, onCorrect }) {
   const [archiveOpen, setArchiveOpen] = useState(false);
   if (!rows.length && !sentRows.length) return null;
   const renderRow = ({ student, info }) => {
@@ -5752,16 +5881,19 @@ function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEval
         <div style={{ flex:"1 1 210px", minWidth:0 }}>
           <button type="button" onClick={()=>onStudentClick(student)} style={{ padding:0, border:"none", background:"transparent", textAlign:"left", fontFamily:"inherit", fontWeight:700, fontSize:14, color:"#111", cursor:"pointer", overflowWrap:"anywhere" }}>{student.name}</button>
           <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Tamamlanan dönem · {info.donem} · {startYear === endYear ? startYear : startYear+"–"+endYear} · {info.packageSize} ders</p>
-          <p style={{ margin:"2px 0 0", fontSize:12, color:log?.sentAt?"#059669":log?"#7e22ce":"#c2410c", fontWeight:700 }}>{log ? "Dönem puanı: "+fmtNumber(log.evaluation.periodScore)+"/100 · "+(log.sentAt ? "Özet gönderildi · "+fmtMed(log.sentAt) : "Özet gönderilmedi") : "Dönem değerlendirilmedi"}</p>
+          <p style={{ margin:"2px 0 0", fontSize:12, color:log?.sentAt?"#059669":log?"#7e22ce":"#c2410c", fontWeight:700 }}>{log ? "Dönem puanı: "+fmtNumber(log.evaluation.periodScore)+"/100 · "+(log.sentAt ? "Özet gönderildi · "+fmtMed(log.sentAt) : log.periodCorrection?.kind==='period_piece_correction_v253' ? "Düzeltildi · Yeniden gönderim bekliyor" : "Özet gönderilmedi") : "Dönem değerlendirilmedi"}</p>
         </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
         <button type="button" disabled={busy} onClick={()=>log ? onSummary(student.id,key) : onEvaluate(student.id,key)} style={{ background:log?"#25D366":"#a855f7", color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:busy?"wait":"pointer", opacity:busy ? .7 : 1 }}>{log ? log.sentAt ? "Dönem Özetini Aç" : "Dönem Özetini Gönder" : "Dönemi Değerlendir"}</button>
+        {log && onCorrect ? <button type="button" disabled={busy} onClick={()=>onCorrect(student.id,key)} style={{background:"#fff",color:"#7e22ce",border:"1px solid #d8b4fe",borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,fontFamily:"inherit",cursor:busy?"wait":"pointer"}}>Değerlendirmeyi Düzelt</button>:null}
+        </div>
       </div>;
   };
   return <><AçılırBugünBölümü title={`Dönem Değerlendirmeleri (${rows.length} bekleyen)`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
     {rows.map(renderRow)}
     {sentRows.length ? <button type="button" onClick={()=>setArchiveOpen(true)} style={{ marginTop:10, padding:"8px 10px", border:"1px solid #d8b4fe", borderRadius:8, background:"#fff", color:"#7e22ce", fontWeight:700, fontSize:12, fontFamily:"inherit", cursor:"pointer" }}>Gönderilmiş Özetler ({sentRows.length})</button> : null}
   </AçılırBugünBölümü>
-    {archiveOpen && sentRows.length ? <SentPeriodSummariesSheet rows={sentRows} busyStudentId={busyStudentId} onClose={()=>setArchiveOpen(false)} onStudentClick={student=>{ setArchiveOpen(false); onStudentClick(student); }} onSummary={(sid,key)=>{ setArchiveOpen(false); onSummary(sid,key); }} /> : null}
+    {archiveOpen && sentRows.length ? <SentPeriodSummariesSheet rows={sentRows} busyStudentId={busyStudentId} onClose={()=>setArchiveOpen(false)} onStudentClick={student=>{ setArchiveOpen(false); onStudentClick(student); }} onSummary={(sid,key)=>{ setArchiveOpen(false); onSummary(sid,key); }} onCorrect={onCorrect ? (sid,key)=>{setArchiveOpen(false);onCorrect(sid,key);} : undefined} /> : null}
   </>;
 }
 
@@ -9200,6 +9332,12 @@ export default function App() {
   const [telafiPlanMessagePrompt, setTelafiPlanMessagePrompt] = useState(null);
   const [periodEvaluationModal, setPeriodEvaluationModal] = useState(null);
   const [periodSummaryPrompt, setPeriodSummaryPrompt] = useState(null);
+  const [periodCorrectionModal,setPeriodCorrectionModal]=useState(null);
+  const periodCorrectionWritingRef=useRef(false);
+  const periodCorrectionScopeRef=useRef(null);
+  const periodCorrectionScope={actorUserId:authSession?.user?.id || "",branchId:currentBranch?.id || "",generation:protectedDataLoadGenerationRef.current,
+    ready:!!(giris && authSession?.user?.id && currentBranch?.id && loadedSources.students && browserOnline && !connectionRevalidationRequired && !accessContextLoading && !loading)};
+  periodCorrectionScopeRef.current=periodCorrectionScope;
   const [detailSt, setDetailSt] = useState(null);
   const [detailInitialTab, setDetailInitialTab] = useState("takvim");
   const [showAdd, setShowAdd] = useState(false);
@@ -14402,6 +14540,75 @@ export default function App() {
     pop("Ödeme kaydı silindi");
   };
 
+  const openPeriodCorrection = async(sid,key) => {
+    const scope={...periodCorrectionScopeRef.current};
+    const active=()=>periodCorrectionScopeRef.current?.ready && pieceUpdateScopeKey(periodCorrectionScopeRef.current)===pieceUpdateScopeKey(scope);
+    if(!scope.ready || summaryOpeningId || periodCorrectionWritingRef.current || !requireProtectedSources(['students'],'Dönem değerlendirme düzeltmesi')) return;
+    setSummaryOpeningId(sid);
+    try {
+      const result=await timedSingleLessonRequest(()=>supabase.from('students').select('*').eq('id',sid).eq('branch_id',scope.branchId).single());
+      if(!active()) return;
+      const student=result.data,info=completedPeriodInfoByKey(student,key);
+      const matches=(student?.package_summary_logs || []).filter(log=>log.packageKey===key);
+      if(result.error || student?.id!==sid || student.branch_id!==scope.branchId || !Number.isInteger(student.record_version) || student.record_version<0
+        || !info || matches.length!==1 || !validPeriodCorrectionLog(matches[0],key)) {
+        pop('Dönem kaydı doğrulanamadı. Öğrenciyi güncel kayıttan yeniden açın.',8000);return;
+      }
+      setPeriodCorrectionModal({scope,scopeKey:pieceUpdateScopeKey(scope),student,info,key,log:matches[0]});
+    } catch {if(active())pop('Dönem kaydı okunamadı; düzeltme penceresi açılmadı.',8000);}
+    finally {setSummaryOpeningId(null);}
+  };
+
+  const readPeriodCorrectionHistory = async(context,page) => {
+    const active=()=>periodCorrectionScopeRef.current?.ready && pieceUpdateScopeKey(periodCorrectionScopeRef.current)===context.scopeKey;
+    if(!active() || !Number.isInteger(page) || page<0 || page>100000) return {ok:false,error:'Oturum veya şube değişti; pencereyi yeniden açın.'};
+    try {
+      const result=await timedSingleLessonRequest(()=>supabase.from('student_period_corrections').select('*')
+        .eq('student_id',context.student.id).eq('branch_id',context.scope.branchId).eq('package_key',context.key).order('revision',{ascending:false}).range(page*10,page*10+10));
+      if(!active()) return {ok:false,error:'Oturum veya şube değişti.'};
+      if(result.error || !Array.isArray(result.data) || result.data.length>11 || result.data.some(row=>row.student_id!==context.student.id || row.branch_id!==context.scope.branchId
+        || row.package_key!==context.key || !Number.isInteger(row.revision) || row.revision<1 || !validPeriodCorrectionLog(row.before_log,context.key))) {
+        return {ok:false,error:'Düzeltme geçmişi okunamadı. Yeni düzeltme için v253 SQL kurulumu ve erişim doğrulanmalı.'};
+      }
+      return {ok:true,rows:result.data};
+    } catch {return {ok:false,error:'Düzeltme geçmişi okunamadı; kayıt gönderilmedi.'};}
+  };
+
+  const handlePeriodCorrection = async(request,mode='write') => {
+    const scope={...periodCorrectionScopeRef.current},scopeKey=pieceUpdateScopeKey(scope),p=request?.params;
+    const active=()=>periodCorrectionScopeRef.current?.ready && pieceUpdateScopeKey(periodCorrectionScopeRef.current)===scopeKey;
+    if(!validPeriodCorrectionRequest(request) || !scope.ready || request.actorUserId!==scope.actorUserId || p.branchId!==scope.branchId
+      || !students.some(s=>s.id===p.studentId && s.branch_id===p.branchId) || !['write','check'].includes(mode)
+      || !requireProtectedSources(['students'],'Dönem değerlendirme düzeltmesi')) return {ok:false,error:'Öğrenci, oturum veya aktif şube doğrulanamadı; ilgili oturumdan aynı kaydı kontrol edin.'};
+    if(periodCorrectionWritingRef.current) return {ok:false,error:'Devam eden dönem düzeltmesi kontrol ediliyor.'};
+    periodCorrectionWritingRef.current=true;setSummaryOpeningId(p.studentId);
+    try {
+      const result=mode==='check'
+        ? await timedSingleLessonRequest(()=>supabase.from('student_period_corrections').select('*').eq('operation_id',p.operationId).eq('student_id',p.studentId).eq('branch_id',p.branchId).maybeSingle())
+        : await runBranchScopedWrite(()=>timedSingleLessonRequest(()=>supabase.rpc('correct_student_period_evaluation',{p_request:p})));
+      if(!active()) return {ok:false,error:'Oturum veya şube değişti; sonuç ilgili öğrenci ve oturumdan kontrol edilmeli.'};
+      if(result.error){
+        const rejected=mode==='write' && (/PERIOD_CORRECTION_(?:NOT_AUTHORIZED|INVALID_INPUT|STUDENT_NOT_FOUND|STALE_STUDENT|INVALID_SOURCE|SOURCE_CHANGED|NO_CHANGE|OPERATION_ID_CONFLICT)/.test(String(result.error.message || '')) || result.error.code==='PGRST202');
+        return {ok:false,rejected,error:rejected?'Düzeltme kaydedilmedi. Dönem kaydı değişmiş veya v253 SQL kurulumu eksik olabilir; pencereyi güncel kayıttan yeniden açın.':'Sonuç doğrulanamadı. Aynı kaydı kontrol edin; mesajı yeniden göndermeyin.'};
+      }
+      if(!result.data) return {ok:false,error:'Bu işlem kaydı henüz bulunamadı. Aynı kaydı kontrol edebilir veya aynı işlem kimliğiyle yeniden deneyebilirsiniz.'};
+      if(!periodCorrectionReceiptMatches(result.data,request)) return {ok:false,error:'Düzeltme kanıtı beklenen bilgilerle eşleşmedi; yeni bir düzeltme göndermeyin.'};
+      const refreshed=await timedSingleLessonRequest(()=>supabase.from('students').select('*').eq('id',p.studentId).eq('branch_id',p.branchId).single());
+      if(!active()) return {ok:false,error:'Düzeltme kaydı doğrulandı; oturum değişti. İlgili öğrenci ve şubeden yeniden kontrol edin.'};
+      const row=refreshed.data;
+      if(refreshed.error || row?.id!==p.studentId || row.branch_id!==p.branchId || !Number.isInteger(row.record_version) || row.record_version<result.data.resulting_record_version || !Array.isArray(row.schedule) || !Array.isArray(row.package_summary_logs)) {
+        return {ok:true,refreshed:false,error:'Düzeltme kaydı doğrulandı; öğrenci ekranı henüz yenilenemedi. Aynı kaydı kontrol edin.'};
+      }
+      setStudents(previous=>!active()?previous:previous.map(s=>s.id===row.id && s.branch_id===row.branch_id && Number(s.record_version || 0)<=row.record_version ? row:s));
+      const currentLog=row.package_summary_logs.find(log=>log.packageKey===p.packageKey);
+      pop(currentLog?.periodCorrection?.operationId===p.operationId && !currentLog.sentAt
+        ? 'Dönem düzeltmesi doğrulandı. Düzeltilmiş özet yeniden gönderilmeyi bekliyor.'
+        : 'Düzeltme kaydı doğrulandı; öğrencinin güncel bilgileri yenilendi.',7000);
+      return {ok:true,refreshed:true,row:result.data};
+    } catch {return {ok:false,error:'Sonuç doğrulanamadı. Aynı kaydı kontrol edin; yeni işlem oluşturmayın.'};}
+    finally {periodCorrectionWritingRef.current=false;setSummaryOpeningId(null);}
+  };
+
   const handleDonemDegerlendirmeAc = (sid, periodKey="") => {
     const student = students.find(s => s.id === sid);
     if (!student) { pop("Öğrenci kaydı bulunamadı", 5000); return; }
@@ -14503,11 +14710,16 @@ export default function App() {
     setPeriodSummaryPrompt({ student, info, log });
   };
 
-  const handlePaketOzetiGonderildi = async (sid, info) => {
+  const handlePaketOzetiGonderildi = async (sid, info, expectedLog=null) => {
     const student = students.find(s => s.id === sid);
     const key = packageSummaryKey(info);
     const existing = (student?.package_summary_logs || []).find(log => log.packageKey === key);
     if (!student || !existing?.evaluation) return;
+    if ((existing.periodCorrection?.kind==='period_piece_correction_v253' || expectedLog?.periodCorrection?.kind==='period_piece_correction_v253') && (!expectedLog
+      || JSON.stringify(canonicalJson(existing.evaluation))!==JSON.stringify(canonicalJson(expectedLog.evaluation))
+      || JSON.stringify(canonicalJson(existing.periodCorrection || null))!==JSON.stringify(canonicalJson(expectedLog.periodCorrection || null)))) {
+      pop("Dönem değerlendirmesi değişti. Güncel özeti yeniden açın; gönderim işareti kaydedilmedi.",8000);return;
+    }
     const updatedStudent = {
       ...student,
       package_summary_logs:(student.package_summary_logs || []).map(log => log.packageKey === key ? { ...log, sentAt:new Date().toISOString() } : log),
@@ -15861,7 +16073,7 @@ export default function App() {
             <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
             <GecikenTekDersÖdemeleri lessons={overdueSinglePayments} now={singleLessonResultClock} busyIds={singleLessonBusyIds} onPayment={handleSingleLessonPayment} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <BekleyenTelafiler students={operationalStudents} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
-            <BekleyenDonemDegerlendirmeleri rows={pendingPeriodEvaluations} sentRows={sentPeriodSummaries} onStudentClick={setDetailSt} onEvaluate={handleDonemDegerlendirmeAc} onSummary={handlePaketOzetiAc} busyStudentId={summaryOpeningId} />
+            <BekleyenDonemDegerlendirmeleri rows={pendingPeriodEvaluations} sentRows={sentPeriodSummaries} onStudentClick={setDetailSt} onEvaluate={handleDonemDegerlendirmeAc} onSummary={handlePaketOzetiAc} busyStudentId={summaryOpeningId} onCorrect={openPeriodCorrection} />
             {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
@@ -16071,8 +16283,9 @@ export default function App() {
       {trialAppointmentPrompt && trialAppointmentReady && trialAppointmentPrompt.scopeKey===trialAppointmentScopeKey ? <TrialAppointmentSheet key={trialAppointmentPrompt.scopeKey+singleLessonAppointmentSignature(trialAppointmentPrompt.lesson)} lesson={trialAppointmentPrompt.lesson} onVerify={()=>readTrialAppointment(trialAppointmentPrompt.lesson,trialAppointmentPrompt.scopeKey)} onClose={()=>setTrialAppointmentPrompt(null)} /> : null}
       {welcomeStudentId && students.find(student=>student.id===welcomeStudentId) ? <YeniÖğrenciİletişimSheet student={students.find(student=>student.id===welcomeStudentId)} onClose={()=>setWelcomeStudentId(null)} onMessage={handleCommunicationMessage} /> : null}
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
+      {periodCorrectionModal && periodCorrectionScope.ready && periodCorrectionModal.scopeKey===pieceUpdateScopeKey(periodCorrectionScope) ? <PeriodCorrectionSheet key={periodCorrectionModal.scopeKey+periodCorrectionModal.student.id+periodCorrectionModal.key} context={periodCorrectionModal} onOperation={handlePeriodCorrection} onHistory={page=>readPeriodCorrectionHistory(periodCorrectionModal,page)} onClose={()=>setPeriodCorrectionModal(null)} />:null}
       {periodEvaluationModal ? <DonemDegerlendirmeSheet student={students.find(student=>student.id===periodEvaluationModal.student.id) || periodEvaluationModal.student} info={periodEvaluationModal.info} onClose={()=>setPeriodEvaluationModal(null)} onSave={evaluation=>handleDonemDegerlendirmeKaydet(periodEvaluationModal.student.id, periodEvaluationModal.info, evaluation)} /> : null}
-      {periodSummaryPrompt ? <WhatsAppPreviewSheet title="Dönem Sonu Özeti" subtitle={periodSummaryPrompt.student} text={msgDonemDegerlendirmesi(periodSummaryPrompt.student, periodSummaryPrompt.info, periodSummaryPrompt.log)} onClose={()=>setPeriodSummaryPrompt(null)} onSent={()=>handlePaketOzetiGonderildi(periodSummaryPrompt.student.id, periodSummaryPrompt.info)} /> : null}
+      {periodSummaryPrompt ? <WhatsAppPreviewSheet title="Dönem Sonu Özeti" subtitle={periodSummaryPrompt.student} text={msgDonemDegerlendirmesi(periodSummaryPrompt.student, periodSummaryPrompt.info, periodSummaryPrompt.log)} onClose={()=>setPeriodSummaryPrompt(null)} onSent={()=>handlePaketOzetiGonderildi(periodSummaryPrompt.student.id, periodSummaryPrompt.info, periodSummaryPrompt.log)} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
 
       {odemeKaydetModal ? (
