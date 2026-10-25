@@ -5257,7 +5257,7 @@ function msgGoogleReview(student) {
   return "Merhaba,\n\nDers sürecimizle ilgili deneyiminizi Google’da paylaşmanız bizi çok mutlu eder. Yorumunuz hem bize hem de bizi araştıran ailelere çok yardımcı oluyor.\n\nYorumunuzda “"+lessonPhrase+"” ifadesine yer vermeniz, Bodrum’da "+lessonPhrase+" arayan ailelerin bizi bulmasına da yardımcı olur.\n\nYorum bırakmak için: "+GOOGLE_REVIEW_URL+"\n\nTeşekkür ederiz.\nBodrum Sonsuz Sanat";
 }
 function msgÖdemeHatirlatma() {
-  return "Merhaba,\nDers ödemesini henüz tarafımıza ulaşmış olarak göremiyoruz.\nÖdemenizi uygun olduğunuzda gerçekleştirmenizi rica ederiz. Herhangi bir sorunuz olması durumunda bizimle iletişime geçebilirsiniz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
+  return "Merhaba,\nDers ödemesini henüz tarafımıza ulaşmış olarak göremiyoruz.\nÖdemenizi uygun olduğunuzda gerçekleştirmenizi rica ederiz. Herhangi bir sorunuz olması durumunda bizimle iletişime geçebilirsiniz.\n\nBodrum Sonsuz Sanat";
 }
 function paymentOverdueMessageLine(student, selectedInfo = null) {
   const info = selectedInfo || currentPaymentDueInfo(student) || [...customPackageInfos(student), ...regularPackageInfos(student)]
@@ -5268,11 +5268,11 @@ function paymentOverdueMessageLine(student, selectedInfo = null) {
 }
 function msgÖdemeHatirlatma2(student, selectedInfo = null) {
   const delay = paymentOverdueMessageLine(student, selectedInfo);
-  return "Merhaba,\n"+(delay ? delay+"\n" : "")+"Eğitim programının kesintisiz şekilde devam edebilmesi ve öğrencimizin gün/saat planlamasının korunabilmesi için ödemenizin bu hafta içerisinde tamamlanmasını rica ederiz.\nTeşekkür eder, iyi günler dileriz.\nBodrum Sonsuz Sanat";
+  return "Merhaba,\n"+(delay ? delay+"\n" : "")+"Eğitim programının kesintisiz şekilde devam edebilmesi ve öğrencimizin gün/saat planlamasının korunabilmesi için ödemenizin bu hafta içerisinde tamamlanmasını rica ederiz.\n\nBodrum Sonsuz Sanat";
 }
 function msgÖdemeHatirlatma3(student, selectedInfo = null) {
   const delay = paymentOverdueMessageLine(student, selectedInfo);
-  return "Merhaba,"+(delay ? "\n\n"+delay : "")+"\n\nDüzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır. Bu nedenle ödemenin belirtilen süre içerisinde tamamlanmaması durumunda programınız dondurulacak, ayrılan gün ve saat bekleme listesindeki öğrenciler için kullanıma açılacaktır.\n\nLütfen ödemenizi en kısa sürede gerçekleştiriniz.\n\nTeşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
+  return "Merhaba,"+(delay ? "\n\n"+delay : "")+"\n\nDüzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır. Bu nedenle ödemenin belirtilen süre içerisinde tamamlanmaması durumunda programınız dondurulacak, ayrılan gün ve saat bekleme listesindeki öğrenciler için kullanıma açılacaktır.\n\nLütfen ödemenizi en kısa sürede gerçekleştiriniz.\n\nBodrum Sonsuz Sanat";
 }
 function paymentNoticeMessage(student, info, kind) {
   const period = "Dönem: "+paymentNoticePeriodLabel(info);
@@ -5328,7 +5328,7 @@ function msgProgramDondurma(student) {
 
 function msgDondurmaUyarisi(student) {
   const delay = paymentOverdueMessageLine(student);
-  return "Merhaba,\n\nÖdeme konusunda daha önce tarafınıza bilgilendirme yapılmış olmasına rağmen ödemeniz henüz tarafımıza ulaşmamıştır."+(delay ? "\n"+delay : "")+"\n\nEğitim programlarımız sabit gün ve saat planlamasıyla yürütüldüğü için, düzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır.\n\nBu nedenle programınızı bugün itibarıyla donduruyoruz. Ayrılan gün ve saat, bekleme listesindeki diğer öğrencilerin kullanımına açılacaktır.\n\nİlerleyen dönemde programa devam etmek istemeniz halinde, o tarihteki uygun kontenjan durumuna göre yeni bir gün ve saat planlaması yapılabilir.\n\nAnlayışınız için teşekkür eder, iyi günler dileriz.\n\nBodrum Sonsuz Sanat";
+  return "Merhaba,\n\nÖdeme konusunda daha önce tarafınıza bilgilendirme yapılmış olmasına rağmen ödemeniz henüz tarafımıza ulaşmamıştır."+(delay ? "\n"+delay : "")+"\n\nEğitim programlarımız sabit gün ve saat planlamasıyla yürütüldüğü için, düzenli ödeme yapılmayan programlarda öğrencinin gün ve saatini korumamız mümkün olmamaktadır.\n\nBu nedenle programınızı bugün itibarıyla donduruyoruz. Ayrılan gün ve saat, bekleme listesindeki diğer öğrencilerin kullanımına açılacaktır.\n\nİlerleyen dönemde programa devam etmek istemeniz halinde, o tarihteki uygun kontenjan durumuna göre yeni bir gün ve saat planlaması yapılabilir.\n\nBodrum Sonsuz Sanat";
 }
 function msgPaketOzeti(student) {
   const info = lastCompletedPackageInfo(student);
