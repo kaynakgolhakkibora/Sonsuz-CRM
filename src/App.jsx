@@ -5929,7 +5929,7 @@ function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEval
       const startYear = info.startKey.slice(0,4);
       const endYear = info.endKey.slice(0,4);
       return <div key={student.id+"|"+key} style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, padding:"10px 0", borderBottom:"1px solid #f3e8ff" }}>
-        <div style={{ flex:"1 1 210px", minWidth:0 }}>
+        <div style={{ flex:"1 1 210px", minWidth:0, textAlign:"left" }}>
           <button type="button" onClick={()=>onStudentClick(student)} style={{ padding:0, border:"none", background:"transparent", textAlign:"left", fontFamily:"inherit", fontWeight:700, fontSize:14, color:"#111", cursor:"pointer", overflowWrap:"anywhere" }}>{student.name}</button>
           <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Tamamlanan dönem · {info.donem} · {startYear === endYear ? startYear : startYear+"–"+endYear} · {info.packageSize} ders</p>
           <p style={{ margin:"2px 0 0", fontSize:12, color:log?.sentAt?"#059669":log?"#7e22ce":"#c2410c", fontWeight:700 }}>{log ? "Dönem puanı: "+fmtNumber(log.evaluation.periodScore)+"/100 · "+(log.sentAt ? "Özet gönderildi · "+fmtMed(log.sentAt) : log.periodCorrection?.kind==='period_piece_correction_v253' ? "Düzeltildi · Yeniden gönderim bekliyor" : "Özet gönderilmedi") : "Dönem değerlendirilmedi"}</p>
@@ -7359,7 +7359,7 @@ function GoogleReviewRequests({ students, onStudentClick, onMessage, onRequested
   };
   return <AçılırBugünBölümü title={`Google Yorumu İste (${students.length})`} color="#9a3412" style={{ background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
     {students.map(student=><div key={student.id} style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, padding:"10px 0", borderBottom:"1px solid #ffedd5" }}>
-      <div style={{ flex:"1 1 180px", minWidth:0 }}>
+      <div style={{ flex:"1 1 180px", minWidth:0, textAlign:"left" }}>
         <button type="button" onClick={()=>onStudentClick(student)} style={{ padding:0, border:"none", background:"transparent", textAlign:"left", fontFamily:"inherit", fontWeight:700, fontSize:14, color:"#111", cursor:"pointer", overflowWrap:"anywhere" }}>{student.name}</button>
         <p style={{ margin:"3px 0 0", fontSize:12, color:"#9a3412" }}>İlk tamamlanan dersin üzerinden bir ay geçti.</p>
       </div>
@@ -7370,7 +7370,7 @@ function GoogleReviewRequests({ students, onStudentClick, onMessage, onRequested
         </> : <button type="button" disabled={!!savingId || !!openingId} onClick={()=>send(student)} style={{ ...action, background:"#25D366", color:"#fff" }}>{openingId===student.id?"Hazırlanıyor…":"Yorum Linkini Gönder"}</button>}
       </div>
     </div>)}
-    <p style={{ margin:"10px 0 0", fontSize:11, lineHeight:1.5, color:"#9a3412" }}>Mesajı gerçekten gönderdikten sonra Gönderdim'i seçin. Ardından yeniden hatırlatılmaz.</p>
+    <p style={{ margin:"10px 0 0", fontSize:11, lineHeight:1.5, color:"#9a3412", textAlign:"left" }}>Mesajı gerçekten gönderdikten sonra Gönderdim'i seçin. Ardından yeniden hatırlatılmaz.</p>
   </AçılırBugünBölümü>;
 }
 
@@ -7414,7 +7414,7 @@ function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStuden
         const actionAvailable = !!actionId && (kind === "telafi" ? student.telafi_records : student.schedule).filter(item=>item.id===actionId).length === 1;
         return (
         <div key={kind+"-"+(lesson?.id || record?.id)} style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #e0f2fe" }}>
-          <div onClick={() => kind === "telafi" ? onTelafiClick(student) : onStudentClick(student)} style={{ cursor:"pointer", minWidth:0, overflowWrap:"anywhere" }}>
+          <div onClick={() => kind === "telafi" ? onTelafiClick(student) : onStudentClick(student)} style={{ cursor:"pointer", minWidth:0, overflowWrap:"anywhere", textAlign:"left" }}>
             <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
             <p style={{ margin:"2px 0 0", fontSize:12, color:kind==="telafi"?"#7e22ce":"#0369a1", fontWeight:kind==="telafi"?700:400 }}>{time} · {student.instrument}{kind === "telafi" ? " · Telafi dersi" : ""}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent ? "Hatırlatma gönderildi" : "Hatırlatma bekliyor"}</p>
@@ -7454,7 +7454,7 @@ function BugünEkDersleri({ students, onWA, onReminderToggle, onOpen }) {
         const sent = !!lessonReminderSentInfo(student,{ id:extraLessonReminderRef(extra) });
         return (
         <div key={student.id+"-"+(extra.id || extra.date)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"9px 0", borderBottom:"1px solid #fce7f3" }}>
-          <div onClick={()=>onOpen(student,extra)} style={{ minWidth:0, cursor:"pointer" }}>
+          <div onClick={()=>onOpen(student,extra)} style={{ minWidth:0, cursor:"pointer", textAlign:"left" }}>
             <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}><p style={{ margin:0, fontWeight:750, fontSize:14, color:"#111" }}>{student.name}</p><TonePill tone="special">Ek Ders</TonePill></div>
             <p style={{ margin:"3px 0 0", fontSize:12, color:"#be185d", fontWeight:700 }}>{time} · {student.instrument} · {ekDersTypeLabel(extra.type)}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent?"Hatırlatma gönderildi":"Hatırlatma bekliyor"}</p>
@@ -7481,7 +7481,7 @@ function BugünTekDersleri({ lessons, onWA, onReminderToggle, onOpen, onAction, 
         const trial = isTrialSingleLesson(lesson);
         const busy = !!busyIds[lesson.id];
         return <div key={lesson.id} style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #ede9fe" }}>
-          <div onClick={()=>{ if (!busy) onOpen(lesson); }} style={{ cursor:busy?"wait":"pointer", minWidth:0, flex:"1 1 160px" }}>
+          <div onClick={()=>{ if (!busy) onOpen(lesson); }} style={{ cursor:busy?"wait":"pointer", minWidth:0, flex:"1 1 160px", textAlign:"left" }}>
             <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}><p style={{ margin:0, fontWeight:750, fontSize:14, color:"#111" }}>{lesson.participant_name}</p><TonePill tone="special">{singleLessonTypeLabel(lesson)}</TonePill>{lesson.participant_kind==="guest" && !trial?<TonePill>Misafir</TonePill>:null}</div>
             <p style={{ margin:"3px 0 0", fontSize:12, color:"#6d28d9", fontWeight:700 }}>{timeFromISO(lesson.starts_at)} · {lesson.instrument} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent?"Hatırlatma gönderildi":"Hatırlatma bekliyor"} · {singleLessonBillingLabel(lesson.billing_status)}</p>
@@ -7575,22 +7575,22 @@ function singleLessonTransitionError(lesson, changes) {
 function SonuçBekleyenTekDersler({ lessons, busyIds={}, onStatus, onOpen, onManage }) {
   if (!lessons.length) return null;
   return <AçılırBugünBölümü title={`Sonuç Bekleyen Tek Dersler (${lessons.length})`} color="#b45309" style={{ background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-    <p style={{ margin:"0 0 10px", fontSize:12, color:"#92400e" }}>Önceki günlerden kalan derslerin sonucunu işaretleyin. Ücretsiz ve deneme dersleri de dahildir.</p>
+    <p style={{ textAlign:"left", margin:"0 0 10px", fontSize:12, color:"#92400e" }}>Önceki günlerden kalan derslerin sonucunu işaretleyin. Ücretsiz ve deneme dersleri de dahildir.</p>
     {lessons.map(lesson=>{
       const busy = !!busyIds[lesson.id];
       const paid = lesson.billing_status==="paid";
       return <div key={lesson.id} style={{ padding:"12px 0", borderTop:"1px solid #fde68a", opacity:busy?.65:1 }}>
-        <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}><strong style={{ fontSize:14, overflowWrap:"anywhere" }}>{lesson.participant_name}</strong><TonePill tone="special">{singleLessonTypeLabel(lesson)}</TonePill><TonePill>{singleLessonBillingLabel(lesson.billing_status)}</TonePill></div>
-        <p style={{ margin:"5px 0", fontSize:12, color:"#92400e" }}>{new Date(lesson.starts_at).toLocaleString("tr-TR", { timeZone:"Europe/Istanbul", day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit" })} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}><strong style={{ fontSize:14, overflowWrap:"anywhere", textAlign:"left" }}>{lesson.participant_name}</strong><TonePill tone="special">{singleLessonTypeLabel(lesson)}</TonePill><TonePill>{singleLessonBillingLabel(lesson.billing_status)}</TonePill></div>
+        <p style={{ textAlign:"left", margin:"5px 0", fontSize:12, color:"#92400e" }}>{new Date(lesson.starts_at).toLocaleString("tr-TR", { timeZone:"Europe/Istanbul", day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit" })} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
         <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginTop:8 }}>
           {[ ["completed","Yapıldı","#dcfce7","#166534"], ["no_show","Gelmedi","#fee2e2","#991b1b"], ["cancelled","İptal","#f3f4f6","#475569"] ].map(([status,label,bg,color])=><button key={status} disabled={busy || (paid && status!=="completed")} onClick={()=>onStatus(lesson,status)} style={{ border:0, borderRadius:9, padding:"9px 12px", background:bg, color, fontWeight:800, cursor:"pointer", opacity:paid && status!=="completed"?.5:1 }}>{label}</button>)}
           <button disabled={busy} onClick={()=>onOpen(lesson)} style={{ border:"1px solid #ddd6fe", borderRadius:9, padding:"9px 12px", background:"#fff", color:"#6d28d9", fontWeight:750 }}>Dersi Aç</button>
         </div>
-        {busy ? <p role="status" style={{ fontSize:12, color:"#92400e" }}>İşlem doğrulanıyor...</p> : null}
-        {paid ? <p style={{ fontSize:12, color:"#92400e", margin:"8px 0 0" }}>Gelmedi veya İptal için önce ödemeyi geri alın. <button disabled={busy} onClick={onManage} style={{ border:0, background:"transparent", color:"#6d28d9", textDecoration:"underline", cursor:"pointer" }}>Tek Ders ekranına git</button></p> : null}
+        {busy ? <p role="status" style={{ textAlign:"left", fontSize:12, color:"#92400e" }}>İşlem doğrulanıyor...</p> : null}
+        {paid ? <p style={{ textAlign:"left", fontSize:12, color:"#92400e", margin:"8px 0 0" }}>Gelmedi veya İptal için önce ödemeyi geri alın. <button disabled={busy} onClick={onManage} style={{ border:0, background:"transparent", color:"#6d28d9", textDecoration:"underline", cursor:"pointer" }}>Tek Ders ekranına git</button></p> : null}
       </div>;
     })}
-    <p style={{ margin:"10px 0 0", fontSize:12, color:"#92400e" }}>Yanlış sonucu Tek Ders → Tüm Kayıtlar → Planlandıya Geri Al ile düzeltebilirsiniz.</p>
+    <p style={{ textAlign:"left", margin:"10px 0 0", fontSize:12, color:"#92400e" }}>Yanlış sonucu Tek Ders → Tüm Kayıtlar → Planlandıya Geri Al ile düzeltebilirsiniz.</p>
   </AçılırBugünBölümü>;
 }
 
@@ -7610,22 +7610,22 @@ function GecikenTekDersÖdemeleri({ lessons, now, busyIds={}, onPayment, onOpen 
   if (!lessons.length) return null;
   const today = singleLessonTurkeyDay(now);
   return <AçılırBugünBölümü title={`Geciken Tek Ders Ödemeleri (${lessons.length})`} color="#b91c1c" style={{ background:"#fff1f2", border:"1.5px solid #fda4af", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-    <p style={{ margin:"0 0 10px", fontSize:12, color:"#9f1239" }}>Önceki günlerde yapılmış ve ücreti henüz alınmamış Tek Dersler.</p>
+    <p style={{ textAlign:"left", margin:"0 0 10px", fontSize:12, color:"#9f1239" }}>Önceki günlerde yapılmış ve ücreti henüz alınmamış Tek Dersler.</p>
     {lessons.map(lesson=>{
       const busy = !!busyIds[lesson.id];
       const day = singleLessonTurkeyDay(lesson.starts_at);
       const elapsed = Math.round((Date.parse(today+"T00:00:00Z")-Date.parse(day+"T00:00:00Z"))/86400000);
       return <div key={lesson.id} style={{ padding:"12px 0", borderTop:"1px solid #fecdd3", opacity:busy?.65:1 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}><strong style={{ fontSize:14, overflowWrap:"anywhere" }}>{lesson.participant_name}</strong><TonePill tone="special">Tek Ders</TonePill><TonePill tone="good">Yapıldı</TonePill></div>
-        <p style={{ margin:"6px 0 0", fontSize:12, color:"#9f1239" }}>{new Date(lesson.starts_at).toLocaleString("tr-TR", { timeZone:"Europe/Istanbul", day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit" })} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
-        <p style={{ margin:"5px 0 9px", fontSize:12, color:"#9f1239" }}>Ders tarihinden beri {elapsed} gün · <strong>{Number(lesson.fee).toLocaleString("tr-TR")} TL</strong></p>
+        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}><strong style={{ fontSize:14, overflowWrap:"anywhere", textAlign:"left" }}>{lesson.participant_name}</strong><TonePill tone="special">Tek Ders</TonePill><TonePill tone="good">Yapıldı</TonePill></div>
+        <p style={{ textAlign:"left", margin:"6px 0 0", fontSize:12, color:"#9f1239" }}>{new Date(lesson.starts_at).toLocaleString("tr-TR", { timeZone:"Europe/Istanbul", day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit" })} · {lesson.lesson_mode==="online"?"Online":"Fiziki"}</p>
+        <p style={{ textAlign:"left", margin:"5px 0 9px", fontSize:12, color:"#9f1239" }}>Ders tarihinden beri {elapsed} gün · <strong>{Number(lesson.fee).toLocaleString("tr-TR")} TL</strong></p>
         <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
           <button disabled={busy} onClick={()=>onPayment(lesson,"paid")} style={{ border:0, borderRadius:9, padding:"9px 12px", background:"#10b981", color:"#fff", fontWeight:800, cursor:busy?"wait":"pointer" }}>{busy?"İşlem doğrulanıyor...":"Ödeme Al"}</button>
           <button disabled={busy} onClick={()=>onOpen(lesson)} style={{ border:"1px solid #ddd6fe", borderRadius:9, padding:"9px 12px", background:"#fff", color:"#6d28d9", fontWeight:750 }}>Dersi Aç</button>
         </div>
       </div>;
     })}
-    <p style={{ margin:"10px 0 0", fontSize:12, color:"#9f1239" }}>Ödeme alındığında bu listeden çıkar ve tahsil edildiği ayın Finans gelirine eklenir.</p>
+    <p style={{ textAlign:"left", margin:"10px 0 0", fontSize:12, color:"#9f1239" }}>Ödeme alındığında bu listeden çıkar ve tahsil edildiği ayın Finans gelirine eklenir.</p>
   </AçılırBugünBölümü>;
 }
 
@@ -7653,7 +7653,7 @@ function BekleyenTelafiler({ students, onStudentClick }) {
         const renk = acil ? "#d97706" : "#0284c7";
         return (
           <div key={student.id+"-"+record.id} onClick={() => onStudentClick(student)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"9px 0", borderBottom:index<telafiler.length-1?"1px solid #dbeafe":"none", cursor:"pointer" }}>
-            <div>
+            <div style={{ textAlign:"left" }}>
               <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
               <p style={{ margin:"2px 0 0", fontSize:12, color:"#475569" }}>{fmtShort(record.lessonDate)} dersinin telafisi</p>
               {telafiPlannedAt(record) ? <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Plan: {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p> : null}
@@ -7720,7 +7720,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, o
             const { student:s, info } = row;
             return (
             <div key={row.key} style={{ display:"flex", flexWrap:"wrap", gap:8, justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fed7aa" }}>
-              <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer", flex:"1 1 180px", minWidth:0, overflowWrap:"anywhere" }}>
+              <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer", flex:"1 1 180px", minWidth:0, overflowWrap:"anywhere", textAlign:"left" }}>
                 <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                 <p style={{ margin:"2px 0 0", fontSize:12, color:"#9a3412" }}>{paymentNoticePeriodLabel(info)} · {info.packageSize} ders</p>
                 <p style={{ margin:"2px 0 0", fontSize:12, color:"#9a3412" }}>{s.instrument} · {studentScheduleLabel(s)}</p>
@@ -7740,7 +7740,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, o
             const { student:s, info, overdueDays } = row;
             return (
               <div key={row.key} style={{ display:"flex", flexWrap:"wrap", gap:8, justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #fecdd3" }}>
-                <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer", flex:"1 1 180px", minWidth:0, overflowWrap:"anywhere" }}>
+                <div onClick={() => onStudentClick(s)} style={{ cursor:"pointer", flex:"1 1 180px", minWidth:0, overflowWrap:"anywhere", textAlign:"left" }}>
                   <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                   <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}>{paymentNoticePeriodLabel(info)} · {info.packageSize} ders</p>
                   <p style={{ margin:"2px 0 0", fontSize:12, color:"#be123c" }}><strong>{overdueDays} gün</strong> gecikti</p>
@@ -7913,7 +7913,7 @@ function PendingWeeklyReports({reports,onDownload,busyId,error,loading,onCheck})
   return <><WeeklyReportNotice error={error} loading={loading} onCheck={onCheck} />
     {reports.length?<AçılırBugünBölümü title={"Haftalık Rapor ("+reports.length+")"} color="#6d28d9" style={{background:"#faf5ff",border:"1.5px solid #d8b4fe",borderRadius:14,padding:"12px 16px",marginBottom:14}}>
       {reports.map(report=><div key={report.id} style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",gap:8,padding:"10px 0"}}>
-        <div><p style={{margin:0,fontWeight:800,fontSize:13}}>{report.label}</p><p style={{margin:"4px 0 0",fontSize:12,color:"#7e22ce"}}>{report.trialCompletedCount} deneme · {report.newStudentCount} yeni kayıt · {report.leftCount} ayrılan</p></div>
+        <div style={{textAlign:"left"}}><p style={{margin:0,fontWeight:800,fontSize:13}}>{report.label}</p><p style={{margin:"4px 0 0",fontSize:12,color:"#7e22ce"}}>{report.trialCompletedCount} deneme · {report.newStudentCount} yeni kayıt · {report.leftCount} ayrılan</p></div>
         <div style={{display:"flex",gap:6}}><button onClick={()=>setPreview(report)} style={{border:0,borderRadius:8,padding:"7px 10px",fontWeight:800,color:"#5b21b6",background:"#ede9fe"}}>Önizle</button><button disabled={!!busyId} onClick={()=>onDownload(report)} style={{border:0,borderRadius:8,padding:"7px 10px",fontWeight:800,color:"#fff",background:"#6d28d9"}}>{busyId===report.id?"Hazırlanıyor...":"PDF İndir"}</button></div>
       </div>)}
     </AçılırBugünBölümü>:null}
@@ -8292,7 +8292,7 @@ function PendingMonthlyReports({ reports, onDownload, downloadingId }) {
   return <>
     <AçılırBugünBölümü title={`Ay Sonu Raporu (${reports.length})`} color="#6d28d9" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
       {reports.map(report=><div key={report.id} style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
-        <div><p style={{ margin:0, fontWeight:800, fontSize:14 }}>{report.label}</p><p style={{ margin:"2px 0 0", color:"#7e22ce", fontSize:12 }}>Yönetim raporu hazır · PDF indirilmedi</p></div>
+        <div style={{ textAlign:"left" }}><p style={{ margin:0, fontWeight:800, fontSize:14 }}>{report.label}</p><p style={{ margin:"2px 0 0", color:"#7e22ce", fontSize:12 }}>Yönetim raporu hazır · PDF indirilmedi</p></div>
         <div style={{ display:"flex", gap:6 }}><button onClick={()=>setPreview(report)} style={{ border:"none", borderRadius:8, padding:"7px 9px", background:"#ede9fe", color:"#5b21b6", fontWeight:800, cursor:"pointer" }}>Önizle</button><button disabled={downloadingId===report.id} onClick={()=>onDownload(report)} style={{ border:"none", borderRadius:8, padding:"7px 10px", background:"#6d28d9", color:"#fff", fontWeight:800, cursor:downloadingId===report.id?"wait":"pointer", opacity:downloadingId===report.id ? .7 : 1 }}>{downloadingId===report.id?"Hazırlanıyor...":"PDF İndir"}</button></div>
       </div>)}
     </AçılırBugünBölümü>
@@ -16146,7 +16146,7 @@ export default function App() {
                     const yaş = new Date().getFullYear() - new Date(s.dogum_tarihi).getFullYear();
                     return (
                       <div key={s.id} onClick={() => setDetailSt(s)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", cursor:"pointer" }}>
-                        <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
+                        <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111", textAlign:"left" }}>{s.name}</p>
                         <span style={{ fontSize:13, color:"#86198f", fontWeight:600 }}>{yaş} yaş</span>
                       </div>
                     );
@@ -16166,7 +16166,7 @@ export default function App() {
                 {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
                   return (
                     <div key={s.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f3e8ff" }}>
-                      <div onClick={() => setDetailSt(s)} style={{ cursor:"pointer" }}>
+                      <div onClick={() => setDetailSt(s)} style={{ cursor:"pointer", textAlign:"left" }}>
                         <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{s.name}</p>
                         <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce" }}>Ders hakkı tükendi · Yeni paket yükleyebilirsiniz.</p>
                       </div>
