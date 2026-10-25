@@ -4717,6 +4717,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
     ekDersler.length > 0 ? "+"+ekDersler.length+" ek ders" : "",
     odenmemisEk.length > 0 ? odenmemisEk.length+" ödenmemiş ek" : "",
   ].filter(Boolean).join(" · ");
+  const studentActionButtonStyle = { width:"100%", height:44, boxSizing:"border-box", display:"flex", alignItems:"center", justifyContent:"center", margin:0, padding:"8px 10px", background:"#ccfbf1", color:"#6d28d9", border:"1px solid #99f6e4", borderRadius:10, fontSize:13, lineHeight:"20px", fontWeight:700, fontFamily:"inherit", cursor:"pointer" };
 
   return (
     freezeMessageStudentId === student.id && student.frozen && !left ? <DondurmaMesajSheet student={student} onClose={()=>setFreezeMessageStudentId("")} onSent={()=>setFreezeMessageStudentId("")} /> :
@@ -5019,19 +5020,19 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
           </div>
         ) : null}
 
-        <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:8 }}>
-          <Btn bg="#10b981" onClick={() => setShowOdemeAl(true)}>Ödeme Al</Btn>
-          <Btn bg="#f97316" onClick={() => setShowZam(true)}>Zam Yap</Btn>
-          <Btn bg="#6366f1" onClick={() => setShowDuzenle(true)}>Öğrenciyi Düzenle</Btn>
-          <Btn bg="#111" onClick={() => setShowPaketYukle(true)}>Paket Yükle</Btn>
+        <AçılırBugünBölümü title="Öğrenci İşlemleri" color="#6d28d9" style={{ marginTop:16, padding:14, border:"1px solid #ddd6fe", borderRadius:14, background:"#faf5ff", textAlign:"left" }}>
+          <div role="group" aria-label="Öğrenci işlem düğmeleri" style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          <button type="button" style={studentActionButtonStyle} onClick={() => setShowOdemeAl(true)}>Ödeme Al</button>
+          <button type="button" style={studentActionButtonStyle} onClick={() => setShowZam(true)}>Zam Yap</button>
+          <button type="button" style={studentActionButtonStyle} onClick={() => setShowDuzenle(true)}>Öğrenciyi Düzenle</button>
+          <button type="button" style={studentActionButtonStyle} onClick={() => setShowPaketYukle(true)}>Paket Yükle</button>
           {undoablePackage ? (
-            <div style={{ background:"#fff1f2", border:"1px solid #fecdd3", borderRadius:12, padding:"10px 12px" }}>
+            <div>
               <p style={{ margin:"0 0 8px", fontSize:12, color:"#be123c", fontWeight:700 }}>Geri alınacak dersler: {undoablePackagePreview(student, undoablePackage)}</p>
-              <Btn bg="#ef4444" onClick={async() => { if(window.confirm("Son yüklenen paket geri alınsın mı?")) { if(await onUndoLastPackage(student.id)) onClose(); } }}>Son Paketi Geri Al</Btn>
+              <button type="button" style={studentActionButtonStyle} onClick={async() => { if(window.confirm("Son yüklenen paket geri alınsın mı?")) { if(await onUndoLastPackage(student.id)) onClose(); } }}>Son Paketi Geri Al</button>
             </div>
           ) : null}
-          <div style={{ background:left?"#fff1f2":student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(left?"#fecdd3":student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
-            <button disabled={freezeSaving} onClick={async() => {
+            <button type="button" disabled={freezeSaving} onClick={async() => {
               if (freezeSavingRef.current) return;
               if (student.frozen && !left) { setResumeErrorStudentId(""); setShowResumeProgram(true); return; }
               if (left) { onToggleFreeze(student.id, false); return; }
@@ -5048,16 +5049,18 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
                 freezeSavingRef.current = false;
                 setFreezeSaving(false);
               }
-            }} style={{ width:"100%", background:left||student.frozen?"#2563eb":"#f59e0b", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:freezeSaving?"wait":"pointer", fontFamily:"inherit" }}>
+            }} style={{ ...studentActionButtonStyle, cursor:freezeSaving?"wait":"pointer", opacity:freezeSaving ? .65 : 1 }}>
               {freezeSaving ? "Kaydediliyor…" : left ? "Öğrenciyi Yeniden Aktif Et" : student.frozen ? "Programı Devam Ettir" : "Programı Dondur"}
             </button>
-            {student.frozen && !left ? <Btn bg="#25D366" disabled={freezeSaving} onClick={()=>{ if (!freezeSavingRef.current) setFreezeMessageStudentId(student.id); }}>Dondurma Mesajı</Btn> : null}
-            {!student.frozen && !left && !isStudentDeleted(student) ? <Btn bg="#25D366" disabled={freezeSaving} onClick={()=>{ if (!freezeSavingRef.current) setResumeMessageStudentId(student.id); }}>Programa Dönüş Mesajı</Btn> : null}
+            {student.frozen && !left ? <button type="button" disabled={freezeSaving} style={ { ...studentActionButtonStyle, cursor:freezeSaving?"not-allowed":"pointer", opacity:freezeSaving ? .65 : 1 } } onClick={()=>{ if (!freezeSavingRef.current) setFreezeMessageStudentId(student.id); }}>Dondurma Mesajı</button> : null}
+            {!student.frozen && !left && !isStudentDeleted(student) ? <button type="button" disabled={freezeSaving} style={ { ...studentActionButtonStyle, cursor:freezeSaving?"not-allowed":"pointer", opacity:freezeSaving ? .65 : 1 } } onClick={()=>{ if (!freezeSavingRef.current) setResumeMessageStudentId(student.id); }}>Programa Dönüş Mesajı</button> : null}
             {freezeErrorStudentId === student.id ? <p role="alert" style={{ margin:"8px 0 0", fontSize:12, color:"#b91c1c" }}>Program dondurma kaydı doğrulanamadı. Mesaj açılmadı.</p> : null}
-            {!left ? <button onClick={() => { if(window.confirm(student.name+" ayrılan öğrenci olarak kaydedilsin mi? Geçmiş kayıtlar korunacaktır.")) onStudentLeft(student.id); }} style={{ width:"100%", marginTop:8, background:"#be123c", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Öğrenci Ayrıldı</button> : null}
+          <div style={{ borderTop:"1px solid #ddd6fe", marginTop:4, paddingTop:12, display:"flex", flexDirection:"column", gap:8 }}>
+            {!left ? <button type="button" onClick={() => { if(window.confirm(student.name+" ayrılan öğrenci olarak kaydedilsin mi? Geçmiş kayıtlar korunacaktır.")) onStudentLeft(student.id); }} style={studentActionButtonStyle}>Öğrenci Ayrıldı</button> : null}
+          <button type="button" style={studentActionButtonStyle} onClick={async() => { if(window.confirm(student.name+" öğrenci ekranlarından kaldırılsın mı? Geçmiş ders ve ödeme kayıtları finans geçmişinde korunacaktır.")){ const deleted=await onDelete(student.id); if(deleted) onClose(); } }}>Öğrenciyi Sil</button>
           </div>
-          <Btn bg="#ef4444" onClick={async() => { if(window.confirm(student.name+" öğrenci ekranlarından kaldırılsın mı? Geçmiş ders ve ödeme kayıtları finans geçmişinde korunacaktır.")){ const deleted=await onDelete(student.id); if(deleted) onClose(); } }}>Öğrenciyi Sil</Btn>
-        </div>
+          </div>
+        </AçılırBugünBölümü>
       </Sheet>
       {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => onTelafiDone(student.id, id, payload)} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => onMoveOne(student.id, lid, date, time)} /> : null}
