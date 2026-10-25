@@ -5595,6 +5595,57 @@ function WhatsAppPreviewSheet({ title, subtitle, text, onClose, onSent }) {
   </Sheet>;
 }
 
+function PeriodSummaryPreviewSheet({ prompt, onVerify, onSent, onClose }) {
+  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[blocked,setBlocked]=useState(false);
+  const busyRef=useRef(false),mountedRef=useRef(true),reservedRef=useRef(null);
+  const text=msgDonemDegerlendirmesi(prompt.student,prompt.info,prompt.log),phone=calendarAvailabilityPhone(prompt.student.phone);
+  const closeReserved=()=>{try{reservedRef.current?.close();}catch{}reservedRef.current=null;};
+  useEffect(()=>{mountedRef.current=true;return()=>{mountedRef.current=false;closeReserved();};},[]);
+  const close=()=>{if(!busyRef.current)onClose();};
+  const send=async()=>{
+    if(busyRef.current || blocked)return;
+    busyRef.current=true;setBusy(true);setError('');
+    let opened=false;
+    try {
+      if(phone){
+        const reserved=window.open('about:blank','_blank');reservedRef.current=reserved;
+        if(!reserved){setError('Tarayıcı yeni pencereyi engelledi. Açılır pencereye izin verip yeniden deneyin.');return;}
+        reserved.opener=null;
+        reserved.document.title='Sonsuz Sanat — Kayıt kontrolü';
+        reserved.document.body.textContent='Dönem özeti kontrol ediliyor…';
+      }
+      const verified=await onVerify();
+      if(!mountedRef.current)return;
+      if(!verified?.ok){closeReserved();setError(verified?.error || 'Güncel dönem kaydı doğrulanamadı. Mesaj açılmadı.');setBlocked(verified?.blocked===true);return;}
+      if(typeof verified.isCurrent!=='function' || !verified.isCurrent()){
+        closeReserved();setBlocked(true);setError('Öğrenci veya oturum değişti. Pencereyi kapatıp güncel özeti yeniden açın.');return;
+      }
+      if(phone){
+        const reserved=reservedRef.current;
+        if(!reserved || reserved.closed){closeReserved();setError('Mesaj penceresi kapandı. Yeniden deneyin.');return;}
+        reserved.location.replace('https://wa.me/'+phone+'?text='+encodeURIComponent(text));reservedRef.current=null;opened=true;
+      }else{await navigator.clipboard.writeText(text);opened=true;}
+      if(mountedRef.current && verified.isCurrent())await onSent();
+    } catch {
+      closeReserved();
+      if(mountedRef.current){setBlocked(opened);setError(opened
+        ? 'Mesaj hazırlandı; gönderim işareti doğrulanamadı. Mesajı tekrar göndermeyin; kaydı yeniden kontrol edin.'
+        : 'Mesaj açılamadı veya kopyalanamadı. Gönderim işareti kaydedilmedi; yeniden deneyin.');}
+    } finally {
+      busyRef.current=false;
+      if(mountedRef.current)setBusy(false);
+    }
+  };
+  return <Sheet title="Dönem Sonu Özeti" subtitle={prompt.student.name} onClose={close}>
+    <div style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:12,padding:'12px 14px',marginBottom:12}}>
+      <p style={{margin:0,fontSize:12,color:'#475569',lineHeight:1.65,whiteSpace:'pre-line',overflowWrap:'anywhere'}}>{text}</p>
+    </div>
+    {error?<p role="alert" style={{fontSize:13,color:'#b91c1c',lineHeight:1.6,overflowWrap:'anywhere'}}>{error}</p>:null}
+    <Btn bg="#25D366" disabled={busy || blocked} onClick={send}>{busy?'Kontrol ediliyor…':phone?"WhatsApp'ta Aç":'Mesajı Kopyala'}</Btn>
+    <Btn bg="#111" outline disabled={busy} onClick={close}>Kapat</Btn>
+  </Sheet>;
+}
+
 function validPeriodCorrectionLog(log, key=log?.packageKey) {
   const e=log?.evaluation;
   return !!log && log.type!=='manual_piece' && typeof key==='string' && key.trim()===key && key.length>0 && key.length<=500
@@ -9338,6 +9389,8 @@ export default function App() {
   const periodCorrectionScope={actorUserId:authSession?.user?.id || "",branchId:currentBranch?.id || "",generation:protectedDataLoadGenerationRef.current,
     ready:!!(giris && authSession?.user?.id && currentBranch?.id && loadedSources.students && browserOnline && !connectionRevalidationRequired && !accessContextLoading && !loading)};
   periodCorrectionScopeRef.current=periodCorrectionScope;
+  const periodSummaryStateRef=useRef(null);
+  periodSummaryStateRef.current={prompt:periodSummaryPrompt,students};
   const [detailSt, setDetailSt] = useState(null);
   const [detailInitialTab, setDetailInitialTab] = useState("takvim");
   const [showAdd, setShowAdd] = useState(false);
@@ -14703,11 +14756,45 @@ export default function App() {
   };
 
   const handlePaketOzetiAc = (sid, periodKey="") => {
+    const scope={...periodCorrectionScopeRef.current};
+    if(!scope.ready)return;
     const student = students.find(s => s.id === sid);
     const info = periodKey ? completedPeriodInfoByKey(student, periodKey) : lastCompletedPackageInfo(student);
     const log = periodEvaluationInfo(student, info);
     if (!student || !info || !log) { pop("Önce dönem değerlendirmesini tamamlayın", 5000); return; }
-    setPeriodSummaryPrompt({ student, info, log });
+    setPeriodSummaryPrompt({ student, info, log, scopeKey:pieceUpdateScopeKey(scope) });
+  };
+
+  const verifyPeriodSummaryPreview = async(prompt) => {
+    const scope={...periodCorrectionScopeRef.current},scopeKey=pieceUpdateScopeKey(scope);
+    const active=()=>periodCorrectionScopeRef.current?.ready && pieceUpdateScopeKey(periodCorrectionScopeRef.current)===scopeKey
+      && periodSummaryStateRef.current?.prompt===prompt;
+    const fail=(error,blocked=false)=>({ok:false,error,blocked});
+    const sid=prompt?.student?.id,key=packageSummaryKey(prompt?.info);
+    if(!scope.ready || !active() || prompt?.scopeKey!==scopeKey || !sid || !key || prompt.student.branch_id!==scope.branchId
+      || !Number.isInteger(prompt.student.record_version) || !requireProtectedSources(['students'],'Dönem özeti kontrolü')){
+      return fail('Oturum veya öğrenci kaydı değişti. Pencereyi kapatıp güncel özeti yeniden açın.',true);
+    }
+    try {
+      const result=await timedSingleLessonRequest(()=>supabase.from('students').select('*').eq('id',sid).eq('branch_id',scope.branchId).single());
+      if(!active())return fail('Oturum veya şube değişti. Pencereyi kapatıp güncel özeti yeniden açın.',true);
+      const student=result.data;
+      if(result.error || student?.id!==sid || student.branch_id!==scope.branchId || !Number.isInteger(student.record_version)
+        || !Array.isArray(student.package_summary_logs))return fail('Güncel dönem kaydı okunamadı. Mesaj açılmadı; bağlantıyı kontrol edip yeniden deneyin.');
+      const info=completedPeriodInfoByKey(student,key),matches=student.package_summary_logs.filter(log=>log.packageKey===key),log=matches[0];
+      const same=(a,b)=>JSON.stringify(canonicalJson(a))===JSON.stringify(canonicalJson(b));
+      const local=periodSummaryStateRef.current?.students.find(s=>s.id===sid && s.branch_id===scope.branchId);
+      if(!info || matches.length!==1 || !log?.evaluation || !same(log,prompt.log)
+        || student.record_version!==prompt.student.record_version || local?.record_version!==student.record_version
+        || calendarAvailabilityPhone(student.phone)!==calendarAvailabilityPhone(prompt.student.phone)
+        || msgDonemDegerlendirmesi(student,info,log)!==msgDonemDegerlendirmesi(prompt.student,prompt.info,prompt.log)){
+        setStudents(previous=>!active()?previous:previous.map(s=>s.id===sid && s.branch_id===scope.branchId && Number(s.record_version || 0)<=student.record_version?student:s));
+        return fail('Dönem değerlendirmesi veya öğrenci kaydı değişti. Bu mesaj eski; pencereyi kapatıp güncel özeti yeniden açın.',true);
+      }
+      return {ok:true,isCurrent:()=>active() && periodSummaryStateRef.current?.students.some(s=>s.id===sid && s.branch_id===scope.branchId
+        && s.record_version===student.record_version && same(s.package_summary_logs,prompt.student.package_summary_logs)
+        && calendarAvailabilityPhone(s.phone)===calendarAvailabilityPhone(student.phone) && s.name===student.name)};
+    } catch {return fail('Güncel dönem kaydı okunamadı. Mesaj açılmadı; yeniden deneyin.');}
   };
 
   const handlePaketOzetiGonderildi = async (sid, info, expectedLog=null) => {
@@ -16285,7 +16372,7 @@ export default function App() {
       {mesajSt ? <MesajSheet student={mesajSt} initialKey={mesajInitialKey} onClose={()=>{ setMesajSt(null); setMesajInitialKey(""); }} /> : null}
       {periodCorrectionModal && periodCorrectionScope.ready && periodCorrectionModal.scopeKey===pieceUpdateScopeKey(periodCorrectionScope) ? <PeriodCorrectionSheet key={periodCorrectionModal.scopeKey+periodCorrectionModal.student.id+periodCorrectionModal.key} context={periodCorrectionModal} onOperation={handlePeriodCorrection} onHistory={page=>readPeriodCorrectionHistory(periodCorrectionModal,page)} onClose={()=>setPeriodCorrectionModal(null)} />:null}
       {periodEvaluationModal ? <DonemDegerlendirmeSheet student={students.find(student=>student.id===periodEvaluationModal.student.id) || periodEvaluationModal.student} info={periodEvaluationModal.info} onClose={()=>setPeriodEvaluationModal(null)} onSave={evaluation=>handleDonemDegerlendirmeKaydet(periodEvaluationModal.student.id, periodEvaluationModal.info, evaluation)} /> : null}
-      {periodSummaryPrompt ? <WhatsAppPreviewSheet title="Dönem Sonu Özeti" subtitle={periodSummaryPrompt.student} text={msgDonemDegerlendirmesi(periodSummaryPrompt.student, periodSummaryPrompt.info, periodSummaryPrompt.log)} onClose={()=>setPeriodSummaryPrompt(null)} onSent={()=>handlePaketOzetiGonderildi(periodSummaryPrompt.student.id, periodSummaryPrompt.info, periodSummaryPrompt.log)} /> : null}
+      {periodSummaryPrompt && periodCorrectionScope.ready && periodSummaryPrompt.scopeKey===pieceUpdateScopeKey(periodCorrectionScope) ? <PeriodSummaryPreviewSheet key={periodSummaryPrompt.scopeKey+periodSummaryPrompt.student.id+packageSummaryKey(periodSummaryPrompt.info)} prompt={periodSummaryPrompt} onVerify={()=>verifyPeriodSummaryPreview(periodSummaryPrompt)} onClose={()=>setPeriodSummaryPrompt(null)} onSent={()=>handlePaketOzetiGonderildi(periodSummaryPrompt.student.id, periodSummaryPrompt.info, periodSummaryPrompt.log)} /> : null}
       {odemeSt ? <ÖdemeSheet student={odemeSt} onClose={()=>setÖdemeSt(null)} onÖdemeAl={handleRecharge} onMesajGonder={(st)=>setMesajSt(st)} /> : null}
 
       {odemeKaydetModal ? (
