@@ -3786,27 +3786,30 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
   );
 }
 
-function ResumeProgramSheet({ student, onClose, onResume }) {
+function ResumeProgramSheet({ student, onClose, onResume, error="" }) {
   const today = localDateKey();
   const [startDate, setStartDate] = useState(today);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const upcomingCount = (student.schedule || []).filter(lesson => lesson.status === "upcoming").length;
   const preview = startDate && upcomingCount
     ? buildScheduleSlots(getStudentSlots(student), upcomingCount, new Date(startDate+"T12:00:00"), getLessonDuration(student))
     : [];
   const firstLesson = preview[0];
   const submit = async () => {
-    if (!startDate || saving) return;
+    if (!startDate || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       const saved = await onResume(startDate);
       if (saved !== false) onClose();
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
   return (
-    <Sheet title="Programı Devam Ettir" subtitle={student.name} onClose={onClose}>
+    <Sheet title="Programı Devam Ettir" subtitle={student.name} onClose={()=>{ if (!savingRef.current) onClose(); }}>
       <p style={{ margin:"0 0 14px", fontSize:13, color:"#475569", lineHeight:1.55 }}>Öğrencinin yeniden derse başlayabileceği tarihi seçin. Bekleyen dersler sabit programındaki ilk uygun gün ve saatten itibaren yeniden sıralanır.</p>
       <label style={{ ...LBL, marginTop:0 }}>Derse Başlayabileceği Tarih</label>
       <input style={INP} type="date" min={today} value={startDate} onChange={event=>setStartDate(event.target.value)} />
@@ -3816,8 +3819,9 @@ function ResumeProgramSheet({ student, onClose, onResume }) {
           <p style={{ margin:"4px 0 0", fontSize:11, color:"#475569" }}>{upcomingCount} bekleyen ders yeni tarihlere taşınacak. Geçmiş dersler değişmeyecek.</p>
         </> : <p style={{ margin:0, fontSize:12, color:"#475569" }}>Bekleyen ders bulunmuyor; öğrenci yalnızca aktif duruma alınacak.</p>}
       </div>
+      {error ? <p role="alert" style={{ margin:"0 0 10px", fontSize:12, color:"#b91c1c" }}>{error}</p> : null}
       <button disabled={saving || !startDate} onClick={submit} style={{ width:"100%", display:"block", marginBottom:8, border:"none", borderRadius:14, padding:"13px 16px", background:"#2563eb", color:"#fff", fontWeight:700, fontSize:14, cursor:saving?"wait":"pointer", opacity:saving?.7:1, fontFamily:"inherit" }}>{saving ? "Kaydediliyor..." : "Programı Devam Ettir"}</button>
-      <Btn bg="#111" outline onClick={onClose}>Vazgeç</Btn>
+      <Btn bg="#111" outline disabled={saving} onClick={()=>{ if (!savingRef.current) onClose(); }}>Vazgeç</Btn>
     </Sheet>
   );
 }
@@ -4689,6 +4693,8 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
   const [freezeSaving, setFreezeSaving] = useState(false);
   const [freezeErrorStudentId, setFreezeErrorStudentId] = useState("");
   const freezeSavingRef = useRef(false);
+  const [resumeMessageStudentId, setResumeMessageStudentId] = useState("");
+  const [resumeErrorStudentId, setResumeErrorStudentId] = useState("");
   const bal = calcBalance(student.schedule);
   const np = calcNextPayment(student.schedule);
   const telafiRecords = student.telafi_records || [];
@@ -4714,6 +4720,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
 
   return (
     freezeMessageStudentId === student.id && student.frozen && !left ? <DondurmaMesajSheet student={student} onClose={()=>setFreezeMessageStudentId("")} onSent={()=>setFreezeMessageStudentId("")} /> :
+    resumeMessageStudentId === student.id && !student.frozen && !left && !isStudentDeleted(student) ? <ProgramaDonusMesajSheet student={student} onClose={()=>setResumeMessageStudentId("")} onSent={()=>setResumeMessageStudentId("")} /> :
     <>
       <Sheet title={student.name} onClose={onClose}>
         <div style={SECTION}>
@@ -5026,7 +5033,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
           <div style={{ background:left?"#fff1f2":student.frozen?"#eff6ff":"#f9fafb", border:"1px solid "+(left?"#fecdd3":student.frozen?"#bfdbfe":"#e5e7eb"), borderRadius:12, padding:"12px 14px" }}>
             <button disabled={freezeSaving} onClick={async() => {
               if (freezeSavingRef.current) return;
-              if (student.frozen && !left) { setShowResumeProgram(true); return; }
+              if (student.frozen && !left) { setResumeErrorStudentId(""); setShowResumeProgram(true); return; }
               if (left) { onToggleFreeze(student.id, false); return; }
               freezeSavingRef.current = true;
               setFreezeSaving(true);
@@ -5045,6 +5052,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
               {freezeSaving ? "Kaydediliyor…" : left ? "Öğrenciyi Yeniden Aktif Et" : student.frozen ? "Programı Devam Ettir" : "Programı Dondur"}
             </button>
             {student.frozen && !left ? <Btn bg="#25D366" disabled={freezeSaving} onClick={()=>{ if (!freezeSavingRef.current) setFreezeMessageStudentId(student.id); }}>Dondurma Mesajı</Btn> : null}
+            {!student.frozen && !left && !isStudentDeleted(student) ? <Btn bg="#25D366" disabled={freezeSaving} onClick={()=>{ if (!freezeSavingRef.current) setResumeMessageStudentId(student.id); }}>Programa Dönüş Mesajı</Btn> : null}
             {freezeErrorStudentId === student.id ? <p role="alert" style={{ margin:"8px 0 0", fontSize:12, color:"#b91c1c" }}>Program dondurma kaydı doğrulanamadı. Mesaj açılmadı.</p> : null}
             {!left ? <button onClick={() => { if(window.confirm(student.name+" ayrılan öğrenci olarak kaydedilsin mi? Geçmiş kayıtlar korunacaktır.")) onStudentLeft(student.id); }} style={{ width:"100%", marginTop:8, background:"#be123c", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Öğrenci Ayrıldı</button> : null}
           </div>
@@ -5056,7 +5064,27 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
       {showOdemeAl ? <OdemeAlSheet student={student} saving={paymentSavingId===student.id} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={async(sid, date, count, periodCount) => { const saved=await onRecharge(sid,date,count,periodCount); if(saved) {setShowPaketYukle(false);onClose();} return saved; }} onMesajGonder={onMesaj} /> : null}
       {showZam ? <ZamSheet student={student} onClose={() => setShowZam(false)} onSave={onZamYap} /> : null}
-      {showResumeProgram ? <ResumeProgramSheet student={student} onClose={() => setShowResumeProgram(false)} onResume={(startDate) => onToggleFreeze(student.id, false, startDate)} /> : null}
+      {showResumeProgram ? <ResumeProgramSheet student={student} error={resumeErrorStudentId === student.id ? "Programı devam ettirme kaydı doğrulanamadı. Mesaj açılmadı." : ""} onClose={() => setShowResumeProgram(false)} onResume={async(startDate) => {
+        if (freezeSavingRef.current) return false;
+        freezeSavingRef.current = true;
+        setFreezeSaving(true);
+        setResumeErrorStudentId("");
+        try {
+          const savedStudent = await onToggleFreeze(student.id, false, startDate);
+          if (savedStudent?.id === student.id && savedStudent.frozen === false && !isStudentLeft(savedStudent) && !isStudentDeleted(savedStudent)) {
+            setResumeMessageStudentId(savedStudent.id);
+            return savedStudent;
+          }
+          setResumeErrorStudentId(student.id);
+          return false;
+        } catch {
+          setResumeErrorStudentId(student.id);
+          return false;
+        } finally {
+          freezeSavingRef.current = false;
+          setFreezeSaving(false);
+        }
+      }} /> : null}
       {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
       {ekDersOdemeSel ? <EkDersOdemeSheet student={student} extra={ekDersOdemeSel} onClose={()=>setEkDersOdemeSel(null)} onConfirm={onEkDersOdeme} /> : null}
       {showDuzenle ? <DuzenleSheet student={student} teachers={teachers} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} onPreviewProgram={onPreviewProgram} /> : null}
@@ -5250,6 +5278,26 @@ function paymentNoticeMessage(student, info, kind) {
     : kind === "wa3" ? msgÖdemeHatirlatma3(student, info) : msgÖdemeHatirlatma();
   return text.replace("Merhaba,", "Merhaba,\n"+period);
 }
+function msgProgramaDonus(student) {
+  const storedSlots = student?.lessonSlots || student?.lesson_slots;
+  const slots = (Array.isArray(storedSlots) && storedSlots.length) || (student?.day && student?.time) ? getStudentSlots(student) : [];
+  const firstUpcoming = [...(student?.schedule || [])].filter(lesson=>lesson?.status === "upcoming" && lesson.date && !isNaN(new Date(lesson.date).getTime())).sort((a,b)=>new Date(a.date)-new Date(b.date))[0];
+  const lines = slots.length === 1 ? ["• Ders günü: "+slots[0].day, "• Ders saati: "+slots[0].time] : slots.map(slot=>"• "+slot.day+" — "+slot.time);
+  if (firstUpcoming) {
+    const firstDate = new Date(firstUpcoming.date);
+    const firstTime = lessonTime(student, firstUpcoming);
+    const matchesProgram = slots.some(slot=>slotDayIndex(slot.day) === firstDate.getDay() && slot.time === firstTime);
+    lines.push("• İlk ders tarihi: "+firstDate.toLocaleDateString("tr-TR", { day:"numeric", month:"long", year:"numeric" })+(!matchesProgram && firstTime ? " · "+firstTime : ""));
+  }
+  return [
+    "Merhaba,",
+    (student?.name || "Öğrencimiz")+" için ders programımız yeniden planlanmış ve aktif hale getirilmiştir.",
+    ...(lines.length ? ["Ders programınız:\n\n"+lines.join("\n")] : []),
+    firstUpcoming ? "Belirtilen tarih ve saatte görüşmek üzere." : "Görüşmek üzere.",
+    "Bodrum Sonsuz Sanat"
+  ].join("\n\n");
+}
+
 function msgProgramDondurma(student) {
   const remaining = calcBalance(student?.schedule || []);
   const pending = activeTelafiRecords(student?.telafi_records || []);
@@ -5751,6 +5799,23 @@ function MesajSheet({ student, onClose, initialKey = "" }) {
       </div>
     </Sheet>
   );
+}
+
+function ProgramaDonusMesajSheet({ student, onClose, onSent }) {
+  const text = msgProgramaDonus(student);
+  const send = async () => {
+    const phone = calendarAvailabilityPhone(student.phone);
+    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
+    else await navigator.clipboard.writeText(text);
+    if (onSent) await onSent(phone ? "whatsapp" : "copied");
+  };
+  return <Sheet title="Programa Dönüş Bilgilendirmesi" subtitle={student.name} onClose={onClose}>
+    <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
+      <p style={{ margin:0, fontSize:12, color:"#475569", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
+    </div>
+    <Btn bg="#25D366" onClick={send}>{calendarAvailabilityPhone(student.phone) ? "WhatsApp'ta Aç" : "Mesajı Kopyala"}</Btn>
+    <Btn bg="#111" outline onClick={onClose}>Şimdi Değil</Btn>
+  </Sheet>;
 }
 
 function DondurmaMesajSheet({ student, onClose, onSent }) {
