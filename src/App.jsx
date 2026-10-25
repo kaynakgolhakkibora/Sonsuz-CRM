@@ -6601,7 +6601,8 @@ function calendarAvailabilityInterval(date,time,duration) {
   return Number.isFinite(end) ? {start:start.getTime(),end} : null;
 }
 function calendarAvailabilityModel(days,intervals,generatedAt=new Date(),teacherName="") {
-  if (days.length!==7 || days.some(day=>isNaN(new Date(day).getTime())) || intervals.some(item=>!Number.isFinite(item.start)||!Number.isFinite(item.end)||item.end<=item.start)) return null;
+  const cutoff = new Date(generatedAt).getTime();
+  if (!Number.isFinite(cutoff) || days.length!==7 || days.some(day=>isNaN(new Date(day).getTime())) || intervals.some(item=>!Number.isFinite(item.start)||!Number.isFinite(item.end)||item.end<=item.start)) return null;
   const dayNames=["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"];
   const dates=days.map(day=>new Date(day));
   const weekLabel=dates[0].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})+" - "+dates[6].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"});
@@ -6615,7 +6616,7 @@ function calendarAvailabilityModel(days,intervals,generatedAt=new Date(),teacher
       dateLabel:day.toLocaleDateString("tr-TR",{day:"numeric",month:"long"}),
       times:calendarAvailabilityStarts(index).filter(time=>{
         const slot=calendarAvailabilityInterval(day,time,45);
-        return !intervals.some(item=>item.start<slot.end && item.end>slot.start);
+        return slot.start>cutoff && !intervals.some(item=>item.start<slot.end && item.end>slot.start);
       }),
     })),
   };
@@ -7189,6 +7190,24 @@ function CalendarProgramSheet({students,branchId,branchName,calendarTeacher=null
 
 
 function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry,onClose,recipients=[],teacherName="",teacherIssue=false}) {
+  const [availabilityNow,setAvailabilityNow]=useState(()=>Date.now());
+  const clockKey=days.map(localDateKey).join("|");
+  useEffect(()=>{
+    let timer;
+    const refresh=()=>{
+      window.clearTimeout(timer);
+      const now=Date.now();
+      setAvailabilityNow(now);
+      const next=days.flatMap((day,index)=>calendarAvailabilityStarts(index).map(time=>calendarAvailabilityInterval(day,time,45)?.start))
+        .filter(at=>Number.isFinite(at) && at>now).reduce((earliest,at)=>Math.min(earliest,at),now+60000);
+      timer=window.setTimeout(refresh,Math.max(1,next-now));
+    };
+    const visible=()=>{if(document.visibilityState==="visible")refresh();};
+    refresh();
+    window.addEventListener("focus",refresh);
+    document.addEventListener("visibilitychange",visible);
+    return ()=>{window.clearTimeout(timer);window.removeEventListener("focus",refresh);document.removeEventListener("visibilitychange",visible);};
+  },[clockKey]);
   const dialogRef=useRef(null);
   const aliveRef=useRef(true);
   const exportBusyRef=useRef(false);
@@ -7207,7 +7226,7 @@ function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry
   const query=recipientSearch.trim().toLocaleLowerCase("tr-TR");
   const matchingRecipients=recipients.filter(item=>[item.name,item.guardian,item.phone].some(value=>String(value).toLocaleLowerCase("tr-TR").includes(query)) || item.id===recipientId);
   const blocked=invalid || ["loading","error"].includes(moveReadState);
-  const model=blocked?null:calendarAvailabilityModel(days,intervals,new Date(),teacherName);
+  const model=blocked?null:calendarAvailabilityModel(days,intervals,new Date(availabilityNow),teacherName);
   const signature=JSON.stringify([teacherName,model?.days || [moveReadState,invalid]]);
   const currentSignatureRef=useRef(signature);
   currentSignatureRef.current=signature;
