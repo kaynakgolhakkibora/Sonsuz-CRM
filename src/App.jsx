@@ -6186,7 +6186,7 @@ function calendarTeacherProgramStudents(students,teacher,teachers,branchId) {
   for(const student of students) {
     if(!student?.id || student.branch_id!==branchId || ids.has(student.id)) return null;
     ids.add(student.id);
-    if(isStudentDeleted(student) || isStudentLeft(student)) continue;
+    if(student.frozen || isStudentDeleted(student) || isStudentLeft(student)) continue;
     const owner=calendarTeacherOwner(calendarTeacherReference(student),teachers);
     if(!owner) return null;
     if(owner===teacher.id) visible.push(student);
@@ -6856,7 +6856,7 @@ function calendarProgramModel(students,branchId) {
   for (const student of students) {
     if (!student?.id || student.branch_id!==branchId || ids.has(student.id)) return null;
     ids.add(student.id);
-    if (isStudentDeleted(student) || isStudentLeft(student)) continue;
+    if (student.frozen || isStudentDeleted(student) || isStudentLeft(student)) continue;
     const raw=student.lessonSlots || student.lesson_slots;
     if (raw!=null && !Array.isArray(raw)) return null;
     const expected=raw?.length ? raw : [{day:student.day,time:student.time}];
