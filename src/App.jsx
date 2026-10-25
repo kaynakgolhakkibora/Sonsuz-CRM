@@ -14065,7 +14065,8 @@ export default function App() {
         }
         const event = { id:uid(), type:"communication_google_review", value:"requested", at:new Date().toISOString() };
         const payload = { status_history:[...(current.status_history || []),event], record_version:current.record_version+1,
-          last_write_id:event.id, last_saved_at:event.at };
+          last_write_id:event.id, last_saved_at:event.at,
+          ...(Object.prototype.hasOwnProperty.call(current,"program_operation_id") ? {program_operation_id:current.program_operation_id} : {}) };
         if (!matchesScope()) return false;
         // Only communication history and CAS metadata are written; no lesson/payment/package payload.
         const result = await timedSingleLessonRequest(()=>supabase.from("students").update(payload)
