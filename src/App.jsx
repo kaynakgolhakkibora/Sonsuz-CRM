@@ -6234,6 +6234,7 @@ function TeacherCalendarPanel({students,teachers,singleLessons,branchId,branchNa
 }
 
 function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "", calendarTeacher=null, calendarTeachers=[], calendarMoveReadScope=null, availabilityOpen=false, onAvailabilityClose=()=>{} }) {
+  students = students.filter(student=>!isStudentDeleted(student));
   const ownerFor=(student,date=null,item=null)=>calendarTeacherOwner(calendarTeacherReference(student,date,item),calendarTeachers);
   const moveRequests = calendarMoveReadRequests(students,calendarMoveReadScope,offset).filter(request=>{
     if(!calendarTeacher) return true;
