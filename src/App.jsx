@@ -1351,15 +1351,7 @@ function singleLessonMoveIssueMessage(issue) {
 // v174: read-only calendar proof. Never attach this evidence to a student payload.
 function calendarMoveReadRequests(students, scope, offset=0) {
   if (!SINGLE_LESSON_MOVE_UUID.test(scope?.actorUserId || "") || !SINGLE_LESSON_MOVE_UUID.test(scope?.branchId || "")) return [];
-  const start = new Date();
-  const dow = start.getDay();
-  start.setDate(start.getDate() - (dow===0?6:dow-1) + offset*7);
-  start.setHours(0,0,0,0);
-  const visibleDates = new Set(Array.from({length:7},(_,index)=>{
-    const day = new Date(start);
-    day.setDate(start.getDate()+index);
-    return turkeyDateKey(day);
-  }));
+  const visibleDates = new Set(calendarWeekDays(new Date(),offset).map(calendarDayKey));
   return students.flatMap(student => {
     if (student.branch_id !== scope.branchId || student.frozen || isStudentLeft(student)) return [];
     const counts = new Map();
@@ -6147,6 +6139,65 @@ function ZamSheet({ student, onClose, onSave }) {
   );
 }
 
+// Calendar-only civil time reads. Business writers keep their existing date helpers.
+const CALENDAR_READ_ZONE = "Europe/Istanbul";
+const CALENDAR_READ_PARTS = new Intl.DateTimeFormat("en-GB",{timeZone:CALENDAR_READ_ZONE,calendar:"gregory",numberingSystem:"latn",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"});
+function calendarWallDate(key,time="00:00",seconds=0,milliseconds=0) {
+  const invalid=()=>new Date(NaN),clock=/^(\d{2}):(\d{2})$/.exec(String(time));
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(key || "") || !clock || Number(clock[1])>23 || Number(clock[2])>59 || !Number.isInteger(seconds) || seconds<0 || seconds>59 || !Number.isInteger(milliseconds) || milliseconds<0 || milliseconds>999) return invalid();
+  const civil=key+"T"+time+":"+String(seconds).padStart(2,"0")+"."+String(milliseconds).padStart(3,"0")+"Z",target=new Date(civil);
+  if(!Number.isFinite(target.getTime()) || target.toISOString()!==civil) return invalid();
+  const civilValue=date=>{
+    const p=Object.fromEntries(CALENDAR_READ_PARTS.formatToParts(date).map(part=>[part.type,part.value]));
+    return new Date(p.year+"-"+p.month+"-"+p.day+"T"+p.hour+":"+p.minute+":"+p.second+"Z").getTime()+date.getUTCMilliseconds();
+  };
+  const candidates=new Set();
+  for(const shift of [-86400000,0,86400000]) {
+    const sample=new Date(target.getTime()+shift),offset=civilValue(sample)-sample.getTime(),at=target.getTime()-offset;
+    if(civilValue(new Date(at))===target.getTime()) candidates.add(at);
+  }
+  return candidates.size===1 ? new Date([...candidates][0]) : invalid();
+}
+function calendarReadDate(value) {
+  if(value instanceof Date || typeof value==="number") return new Date(value);
+  if(typeof value!=="string") return new Date(NaN);
+  const civil=/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?$/.exec(value);
+  if(civil) return calendarWallDate(civil[1],civil[2] || "00:00",Number(civil[3] || 0),Number((civil[4] || "").padEnd(3,"0").slice(0,3)));
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? new Date(value) : new Date(NaN);
+}
+function calendarDayKey(value=new Date()) {
+  const date=calendarReadDate(value);if(!Number.isFinite(date.getTime()))return "";
+  const p=Object.fromEntries(CALENDAR_READ_PARTS.formatToParts(date).map(part=>[part.type,part.value]));
+  return p.year+"-"+p.month+"-"+p.day;
+}
+function calendarTime(value) {
+  const date=calendarReadDate(value);if(!Number.isFinite(date.getTime()))return "";
+  const p=Object.fromEntries(CALENDAR_READ_PARTS.formatToParts(date).map(part=>[part.type,part.value]));
+  return p.hour+":"+p.minute;
+}
+function calendarDayStart(value=new Date()) { return calendarWallDate(calendarDayKey(value)); }
+function calendarAddDays(value,count) {
+  const key=calendarDayKey(value),day=new Date(key+"T00:00:00Z");
+  if(!Number.isFinite(day.getTime()) || !Number.isInteger(count))return new Date(NaN);
+  day.setUTCDate(day.getUTCDate()+count);return calendarWallDate(day.toISOString().slice(0,10));
+}
+function calendarWeekDays(value=new Date(),offset=0) {
+  const day=new Date(calendarDayKey(value)+"T00:00:00Z");if(!Number.isFinite(day.getTime()) || !Number.isInteger(offset))return [];
+  const dow=day.getUTCDay(),start=calendarAddDays(value,-(dow===0?6:dow-1)+offset*7);
+  return Array.from({length:7},(_,index)=>calendarAddDays(start,index));
+}
+function calendarDateLabel(value,options) {
+  const date=calendarReadDate(value);return Number.isFinite(date.getTime()) ? date.toLocaleDateString("tr-TR",{...options,timeZone:CALENDAR_READ_ZONE}) : "";
+}
+function calendarLessonTime(student,lesson) { return lesson?.time || calendarTime(lesson?.date) || student?.time || ""; }
+function calendarTeacherNameForDate(student,date,item=null) {
+  const direct=item?.teacherName || item?.teacher_name;if(direct)return direct;
+  const key=calendarDayKey(date),history=[...(student?.teacher_history || [])]
+    .filter(entry=>entry?.teacherName && entry?.from && calendarDayKey(entry.from) && calendarDayKey(entry.from)<=key)
+    .sort((a,b)=>calendarDayKey(a.from).localeCompare(calendarDayKey(b.from)));
+  return history.length ? history[history.length-1].teacherName : studentTeacherName(student);
+}
+
 function calendarTeacherChoices(teachers) {
   const active=(teachers || []).filter(teacher=>teacher?.active);
   const ids=new Set();
@@ -6162,11 +6213,11 @@ function calendarTeacherReference(student,date=null,item=null) {
   const direct=reference(item);
   if(direct.id || direct.name) return direct;
   if(date) {
-    const target=new Date(date);
+    const target=calendarReadDate(date);
     if(!isNaN(target.getTime())) {
       const history=(Array.isArray(student?.teacher_history)?student.teacher_history:[])
-        .filter(entry=>{const ref=reference(entry),at=new Date(entry?.from);return (ref.id || ref.name) && entry?.from && !isNaN(at.getTime()) && dateKey(entry.from)<=dateKey(date);})
-        .sort((a,b)=>dateKey(a.from).localeCompare(dateKey(b.from)));
+        .filter(entry=>{const ref=reference(entry),at=calendarReadDate(entry?.from);return (ref.id || ref.name) && entry?.from && !isNaN(at.getTime()) && calendarDayKey(entry.from)<=calendarDayKey(date);})
+        .sort((a,b)=>calendarDayKey(a.from).localeCompare(calendarDayKey(b.from)));
       if(history.length) return reference(history[history.length-1]);
     }
   }
@@ -6277,29 +6328,26 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   const programReadState=programStudents.length ? (programReadResult?.key===programReadKey ? programReadResult.state : "loading") : "";
   const programRecords=programReadResult?.key===programReadKey && programReadResult.state==="ready" ? programReadResult.records : [];
   const now = new Date();
-  const dow = now.getDay();
-  const start = new Date(now);
-  start.setDate(now.getDate() - (dow===0?6:dow-1) + offset*7);
-  start.setHours(0,0,0,0);
-  const days = Array.from({length:7},(_,i)=>{ const d=new Date(start); d.setDate(start.getDate()+i); return d; });
-  const label = fmtMed(days[0].toISOString()) + " - " + fmtMed(days[6].toISOString());
-  const todayMid = midday();
+  const days = calendarWeekDays(now,offset);
+  const start = days[0];
+  const label = calendarDateLabel(days[0],{day:"numeric",month:"long"}) + " - " + calendarDateLabel(days[6],{day:"numeric",month:"long"});
+  const todayMid = calendarDayStart(now);
   const dayNames = ["Pzt","Sal","Çar","Per","Cum","Cmt","Paz"];
   const startMinutes = 10 * 60;
   const endMinutes = 20 * 60;
   const slotMinutes = 15;
   const rowCount = (endMinutes - startMinutes) / slotMinutes;
-  const dayKeyToIndex = new Map(days.map((day,index)=>[localDateKey(day), index]));
+  const dayKeyToIndex = new Map(days.map((day,index)=>[calendarDayKey(day), index]));
   const calendarItems = [];
   // Read-only observation: uses the existing source filters, never changes calendar items.
   const availabilityIntervals = [];
   let availabilityInvalid = false;
   let teacherUnresolved = false;
   const matchesTeacher=(student,date,item,time,duration,current=false)=>{
-    if(!calendarTeacher) return !teacherName || (current?studentTeacherName(student):teacherForDate(student,date,item))===teacherName;
+    if(!calendarTeacher) return !teacherName || (current?studentTeacherName(student):calendarTeacherNameForDate(student,date,item))===teacherName;
     const owner=ownerFor(student,current?null:date,current?null:item);
     if(!owner && availabilityOpen && !student?.frozen && !isStudentLeft(student)) {
-      const interval=calendarAvailabilityInterval(date,time,duration),weekEnd=new Date(days[6]);weekEnd.setDate(weekEnd.getDate()+1);
+      const interval=calendarAvailabilityInterval(date,time,duration),weekEnd=calendarAddDays(days[6],1);
       if(!interval || (interval.start<weekEnd.getTime() && interval.end>start.getTime())) {availabilityInvalid=true;teacherUnresolved=true;}
     }
     return owner===calendarTeacher.id;
@@ -6325,7 +6373,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     if (left && isStudentDeleted(student)) return;
     const historyOnly = student.frozen || left;
     const frozenAt = student.frozen ? (Array.isArray(student.status_history) ? student.status_history : []).reduce((latest,event)=>{
-      const at = event?.type === "frozen" && event.at ? new Date(event.at).getTime() : NaN;
+      const at = event?.type === "frozen" && event.at ? calendarReadDate(event.at).getTime() : NaN;
       return Number.isFinite(at) && at <= now.getTime() && (latest === null || at > latest) ? at : latest;
     },null) : null;
     let leftAt = null;
@@ -6333,12 +6381,12 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       const value = student.left_at || student.leftAt;
       if (typeof value === "string" && isValidLocalDateInput(value.slice(0,10))
         && (/^\d{4}-\d{2}-\d{2}$/.test(value) || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value))) {
-        const at = new Date(value + (/^\d{4}-\d{2}-\d{2}$/.test(value) ? "T00:00:00" : "")).getTime();
+        const at = calendarReadDate(value).getTime();
         if (Number.isFinite(at) && at <= now.getTime()) leftAt = at;
       }
       if (leftAt !== null && frozenAt !== null && frozenAt < leftAt) {
         const reactivated = (Array.isArray(student.status_history) ? student.status_history : []).some(event=>{
-          const at = event?.type === "active" && event.at ? new Date(event.at).getTime() : NaN;
+          const at = event?.type === "active" && event.at ? calendarReadDate(event.at).getTime() : NaN;
           return Number.isFinite(at) && at > frozenAt && at <= leftAt;
         });
         if (!reactivated) leftAt = frozenAt;
@@ -6347,25 +6395,19 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     const inactiveAt = left ? leftAt : frozenAt;
     const visibleRecordedDate = (date,time,confirmed=false) => {
       if (!historyOnly) return true;
-      const occurrence = new Date(date);
+      const occurrence = calendarReadDate(date);
       const clock = /^(\d{2}):(\d{2})$/.exec(String(time || ""));
       if (isNaN(occurrence.getTime()) || !clock || Number(clock[1]) > 23 || Number(clock[2]) > 59) return false;
-      occurrence.setHours(Number(clock[1]),Number(clock[2]),0,0);
-      const at = occurrence.getTime();
+      const at = calendarWallDate(calendarDayKey(occurrence),time).getTime();
       return at < now.getTime() && (confirmed || (inactiveAt !== null && at < inactiveAt));
     };
     const schedule = student.schedule || [];
     const packageEnded = calcBalance(schedule) === 0;
-    const scheduleDates = schedule.map(lesson=>new Date(lesson.date)).filter(date=>!isNaN(date.getTime()));
+    const scheduleDates = schedule.map(lesson=>calendarReadDate(lesson.date)).filter(date=>!isNaN(date.getTime()));
     const earliestSchedule = scheduleDates.length ? new Date(Math.min(...scheduleDates.map(date=>date.getTime()))) : null;
-    const earliestScheduleWeek = earliestSchedule ? (() => {
-      const date = midday(earliestSchedule);
-      const day = date.getDay();
-      date.setDate(date.getDate() - (day===0 ? 6 : day-1));
-      return date;
-    })() : null;
+    const earliestScheduleWeek = earliestSchedule ? calendarWeekDays(earliestSchedule)[0] : null;
     const statedStart = student.lesson_start_date || student.lessonStartDate;
-    const programStart = statedStart ? midday(new Date(statedStart+(/^\d{4}-\d{2}-\d{2}$/.test(statedStart)?"T12:00:00":""))) : (earliestScheduleWeek || todayMid);
+    const programStart = statedStart ? calendarDayStart(statedStart) : (earliestScheduleWeek || todayMid);
     const actualKeys = new Set();
     const timeline=programTimeline(student,programRecords.find(record=>record.studentId===student.id));
     const lessonIdCounts = new Map();
@@ -6378,16 +6420,16 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     }));
 
     schedule.forEach(lesson => {
-      if (!visibleRecordedDate(lesson.date,lessonTime(student,lesson),["completed","noshow","lastminute","telafi"].includes(lesson.status))) return;
-      const recordedDayIndex=dayKeyToIndex.get(localDateKey(lesson.date));
-      if(recordedDayIndex!==undefined)actualKeys.add(recordedDayIndex+"|"+lessonTime(student,lesson));
-      if (!matchesTeacher(student,lesson.date,lesson,lessonTime(student,lesson),getLessonDuration(student,lesson))) return;
-      if (!historyOnly) observeAvailability(lesson.date,lessonTime(student,lesson),getLessonDuration(student,lesson),lesson.status==="telafi"?"telafi-slot":"normal");
-      const dayIndex = dayKeyToIndex.get(localDateKey(lesson.date));
+      if (!visibleRecordedDate(lesson.date,calendarLessonTime(student,lesson),["completed","noshow","lastminute","telafi"].includes(lesson.status))) return;
+      const recordedDayIndex=dayKeyToIndex.get(calendarDayKey(lesson.date));
+      if(recordedDayIndex!==undefined)actualKeys.add(recordedDayIndex+"|"+calendarLessonTime(student,lesson));
+      if (!matchesTeacher(student,lesson.date,lesson,calendarLessonTime(student,lesson),getLessonDuration(student,lesson))) return;
+      if (!historyOnly) observeAvailability(lesson.date,calendarLessonTime(student,lesson),getLessonDuration(student,lesson),lesson.status==="telafi"?"telafi-slot":"normal");
+      const dayIndex = dayKeyToIndex.get(calendarDayKey(lesson.date));
       if (dayIndex === undefined) return;
-      const time = lessonTime(student, lesson);
+      const time = calendarLessonTime(student, lesson);
       addItem({
-        key:"lesson-"+student.id+"-"+(lesson.id || localDateKey(lesson.date)+"-"+time),
+        key:"lesson-"+student.id+"-"+(lesson.id || calendarDayKey(lesson.date)+"-"+time),
         student,
         dayIndex,
         time,
@@ -6397,21 +6439,21 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       });
     });
 
-    const visibleProgramSlots=!historyOnly && timeline ? days.flatMap(day=>programSlotsOnDate(student,timeline,day)
-      .filter(slot=>slotDayIndex(slot.day)===day.getDay()).map(slot=>({...slot,date:day}))) : [];
+    const visibleProgramSlots=!historyOnly && timeline ? days.flatMap((day,index)=>programSlotsOnDate(student,timeline,day)
+      .filter(slot=>slotDayIndex(slot.day)===(index+1)%7).map(slot=>({...slot,date:day}))) : [];
     visibleProgramSlots.forEach((slot,slotIndex) => {
       const targetDay = slotDayIndex(slot.day);
-      const dayIndex = days.findIndex(day=>day.getDay()===targetDay);
+      const dayIndex = days.findIndex((day,index)=>(index+1)%7===targetDay);
       if (dayIndex < 0) return;
-      const slotDate = midday(days[dayIndex]);
-      if (slotDate < midday(programStart) || slotDate < todayMid) return;
+      const slotDate = calendarDayStart(days[dayIndex]);
+      if (slotDate < calendarDayStart(programStart) || slotDate < todayMid) return;
       if (!matchesTeacher(student,slotDate,null,slot.time,getLessonDuration(student),true)) return;
       if (actualKeys.has(dayIndex+"|"+slot.time)) return;
       if (movedSourceKeys.has(turkeyDateKey(slotDate)+"|"+slot.time)) return;
       if (timeline.sourceKeys.includes(turkeyDateKey(slotDate)+"|"+slot.time)) return;
       observeAvailability(slotDate,slot.time,getLessonDuration(student),packageEnded?"package-ended":"normal");
       addItem({
-        key:"slot-"+student.id+"-"+slotIndex+"-"+localDateKey(slotDate),
+        key:"slot-"+student.id+"-"+slotIndex+"-"+calendarDayKey(slotDate),
         student,
         dayIndex,
         time:slot.time,
@@ -6424,16 +6466,16 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     (student.telafi_records || []).forEach(record => {
       const plannedAt = telafiPlannedAt(record);
       if (!plannedAt) return;
-      if (!visibleRecordedDate(plannedAt,timeFromISO(plannedAt),!!record.done)) return;
-      if (!matchesTeacher(student,plannedAt,record,timeFromISO(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student))) return;
-      if (!historyOnly) observeAvailability(plannedAt,timeFromISO(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student),"planned-telafi");
-      const dayIndex = dayKeyToIndex.get(localDateKey(plannedAt));
+      if (!visibleRecordedDate(plannedAt,calendarTime(plannedAt),!!record.done)) return;
+      if (!matchesTeacher(student,plannedAt,record,calendarTime(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student))) return;
+      if (!historyOnly) observeAvailability(plannedAt,calendarTime(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student),"planned-telafi");
+      const dayIndex = dayKeyToIndex.get(calendarDayKey(plannedAt));
       if (dayIndex === undefined) return;
       addItem({
         key:"planned-telafi-"+student.id+"-"+(record.id || plannedAt),
         student,
         dayIndex,
-        time:timeFromISO(plannedAt),
+        time:calendarTime(plannedAt),
         duration:record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student),
         kind:"planned-telafi",
         subtitle:"Planlanmış telafi",
@@ -6442,19 +6484,19 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
 
     (student.ek_dersler || []).forEach(extra => {
       if (isStudentDeleted(student) || !extra.date || !shouldShowExtraLessonOnCalendar(extra)) return;
-      const startAt = new Date(extra.date);
+      const startAt = calendarReadDate(extra.date);
       if (isNaN(startAt.getTime())) return;
-      if (!visibleRecordedDate(startAt,timeFromISO(startAt),extra.status === "done")) return;
-      if (!matchesTeacher(student,startAt,extra,timeFromISO(startAt),getLessonDuration(student,extra))) return;
-      if (!historyOnly) observeAvailability(startAt,timeFromISO(startAt),getLessonDuration(student,extra),"extra-lesson");
-      const dayIndex = dayKeyToIndex.get(localDateKey(startAt));
+      if (!visibleRecordedDate(startAt,calendarTime(startAt),extra.status === "done")) return;
+      if (!matchesTeacher(student,startAt,extra,calendarTime(startAt),getLessonDuration(student,extra))) return;
+      if (!historyOnly) observeAvailability(startAt,calendarTime(startAt),getLessonDuration(student,extra),"extra-lesson");
+      const dayIndex = dayKeyToIndex.get(calendarDayKey(startAt));
       if (dayIndex === undefined) return;
       addItem({
-        key:"extra-lesson-"+student.id+"-"+(extra.id || localDateKey(startAt)+"-"+timeFromISO(startAt)),
+        key:"extra-lesson-"+student.id+"-"+(extra.id || calendarDayKey(startAt)+"-"+calendarTime(startAt)),
         student,
         extraLesson:extra,
         dayIndex,
-        time:timeFromISO(startAt),
+        time:calendarTime(startAt),
         duration:getLessonDuration(student, extra),
         kind:"extra-lesson",
         subtitle:"Ek Ders · "+ekDersTypeLabel(extra.type),
@@ -6465,19 +6507,19 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   singleLessons.forEach(lesson=>{
     if (lesson.deleted_at || !["planned","completed"].includes(lesson.lesson_status) || !lesson.starts_at) return;
     if(calendarTeacher) {
-      if(!matchesTeacher(null,lesson.starts_at,lesson,timeFromISO(lesson.starts_at),lesson.duration_minutes || 45)) return;
+      if(!matchesTeacher(null,lesson.starts_at,lesson,calendarTime(lesson.starts_at),lesson.duration_minutes || 45)) return;
     } else if (teacherName && lesson.teacher_name!==teacherName) return;
-    const startAt = new Date(lesson.starts_at);
+    const startAt = calendarReadDate(lesson.starts_at);
     if (isNaN(startAt.getTime())) return;
-    observeAvailability(startAt,timeFromISO(startAt),lesson.duration_minutes || 45,"single-lesson");
-    const dayIndex = dayKeyToIndex.get(localDateKey(startAt));
+    observeAvailability(startAt,calendarTime(startAt),lesson.duration_minutes || 45,"single-lesson");
+    const dayIndex = dayKeyToIndex.get(calendarDayKey(startAt));
     if (dayIndex===undefined) return;
     addItem({
       key:"single-lesson-"+lesson.id,
       singleLesson:lesson,
       displayName:lesson.participant_name,
       dayIndex,
-      time:timeFromISO(startAt),
+      time:calendarTime(startAt),
       duration:lesson.duration_minutes || 45,
       kind:"single-lesson",
       subtitle:singleLessonTypeLabel(lesson)+" · "+(lesson.lesson_mode==="online"?"Online":"Fiziki"),
@@ -6513,14 +6555,22 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
         .week-calendar-v66-event-compact { padding:1px 4px; gap:1px; }
         .week-calendar-v66-event-compact .week-calendar-v66-name { font-size:9px; line-height:1; }
         .week-calendar-v66-compact-line { display:block; width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:6.5px; line-height:1; font-weight:750; letter-spacing:-.12px; font-variant-numeric:tabular-nums; }
+        .week-calendar-v66-scroll-hint { display:none; }
+        .week-calendar-v66:focus-visible { outline:2px solid #7c3aed; outline-offset:3px; }
         @media (max-width:700px) {
-          .week-calendar-v66-grid { grid-template-columns:42px repeat(7,minmax(0,1fr)); }
-          .week-calendar-v66-event { border-left-width:2px; padding:3px 2px; }
-          .week-calendar-v66-name { font-size:8px; }
-          .week-calendar-v66-time { font-size:7px; }
-          .week-calendar-v66-event-compact { padding:1px 2px; }
-          .week-calendar-v66-event-compact .week-calendar-v66-name { font-size:7px; }
-          .week-calendar-v66-compact-line { font-size:5.5px; }
+          .week-calendar-v66 { overflow:auto; max-width:100%; box-sizing:border-box; -webkit-overflow-scrolling:touch; }
+          .week-calendar-v66-grid { grid-template-columns:48px repeat(7,minmax(140px,1fr)); grid-template-rows:56px repeat(${rowCount},24px); min-width:1028px; }
+          .week-calendar-v66-scroll-hint { display:block; margin:0 0 8px; color:#64748b; font-size:12px; line-height:1.4; text-align:left; }
+          .week-calendar-v66-corner,.week-calendar-v66-hour { position:sticky; left:0; z-index:5!important; }
+          .week-calendar-v66-day { font-size:12px!important; }
+          .week-calendar-v66-day span:last-child { font-size:11px!important; }
+          .week-calendar-v66-event { border-left-width:2px; padding:4px 5px; }
+          .week-calendar-v66-name { font-size:12px!important; line-height:1.15; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
+          .week-calendar-v66-time { font-size:12px; line-height:1.15; }
+          .week-calendar-v66-meta { font-size:10px; line-height:1.15; }
+          .week-calendar-v66-event-compact { padding:2px 4px; gap:2px; }
+          .week-calendar-v66-event-compact .week-calendar-v66-name { font-size:12px; line-height:1.15; -webkit-line-clamp:1; }
+          .week-calendar-v66-compact-line { font-size:10px; line-height:1.15; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
         }
       `}</style>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10, background:"#fff", borderRadius:14, padding:"10px 14px", boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
@@ -6548,15 +6598,16 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
         {programReadState==="loading" ? "Program başlangıçları kontrol ediliyor…" : "Program başlangıçları doğrulanamadı. Kayıtlı dersler gösteriliyor; uygun saatler henüz doğrulanmış değil."}
         {programReadState==="error" ? <button onClick={()=>setProgramReadRetry(value=>value+1)}>Yalnız takvimi yeniden kontrol et</button> : null}
       </div> : null}
-      <div className="week-calendar-v66">
+      <p className="week-calendar-v66-scroll-hint">Diğer günleri görmek için takvimi yana kaydırın.</p>
+      <div className="week-calendar-v66" role="region" aria-label="Haftalık ders takvimi" tabIndex={0}>
         <div className="week-calendar-v66-grid">
-          <div style={{ gridColumn:1, gridRow:1, background:"#fbfaf9", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", zIndex:2 }} />
+          <div className="week-calendar-v66-corner" style={{ gridColumn:1, gridRow:1, background:"#fbfaf9", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", zIndex:2 }} />
           {days.map((day,index) => {
-            const today = midday(day).getTime() === todayMid.getTime();
-            return <div key={localDateKey(day)} style={{ gridColumn:index+2, gridRow:1, zIndex:2, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2, background:today?"#eff6ff":"#fbfaf9", color:today?"#1d4ed8":"#374151", borderRight:"1px solid #e5e7eb", borderBottom:"1px solid #d1d5db", fontWeight:800, fontSize:11 }}><span>{dayNames[index]}</span><span style={{ color:today?"#2563eb":"#94a3b8", fontSize:10 }}>{day.getDate()} {day.toLocaleDateString("tr-TR",{month:"short"})}</span></div>;
+            const today = calendarDayStart(day).getTime() === todayMid.getTime();
+            return <div key={calendarDayKey(day)} className="week-calendar-v66-day" style={{ gridColumn:index+2, gridRow:1, zIndex:2, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2, background:today?"#eff6ff":"#fbfaf9", color:today?"#1d4ed8":"#374151", borderRight:"1px solid #e5e7eb", borderBottom:"1px solid #d1d5db", fontWeight:800, fontSize:11 }}><span>{dayNames[index]}</span><span style={{ color:today?"#2563eb":"#94a3b8", fontSize:10 }}>{calendarDateLabel(day,{day:"numeric",month:"short"})}</span></div>;
           })}
-          {Array.from({length:10},(_,hourIndex) => <div key={hourIndex} style={{ gridColumn:1, gridRow:`${hourIndex*4+2} / span 4`, zIndex:2, display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:6, background:"#fbfaf9", color:"#475569", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", fontSize:11, lineHeight:1, fontWeight:800, fontVariantNumeric:"tabular-nums" }}>{String(hourIndex+10).padStart(2,"0")}:00</div>)}
-          {Array.from({length:rowCount},(_,row) => days.map((day,dayIndex) => <div key={dayIndex+"-"+row} style={{ gridColumn:dayIndex+2, gridRow:row+2, zIndex:0, background:midday(day).getTime()===todayMid.getTime()?"#f8fbff":"#fff", borderRight:"1px solid #eef2f7", borderBottom:(row%4===3?"1px solid #d1d5db":"1px solid #f1f5f9") }} />))}
+          {Array.from({length:10},(_,hourIndex) => <div key={hourIndex} className="week-calendar-v66-hour" style={{ gridColumn:1, gridRow:`${hourIndex*4+2} / span 4`, zIndex:2, display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:6, background:"#fbfaf9", color:"#475569", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", fontSize:11, lineHeight:1, fontWeight:800, fontVariantNumeric:"tabular-nums" }}>{String(hourIndex+10).padStart(2,"0")}:00</div>)}
+          {Array.from({length:rowCount},(_,row) => days.map((day,dayIndex) => <div key={dayIndex+"-"+row} style={{ gridColumn:dayIndex+2, gridRow:row+2, zIndex:0, background:calendarDayStart(day).getTime()===todayMid.getTime()?"#f8fbff":"#fff", borderRight:"1px solid #eef2f7", borderBottom:(row%4===3?"1px solid #d1d5db":"1px solid #f1f5f9") }} />))}
           {groupedItems.map(group => <div key={group.key} style={{ gridColumn:group.dayIndex+2, gridRow:`${group.row+2} / span ${group.span}`, zIndex:3, display:"flex", gap:2, minWidth:0, padding:"1px 3px" }}>
             {group.items.map(item => {
               const colors = itemColors[item.kind] || itemColors.normal;
@@ -6593,28 +6644,27 @@ function calendarAvailabilityStarts(dayIndex) {
   });
 }
 function calendarAvailabilityInterval(date,time,duration) {
-  const start=new Date(date);
+  const start=calendarWallDate(calendarDayKey(date),time);
   const match=/^(\d{2}):(\d{2})$/.exec(String(time || ""));
   const minutes=Number(duration);
   if (isNaN(start.getTime()) || !match || Number(match[1])>23 || Number(match[2])>59 || !Number.isFinite(minutes) || minutes<=0) return null;
-  start.setHours(Number(match[1]),Number(match[2]),0,0);
   const end=start.getTime()+minutes*60000;
   return Number.isFinite(end) ? {start:start.getTime(),end} : null;
 }
 function calendarAvailabilityModel(days,intervals,generatedAt=new Date(),teacherName="") {
-  const cutoff = new Date(generatedAt).getTime();
-  if (!Number.isFinite(cutoff) || days.length!==7 || days.some(day=>isNaN(new Date(day).getTime())) || intervals.some(item=>!Number.isFinite(item.start)||!Number.isFinite(item.end)||item.end<=item.start)) return null;
+  const cutoff = calendarReadDate(generatedAt).getTime();
+  if (!Number.isFinite(cutoff) || days.length!==7 || days.some(day=>isNaN(calendarReadDate(day).getTime())) || intervals.some(item=>!Number.isFinite(item.start)||!Number.isFinite(item.end)||item.end<=item.start)) return null;
   const dayNames=["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"];
-  const dates=days.map(day=>new Date(day));
-  const weekLabel=dates[0].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})+" - "+dates[6].toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"});
+  const dates=days.map(day=>calendarReadDate(day));
+  const weekLabel=dates[0].toLocaleDateString("tr-TR",{timeZone:CALENDAR_READ_ZONE,day:"numeric",month:"long",year:"numeric"})+" - "+dates[6].toLocaleDateString("tr-TR",{timeZone:CALENDAR_READ_ZONE,day:"numeric",month:"long",year:"numeric"});
   return {
     weekLabel,
     ...(teacherName?{teacherName:String(teacherName).trim()}:{}),
-    generatedLabel:new Date(generatedAt).toLocaleString("tr-TR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}).replace(/\s/g," "),
+    generatedLabel:calendarReadDate(generatedAt).toLocaleString("tr-TR",{timeZone:CALENDAR_READ_ZONE,day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}).replace(/\s/g," "),
     days:dates.map((day,index)=>({
-      dateKey:localDateKey(day),
+      dateKey:calendarDayKey(day),
       dayName:dayNames[index],
-      dateLabel:day.toLocaleDateString("tr-TR",{day:"numeric",month:"long"}),
+      dateLabel:day.toLocaleDateString("tr-TR",{timeZone:CALENDAR_READ_ZONE,day:"numeric",month:"long"}),
       times:calendarAvailabilityStarts(index).filter(time=>{
         const slot=calendarAvailabilityInterval(day,time,45);
         return slot.start>cutoff && !intervals.some(item=>item.start<slot.end && item.end>slot.start);
@@ -7192,7 +7242,7 @@ function CalendarProgramSheet({students,branchId,branchName,calendarTeacher=null
 
 function CalendarAvailabilitySheet({days,intervals,invalid,moveReadState,onRetry,onClose,recipients=[],teacherName="",teacherIssue=false}) {
   const [availabilityNow,setAvailabilityNow]=useState(()=>Date.now());
-  const clockKey=days.map(localDateKey).join("|");
+  const clockKey=days.map(calendarDayKey).join("|");
   useEffect(()=>{
     let timer;
     const refresh=()=>{
