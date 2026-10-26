@@ -139,6 +139,8 @@ const NORMAL_LESSON_MAKEUP_PLAN_ABSENCE_SETTLE_MS = 20000;
 const NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_STORE_VERSION = 1;
 const NORMAL_LESSON_MAKEUP_COMPLETION_ABSENCE_SETTLE_MS = 20000;
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
+const CALENDAR_SOURCE_PAGE_SIZE = 250;
+const CALENDAR_SOURCE_MAX_PAGES = 10000;
 const MAX_SAVE_RETRIES = 3;
 const DEFAULT_TEACHER_NAME = "Bora Kaynakgöl";
 const LIFECYCLE_TRACKING_START = "2026-08-01";
@@ -1569,6 +1571,34 @@ async function timedSingleLessonRequest(buildRequest, timeoutMs = SINGLE_LESSON_
     return { data:null, error, timedOut:didTimeout };
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+async function readCompleteCalendarSource(buildPage, scopeColumn, scopeId, isCurrent) {
+  const rows = [], seen = new Set();
+  let expectedCount = null;
+  const superseded = () => ({ data:null, error:new Error("CALENDAR_SOURCE_SUPERSEDED"), superseded:true, timedOut:false });
+  try {
+    if (typeof buildPage !== "function" || typeof isCurrent !== "function" || !["branch_id","organization_id"].includes(scopeColumn) || typeof scopeId !== "string" || !scopeId) throw new Error("CALENDAR_SOURCE_SCOPE_INVALID");
+    for (let page=0; page<CALENDAR_SOURCE_MAX_PAGES; page+=1) {
+      if (!isCurrent()) return superseded();
+      const result = await timedSingleLessonRequest(() => buildPage(rows.length,rows.length+CALENDAR_SOURCE_PAGE_SIZE-1));
+      if (!isCurrent()) return superseded();
+      if (result.error) return { data:null, error:result.error, timedOut:result.timedOut === true };
+      if (!Array.isArray(result.data) || result.data.length>CALENDAR_SOURCE_PAGE_SIZE || !Number.isSafeInteger(result.count) || result.count<0) throw new Error("CALENDAR_SOURCE_PAGE_INVALID");
+      if (expectedCount === null) expectedCount = result.count;
+      if (result.count !== expectedCount || rows.length+result.data.length>expectedCount) throw new Error("CALENDAR_SOURCE_COUNT_CHANGED");
+      if (!result.data.length && rows.length !== expectedCount) throw new Error("CALENDAR_SOURCE_INCOMPLETE");
+      for (const row of result.data) {
+        if (!row || typeof row.id !== "string" || !row.id || row[scopeColumn] !== scopeId || seen.has(row.id)) throw new Error("CALENDAR_SOURCE_ROW_INVALID");
+        seen.add(row.id);
+        rows.push(row);
+      }
+      if (rows.length === expectedCount) return { data:rows, error:null, timedOut:false };
+    }
+    throw new Error("CALENDAR_SOURCE_PAGE_LIMIT");
+  } catch (error) {
+    return { data:null, error, timedOut:false };
   }
 }
 
@@ -9205,6 +9235,7 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
   const [personId,setPersonId] = useState(lesson?.single_person_id || (personDefaults ? prefillPerson.id : ''));
   const [personPicker,setPersonPicker] = useState(false);
   const initialParts = singleLessonDateTimeParts(lesson?.starts_at);
+  const existingTime = lesson?.starts_at && Number.isFinite(new Date(lesson.starts_at).getTime()) ? initialParts.time : "";
   const [participantKind, setParticipantKind] = useState(isTrialSingleLesson(lesson) ? "trial" : (lesson?.participant_kind || "guest"));
   const [participantChoiceChanged, setParticipantChoiceChanged] = useState(false);
   const [studentId, setStudentId] = useState(lesson?.student_id || "");
@@ -9213,7 +9244,7 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
   const [teacherId, setTeacherId] = useState(personDefaults ? personDefaults.teacher_id : (lesson?.teacher_id || teachers.find(t=>t.active)?.id || teachers[0]?.id || ""));
   const [instrument, setInstrument] = useState(lesson?.instrument || personDefaults?.instrument || "");
   const [date, setDate] = useState(personDefaults ? '' : (initialParts.date));
-  const [time, setTime] = useState(personDefaults ? '' : (initialParts.time || "10:00"));
+  const [time, setTime] = useState(personDefaults ? '' : existingTime);
   const [duration, setDuration] = useState(lesson?.duration_minutes || personDefaults?.duration_minutes || 45);
   const [lessonMode, setLessonMode] = useState(lesson?.lesson_mode || personDefaults?.lesson_mode || "physical");
   const [billingStatus, setBillingStatus] = useState(lesson?.billing_status || personDefaults?.billing_status || "unpaid");
@@ -9262,6 +9293,7 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
     if (!teacher) return setError("Öğretmeni seçin.");
     if (!instrument.trim()) return setError("Enstrümanı yazın.");
     if (!date || !time || isNaN(startsAt.getTime())) return setError("Geçerli tarih ve saat seçin.");
+    if (!TIMES.includes(time) && time !== existingTime) return setError("Saat listesinden bir saat seçin.");
     if (effectiveBillingStatus !== "free" && (!Number.isFinite(amount) || amount <= 0)) return setError("Ücretli ders için sıfırdan büyük bir tutar yazın.");
     onSave({
       ...(!lesson && participantKind==='guest' && personId ? {single_person_id:personId} : {}),
@@ -9273,7 +9305,7 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
       teacher_id:teacher.id,
       teacher_name:teacher.name,
       instrument:instrument.trim(),
-      starts_at:startsAt.toISOString(),
+      starts_at:existingTime && date === initialParts.date && time === existingTime ? lesson.starts_at : startsAt.toISOString(),
       duration_minutes:Number(duration) || 45,
       lesson_mode:lessonMode,
       lesson_status:lesson?.lesson_status || "planned",
@@ -9325,7 +9357,11 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
         <div><label style={LBL}>Tarih</label><input style={INP} type="date" value={date} onChange={event=>setDate(event.target.value)} disabled={saving} /></div>
-        <div><label style={LBL}>Saat</label><input style={INP} type="time" step={900} value={time} onChange={event=>setTime(event.target.value)} disabled={saving} /></div>
+        <div><label style={LBL}>Saat</label><select style={INP} value={time} onChange={event=>setTime(event.target.value)} disabled={saving}>
+          <option value="">Saat seçin</option>
+          {existingTime && !TIMES.includes(existingTime) ? <option value={existingTime}>{existingTime} · Mevcut saat</option> : null}
+          {TIMES.map(t=><option key={t} value={t}>{t}</option>)}
+        </select></div>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
         <div><label style={LBL}>Ders Süresi</label><select style={INP} value={duration} onChange={event=>setDuration(Number(event.target.value))} disabled={saving}><option value={30}>30 dakika</option><option value={45}>45 dakika</option><option value={60}>60 dakika</option><option value={90}>90 dakika</option></select></div>
@@ -9517,6 +9553,7 @@ export default function App() {
   const normalLessonMakeupCompletionAutoCheckRef = useRef("");
   const connectionAutoRetryRef = useRef(false);
   const protectedDataLoadGenerationRef = useRef(0);
+  const calendarSourceLoadSequenceRef = useRef({ students:0, teachers:0 });
   const accessContextLoadSequenceRef = useRef(0);
   const monthlyReportLoadSequenceRef = useRef(0);
   const branchScopedWriteCountRef = useRef(0);
@@ -10228,17 +10265,20 @@ export default function App() {
   };
 
   const loadStudents = async (expectedGeneration=protectedDataLoadGenerationRef.current, branchId=currentBranch?.id) => {
+    const sequence = ++calendarSourceLoadSequenceRef.current.students;
+    const actorUserId = authSession?.user?.id || "";
+    const isCurrent = () => expectedGeneration === protectedDataLoadGenerationRef.current && sequence === calendarSourceLoadSequenceRef.current.students && actorUserId === programChangeActorRef.current;
     let data = null;
     let error = null;
     try {
       if (!branchId) throw new Error("ACTIVE_BRANCH_REQUIRED");
-      const result = await timedSingleLessonRequest(() => supabase.from("students").select("*").eq("branch_id",branchId).order("created_at"));
+      const result = await readCompleteCalendarSource((from,to) => supabase.from("students").select("*",{ count:"exact" }).eq("branch_id",branchId).order("created_at").order("id").range(from,to),"branch_id",branchId,isCurrent);
       data = result.data;
       error = result.error;
     } catch (caught) {
       error = caught;
     }
-    if (expectedGeneration !== protectedDataLoadGenerationRef.current) return { ok:false, superseded:true };
+    if (!isCurrent()) return { ok:false, superseded:true };
     if (!error && Array.isArray(data)) {
       preferredPeriodSchemaReadyRef.current = data.some(s=>Object.prototype.hasOwnProperty.call(s,"preferred_package_lesson_count"));
       setStudents(data.map(s => ({ ...s, record_version: typeof s.record_version === "number" ? s.record_version : 0 })));
@@ -10262,17 +10302,20 @@ export default function App() {
   };
 
   const loadTeachers = async (expectedGeneration=protectedDataLoadGenerationRef.current, organizationId=activeOrganization?.id) => {
+    const sequence = ++calendarSourceLoadSequenceRef.current.teachers;
+    const actorUserId = authSession?.user?.id || "";
+    const isCurrent = () => expectedGeneration === protectedDataLoadGenerationRef.current && sequence === calendarSourceLoadSequenceRef.current.teachers && actorUserId === programChangeActorRef.current;
     let data = null;
     let error = null;
     try {
       if (!organizationId) throw new Error("ACTIVE_ORGANIZATION_REQUIRED");
-      const result = await timedSingleLessonRequest(() => supabase.from("teachers").select("*").eq("organization_id",organizationId).order("name"));
+      const result = await readCompleteCalendarSource((from,to) => supabase.from("teachers").select("*",{ count:"exact" }).eq("organization_id",organizationId).order("name").order("id").range(from,to),"organization_id",organizationId,isCurrent);
       data = result.data;
       error = result.error;
     } catch (caught) {
       error = caught;
     }
-    if (expectedGeneration !== protectedDataLoadGenerationRef.current) return { ok:false, superseded:true };
+    if (!isCurrent()) return { ok:false, superseded:true };
     if (!error && Array.isArray(data)) {
       setTeachers(data);
       setLoadedSources(current=>({ ...current, teachers:true }));
@@ -10607,6 +10650,7 @@ export default function App() {
     const branch = options.branch || currentBranch;
     const loadSequence = singleLessonLoadSequenceRef.current + 1;
     singleLessonLoadSequenceRef.current = loadSequence;
+    const isCurrent = () => loadSequence === singleLessonLoadSequenceRef.current;
     setSingleLessonsLoading(true);
     setSingleLessonsLoaded(false);
     if (!branch?.id) {
@@ -10618,10 +10662,10 @@ export default function App() {
       return { ok:false, error:branchError };
     }
     const [lessonResult, operationResult] = await Promise.all([
-      timedSingleLessonRequest(() => supabase.from("single_lessons").select("*").eq("branch_id",branch.id).order("starts_at",{ ascending:true })),
+      readCompleteCalendarSource((from,to) => supabase.from("single_lessons").select("*",{ count:"exact" }).eq("branch_id",branch.id).order("starts_at",{ ascending:true }).order("id").range(from,to),"branch_id",branch.id,isCurrent),
       timedSingleLessonRequest(() => supabase.from("single_lesson_operations").select("operation_id").eq("branch_id",branch.id).limit(1)),
     ]);
-    if (loadSequence !== singleLessonLoadSequenceRef.current) return { ok:false, superseded:true };
+    if (!isCurrent()) return { ok:false, superseded:true };
     if (lessonResult.error) {
       console.error("Tek Ders kayıtları yüklenemedi:",lessonResult.error);
       setSingleLessonSecurityReady(false);
