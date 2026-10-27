@@ -5426,17 +5426,17 @@ function packageLessonsText(student, info) {
   return (student.schedule || [])
     .filter(l => ids.has(l.id))
     .sort((a,b)=>new Date(a.date)-new Date(b.date))
-    .map((l,i) => (i+1)+". Ders: "+fmtDate(l.date)+" "+lessonTime(student, l))
+    .map((l,i) => (i+1)+". Ders: "+(l.status === "telafi" ? "Telafiye alındı — " : "")+fmtDate(l.date)+" "+lessonTime(student, l))
     .join("\n");
 }
 
 function msgIlkDersÖdeme(student, selectedInfo = null) {
   const info = selectedInfo || currentPaymentDueInfo(student) || nextPayablePackageInfo(student);
   const lessons = packageLessonsText(student, info);
-  let msg = "Merhaba,\n\nYeni ders dönemimiz bugünkü ders ile başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\n";
+  let msg = "Merhaba,\n\nYeni ders dönemimiz bugün başlamaktadır. Bu sebeple bugün ödeme gününüzdür.\n\n";
   if (info) {
     msg += "Dönem: "+info.donem+"\n";
-    if (lessons) msg += "Planlanan dersler:\n"+lessons+"\n\n";
+    if (lessons) msg += "Bu dönemin dersleri:\n"+lessons+"\n\n";
   }
   msg += "Bodrum Sonsuz Sanat";
   return msg;
