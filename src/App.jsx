@@ -3561,7 +3561,7 @@ function DatePickerField({ dateLabel="Tarih", value="", onChange, min, max, disa
     if (restoreFocus && inputRef.current && !inputRef.current.matches(":disabled")) inputRef.current.focus({ preventScroll:true });
   };
   const show = () => {
-    if (blocked()) return;
+    if (blocked() || open) return;
     const key = datePickerParts(value) ? value : today;
     const parts = datePickerParts(key);
     if (!parts) return;
@@ -3661,7 +3661,11 @@ function DatePickerField({ dateLabel="Tarih", value="", onChange, min, max, disa
       <div className="crm-date-month">
         <button type="button" aria-label="Önceki ay" disabled={view.year === 1 && view.month === 1} onClick={()=>setMonth(view.year, view.month - 1)}>‹</button>
         <select aria-label="Ay" value={view.month} onChange={event=>setMonth(view.year, Number(event.target.value))}>{months.map((month, index)=><option key={month} value={index + 1}>{month}</option>)}</select>
-        <input aria-label="Yıl" inputMode="numeric" value={yearText} maxLength={4} onChange={event=>setYearText(event.target.value)} onBlur={commitYear} onKeyDown={event=>{ if (event.key === "Enter") { event.preventDefault(); commitYear(); } }} />
+        <input aria-label="Yıl" inputMode="numeric" value={yearText} maxLength={4} onChange={event=>{
+          const text = event.target.value, year = Number(text);
+          setYearText(text);
+          if (/^\d{1,4}$/.test(text) && year >= 1 && year <= 9999) setView(previous=>({ ...previous, year }));
+        }} onBlur={commitYear} onKeyDown={event=>{ if (event.key === "Enter") { event.preventDefault(); commitYear(); } }} />
         <button type="button" aria-label="Sonraki ay" disabled={view.year === 9999 && view.month === 12} onClick={()=>setMonth(view.year, view.month + 1)}>›</button>
       </div>
       <table className="crm-date-days" aria-label={months[view.month - 1] + " " + view.year}>
