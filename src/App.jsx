@@ -1,4 +1,4 @@
-import { useState, useEffect, useEffectEvent, useRef } from "react";
+import { useState, useEffect, useEffectEvent, useRef, useId, useLayoutEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { createPortal } from "react-dom";
 
@@ -3506,6 +3506,181 @@ const INP = { width:"100%", border:"1px solid #ded9d3", borderRadius:11, padding
 const LBL = { display:"block", fontSize:11, fontWeight:750, color:"#756f7a", letterSpacing:.3, marginBottom:6, marginTop:15 };
 
 
+const DATE_PICKER_CSS = `
+  .crm-date-field{position:relative;min-width:0;width:100%}.crm-date-field>input{min-width:0;cursor:pointer}.crm-date-field>input::-webkit-calendar-picker-indicator{display:none}.crm-date-field .crm-date-toggle{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:36px;height:36px;display:grid;place-items:center;margin:0;padding:0;border:0;border-radius:8px;background:#eeeafd;color:#5b42d6;cursor:pointer}.crm-date-field .crm-date-toggle:disabled,.crm-date-field:has(input:disabled) .crm-date-toggle{opacity:.45;cursor:not-allowed}.crm-date-field input:focus-visible,.crm-date-toggle:focus-visible{outline:2px solid #5b42d6;outline-offset:2px}
+  .crm-date-popover{position:fixed;z-index:1000;max-height:calc(100dvh - 24px);overflow:auto;padding:12px;border:1px solid #ded8f1;border-radius:15px;background:#fff;color:#211e28;box-shadow:0 12px 42px rgba(34,24,65,.23);font:13px Inter,"Avenir Next",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left}.crm-date-popover *{box-sizing:border-box}.crm-date-popover button{font:inherit;cursor:pointer}.crm-date-popover button:disabled{opacity:.32;cursor:not-allowed}.crm-date-popover button:focus-visible,.crm-date-popover select:focus-visible,.crm-date-popover input:focus-visible{outline:2px solid #5b42d6;outline-offset:1px}.crm-date-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}.crm-date-heading strong{font-size:12px;overflow-wrap:anywhere}.crm-date-heading button{flex-shrink:0;width:28px;height:28px;padding:0;border:0;border-radius:7px;background:#f4f1fa;color:#655779;font-size:19px}.crm-date-month{display:grid;grid-template-columns:28px minmax(0,1fr) 64px 28px;align-items:center;gap:5px;margin-bottom:9px}.crm-date-month>button{height:32px;border:0;border-radius:7px;background:#eeeafd;color:#5b42d6;font-size:22px}.crm-date-month select,.crm-date-month input{min-width:0;width:100%;height:32px;padding:3px 5px;margin:0;border:1px solid #e4dfec;border-radius:7px;background:#fff;color:#211e28;font:inherit;font-size:13px}.crm-date-month input{text-align:center}.crm-date-days{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:2px}.crm-date-days th{height:24px;padding:0;color:#77717d;font-size:10px;font-weight:700;text-align:center}.crm-date-days abbr{text-decoration:none}.crm-date-days td{padding:0;text-align:center}.crm-date-days button{width:100%;height:32px;padding:0;border:1px solid transparent;border-radius:8px;background:#f7f6fa;color:#211e28;font-size:12px;font-weight:650}.crm-date-days button[aria-current="date"]{border-color:#9a89e9}.crm-date-days button[aria-pressed="true"]{background:#5b42d6;color:#fff}.crm-date-days button:not(:disabled):hover{background:#e4dcfc;color:#4933ba}.crm-date-footer{display:flex;justify-content:space-between;gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid #eeeaf4}.crm-date-footer button{padding:5px 7px;border:0;border-radius:6px;background:#f4f1fa;color:#5b42d6;font-size:11px;font-weight:700}
+`;
+
+function datePickerParts(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  if (!match) return null;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(12, 0, 0, 0);
+  return year >= 1 && year <= 9999 && date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? { year, month, day } : null;
+}
+
+function datePickerKey(year, month, day) {
+  return String(year).padStart(4, "0") + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+}
+
+function DatePickerField({ dateLabel="Tarih", value="", onChange, min, max, disabled=false, readOnly=false, style, ...inputProps }) {
+  const pickerId = useId();
+  const inputRef = useRef(null), fieldRef = useRef(null), popupRef = useRef(null);
+  const focusDayRef = useRef(false);
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState({ year:1, month:1 });
+  const [yearText, setYearText] = useState("");
+  const [focusedDay, setFocusedDay] = useState("");
+  const [position, setPosition] = useState(null);
+  const months = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+  const weekdays = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
+  const today = turkeyDateKey();
+  const minimum = datePickerParts(min) ? min : "", maximum = datePickerParts(max) ? max : "";
+  const inRange = key => !!datePickerParts(key) && (!minimum || key >= minimum) && (!maximum || key <= maximum);
+  const blocked = () => disabled || readOnly || !inputRef.current || inputRef.current.matches(":disabled") || inputRef.current.readOnly;
+  const civilDate = (year, month, day) => {
+    const date = new Date(0);
+    date.setUTCFullYear(year, month - 1, day);
+    date.setUTCHours(12, 0, 0, 0);
+    return date;
+  };
+  const setMonth = (year, month, day=1, focus=false) => {
+    const date = civilDate(year, month, 1), nextYear = date.getUTCFullYear(), nextMonth = date.getUTCMonth() + 1;
+    if (nextYear < 1 || nextYear > 9999) return;
+    const lastDay = civilDate(nextYear, nextMonth + 1, 0).getUTCDate();
+    setView({ year:nextYear, month:nextMonth });
+    setYearText(String(nextYear));
+    setFocusedDay(datePickerKey(nextYear, nextMonth, Math.min(day, lastDay)));
+    focusDayRef.current = focus;
+  };
+  const close = (restoreFocus=false) => {
+    setOpen(false);
+    setPosition(null);
+    if (restoreFocus && inputRef.current && !inputRef.current.matches(":disabled")) inputRef.current.focus({ preventScroll:true });
+  };
+  const show = () => {
+    if (blocked()) return;
+    const key = datePickerParts(value) ? value : today;
+    const parts = datePickerParts(key);
+    if (!parts) return;
+    setMonth(parts.year, parts.month, parts.day, true);
+    setPosition(null);
+    setOpen(true);
+  };
+  const choose = key => {
+    if (blocked() || (key !== "" && !inRange(key))) return;
+    // All existing form callbacks consume only target.value, without saving here.
+    if (key !== value) onChange?.({ target:{ value:key }, currentTarget:{ value:key } });
+    close(true);
+  };
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (blocked()) { close(); return; }
+    const place = () => {
+      const field = fieldRef.current, popup = popupRef.current;
+      if (!field || !popup) return;
+      const rect = field.getBoundingClientRect(), width = Math.min(304, window.innerWidth - 24);
+      const height = Math.min(popup.scrollHeight, window.innerHeight - 24);
+      const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+      const below = rect.bottom + 7;
+      const top = below + height <= window.innerHeight - 12 ? below : Math.max(12, rect.top - height - 7);
+      setPosition({ left, top, width });
+    };
+    const outside = event => {
+      if (!fieldRef.current?.contains(event.target) && !popupRef.current?.contains(event.target)) close();
+    };
+    const escape = event => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(true); }
+    };
+    const observer = new MutationObserver(() => { if (blocked()) close(); });
+    for (let node = inputRef.current; node; node = node.parentElement) {
+      if (node === inputRef.current || node.tagName === "FIELDSET") observer.observe(node, { attributes:true, attributeFilter:["disabled", "readonly"] });
+    }
+    place();
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("focusin", outside, true);
+    document.addEventListener("keydown", escape, true);
+    document.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("focusin", outside, true);
+      document.removeEventListener("keydown", escape, true);
+      document.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, disabled, readOnly, view.year, view.month]);
+  useLayoutEffect(() => {
+    if (open && position && focusDayRef.current) {
+      focusDayRef.current = false;
+      const day = popupRef.current?.querySelector('button[data-date="' + focusedDay + '"]:not(:disabled)') || popupRef.current?.querySelector("button[data-date]:not(:disabled)");
+      (day || popupRef.current)?.focus({ preventScroll:true });
+    }
+  }, [open, position, focusedDay]);
+  const first = civilDate(view.year, view.month, 1), offset = (first.getUTCDay() + 6) % 7;
+  const length = civilDate(view.year, view.month + 1, 0).getUTCDate();
+  const dayKeyDown = (event, day) => {
+    const date = civilDate(view.year, view.month, day);
+    let target = null;
+    const shifts = { ArrowLeft:-1, ArrowRight:1, ArrowUp:-7, ArrowDown:7 };
+    if (Object.hasOwn(shifts, event.key)) { date.setUTCDate(day + shifts[event.key]); target = date; }
+    if (event.key === "Home") { date.setUTCDate(day - (date.getUTCDay() + 6) % 7); target = date; }
+    if (event.key === "End") { date.setUTCDate(day + 6 - (date.getUTCDay() + 6) % 7); target = date; }
+    if (event.key === "PageUp" || event.key === "PageDown") {
+      event.preventDefault(); setMonth(view.year + (event.shiftKey ? (event.key === "PageUp" ? -1 : 1) : 0), view.month + (event.shiftKey ? 0 : (event.key === "PageUp" ? -1 : 1)), day, true); return;
+    }
+    if (target) {
+      event.preventDefault();
+      const key = datePickerKey(target.getUTCFullYear(), target.getUTCMonth() + 1, target.getUTCDate());
+      if (inRange(key)) setMonth(target.getUTCFullYear(), target.getUTCMonth() + 1, target.getUTCDate(), true);
+    }
+  };
+  const commitYear = () => {
+    const year = Number(yearText);
+    if (/^\d{1,4}$/.test(yearText) && year >= 1 && year <= 9999) setMonth(year, view.month);
+    else setYearText(String(view.year));
+  };
+  return <div className="crm-date-field" ref={fieldRef}>
+    <style>{DATE_PICKER_CSS}</style>
+    <input {...inputProps} ref={inputRef} type="date" value={value} min={min} max={max} disabled={disabled} readOnly={readOnly}
+      aria-label={inputProps["aria-label"] || dateLabel} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? pickerId : undefined}
+      style={{ ...style, paddingRight:46 }} onChange={event=>{ close(); onChange?.(event); }}
+      onPointerDown={event=>{ if (!blocked()) event.preventDefault(); }}
+      onClick={event=>{ event.preventDefault(); show(); }}
+      onKeyDown={event=>{ if ((event.altKey && event.key === "ArrowDown") || event.key === "F4") { event.preventDefault(); show(); } }} />
+    <button className="crm-date-toggle" type="button" disabled={disabled || readOnly} aria-label={dateLabel + " takvimini aç"}
+      aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? pickerId : undefined} onClick={()=>open ? close(true) : show()}>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18m-13 4h2m4 0h2m-8 3h2"/></svg>
+    </button>
+    {open ? createPortal(<div id={pickerId} ref={popupRef} className="crm-date-popover" role="dialog" aria-label={dateLabel + " için tarih seç"} tabIndex={-1}
+      style={position ? { ...position, visibility:"visible" } : { left:12, top:12, width:"min(304px, calc(100vw - 24px))", visibility:"hidden" }}>
+      <div className="crm-date-heading"><strong>{dateLabel}</strong><button type="button" aria-label="Takvimi kapat" onClick={()=>close(true)}>×</button></div>
+      <div className="crm-date-month">
+        <button type="button" aria-label="Önceki ay" disabled={view.year === 1 && view.month === 1} onClick={()=>setMonth(view.year, view.month - 1)}>‹</button>
+        <select aria-label="Ay" value={view.month} onChange={event=>setMonth(view.year, Number(event.target.value))}>{months.map((month, index)=><option key={month} value={index + 1}>{month}</option>)}</select>
+        <input aria-label="Yıl" inputMode="numeric" value={yearText} maxLength={4} onChange={event=>setYearText(event.target.value)} onBlur={commitYear} onKeyDown={event=>{ if (event.key === "Enter") { event.preventDefault(); commitYear(); } }} />
+        <button type="button" aria-label="Sonraki ay" disabled={view.year === 9999 && view.month === 12} onClick={()=>setMonth(view.year, view.month + 1)}>›</button>
+      </div>
+      <table className="crm-date-days" aria-label={months[view.month - 1] + " " + view.year}>
+        <thead><tr>{weekdays.map((day, index)=><th key={day} scope="col"><abbr title={day}>{["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"][index]}</abbr></th>)}</tr></thead>
+        <tbody>{Array.from({ length:Math.ceil((offset + length) / 7) }, (_, row)=><tr key={row}>{Array.from({ length:7 }, (_, col)=>{
+          const day = row * 7 + col - offset + 1;
+          if (day < 1 || day > length) return <td key={col} />;
+          const key = datePickerKey(view.year, view.month, day);
+          return <td key={col}><button type="button" data-date={key} disabled={!inRange(key)} aria-pressed={value === key} aria-current={today === key ? "date" : undefined}
+            aria-label={day + " " + months[view.month - 1] + " " + view.year + " " + weekdays[col]}
+            onFocus={()=>setFocusedDay(key)} onKeyDown={event=>dayKeyDown(event, day)} onClick={()=>choose(key)}>{day}</button></td>;
+        })}</tr>)}</tbody>
+      </table>
+      <div className="crm-date-footer"><button type="button" onClick={()=>{ const parts = datePickerParts(today); if (parts) setMonth(parts.year, parts.month, parts.day, true); }}>Bugüne git</button><button type="button" disabled={!value} onClick={()=>choose("")}>Temizle</button></div>
+    </div>, document.body) : null}
+  </div>;
+}
+
+
 const PHONE_INPUT_PLACEHOLDER = "05xx xxx xx xx";
 function PhoneInputHint({ id }) {
   return <p id={id} style={{ margin:"6px 0 12px",fontSize:12,lineHeight:1.55,color:"#64748b",overflowWrap:"anywhere" }}>Türkiye numaralarında başına 90 eklemeniz gerekmez. Yurt dışı için +ülke kodunu ekleyin.</p>;
@@ -3834,7 +4009,7 @@ function ResumeProgramSheet({ student, onClose, onResume, error="" }) {
     <Sheet title="Programı Devam Ettir" subtitle={student.name} onClose={()=>{ if (!savingRef.current) onClose(); }}>
       <p style={{ margin:"0 0 14px", fontSize:13, color:"#475569", lineHeight:1.55 }}>Öğrencinin yeniden derse başlayabileceği tarihi seçin. Bekleyen dersler sabit programındaki ilk uygun gün ve saatten itibaren yeniden sıralanır.</p>
       <label style={{ ...LBL, marginTop:0 }}>Derse Başlayabileceği Tarih</label>
-      <input style={INP} type="date" min={today} value={startDate} onChange={event=>setStartDate(event.target.value)} />
+      <DatePickerField dateLabel="Derse Başlayabileceği Tarih" style={INP} type="date" min={today} value={startDate} onChange={event=>setStartDate(event.target.value)} />
       <div style={{ margin:"12px 0 16px", padding:"11px 12px", borderRadius:11, background:"#eff6ff", border:"1px solid #bfdbfe" }}>
         {firstLesson ? <>
           <p style={{ margin:0, fontSize:12, color:"#1e3a8a", fontWeight:800 }}>İlk ders: {fmtDate(firstLesson.date)} · {firstLesson.time}</p>
@@ -3987,7 +4162,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
         : step === "plan"
           ? <>
               <label style={{ ...LBL, marginTop:0 }}>Telafi Tarihi</label>
-              <input style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+              <DatePickerField dateLabel="Telafi Tarihi" style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
               <label style={LBL}>Telafi Saati</label>
               <select style={INP} value={time} onChange={e=>setTime(e.target.value)}>
                 {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -4104,7 +4279,7 @@ function ShiftSheet({ lesson, student, onClose, onShift, onMoveOne }) {
       <Btn bg="#8b5cf6" disabled={moving} onClick={() => { onShift(lesson.id, 14); onClose(); }}>2 Hafta İleri Al</Btn>
       <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, padding:12, margin:"12px 0" }}>
         <p style={{ margin:"0 0 8px", fontSize:13, color:"#666" }}>Sadece bu dersi başka bir tarih ve saate taşı.</p>
-        <input style={INP} type="date" value={moveDate} disabled={moving} onChange={e=>setMoveDate(e.target.value)} />
+        <DatePickerField dateLabel="Ders Taşıma Tarihi" style={INP} type="date" value={moveDate} disabled={moving} onChange={e=>setMoveDate(e.target.value)} />
         <div style={{ height:8 }} />
         <select style={INP} value={moveTime} disabled={moving} onChange={e=>setMoveTime(e.target.value)}>
           {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -4284,22 +4459,22 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram 
       </select>
       {f.teacher_id !== currentTeacherId ? <>
         <label style={LBL}>Öğretmen Değişiklik Tarihi</label>
-        <input style={INP} type="date" value={f.teacher_change_date} onChange={e=>s("teacher_change_date",e.target.value)} />
+        <DatePickerField dateLabel="Öğretmen Değişiklik Tarihi" style={INP} type="date" value={f.teacher_change_date} onChange={e=>s("teacher_change_date",e.target.value)} />
       </> : null}
       <label style={LBL}>Veli Adı</label>
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
       <StudentGenderFields form={f} onChange={s} editing />
       <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
-      <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
+      <DatePickerField dateLabel="Doğum Tarihi" style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Derse Başlama Tarihi</label>
-      <input style={INP} type="date" value={f.lesson_start_date||""} onChange={e=>s("lesson_start_date",e.target.value)} />
+      <DatePickerField dateLabel="Derse Başlama Tarihi" style={INP} type="date" value={f.lesson_start_date||""} onChange={e=>s("lesson_start_date",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder={PHONE_INPUT_PLACEHOLDER} aria-describedby="student-edit-phone-help" type="tel" />
       <PhoneInputHint id="student-edit-phone-help" />
       <label style={LBL}>4 Ders Ücreti (TL)</label>
       <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="5600" type="number" />
       <label style={LBL}>Son Zam Tarihi</label>
-      <input style={INP} type="date" value={f.last_raise_date||""} onChange={e=>s("last_raise_date",e.target.value)} />
+      <DatePickerField dateLabel="Son Zam Tarihi" style={INP} type="date" value={f.last_raise_date||""} onChange={e=>s("last_raise_date",e.target.value)} />
       <label style={LBL}>Enstrüman</label>
       <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
         {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
@@ -4373,7 +4548,7 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
     <Sheet title="Ek Ders Ekle" subtitle={student.name} onClose={onClose}>
       <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Bu ders döneme dahil değil, ayrıca ücretlendirilecek.</p>
       <label style={LBL}>Tarih</label>
-      <input style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+      <DatePickerField dateLabel="Ek Ders Tarihi" style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
       <label style={LBL}>Saat</label>
       <select style={INP} value={time} onChange={e=>setTime(e.target.value)}>
         {TIMES.map(t=><option key={t}>{t}</option>)}
@@ -4433,7 +4608,7 @@ function EkDersOdemeSheet({ student, extra, onClose, onConfirm }) {
         <p style={{ margin:"4px 0 0", fontSize:12, color:"#166534" }}>{fmtDate(extra.date)} · {timeFromISO(extra.date)} · {ekDersTypeLabel(extra.type)}</p>
       </div>
       <label style={LBL}>Ödeme Tarihi</label>
-      <input style={INP} type="date" value={date} onChange={event=>setDate(event.target.value)} disabled={saving} />
+      <DatePickerField dateLabel="Ek Ders Ödeme Tarihi" style={INP} type="date" value={date} onChange={event=>setDate(event.target.value)} disabled={saving} />
       <p style={{ margin:"6px 0 14px", fontSize:12, lineHeight:1.5, color:"#64748b" }}>Bu işlem yalnız bu Ek Dersin ayrı tahsilatını kaydeder. İptal edersen Ek Ders ödenmemiş kalır ve takip eden paket ödemesine dahil edilmeye devam eder.</p>
       <button type="button" disabled={saving || !isValidLocalDateInput(date)} onClick={submit} style={{ width:"100%", background:saving?"#86efac":"#10b981", color:"#fff", border:"none", borderRadius:14, padding:"13px 16px", fontWeight:800, fontSize:14, cursor:saving?"wait":"pointer", fontFamily:"inherit", marginBottom:8 }}>{saving?"Kaydediliyor...":"Ödemeyi Kaydet"}</button>
       <button type="button" disabled={saving} onClick={onClose} style={{ width:"100%", background:"transparent", color:"#111", border:"2px solid #111", borderRadius:14, padding:"11px 16px", fontWeight:700, fontSize:14, cursor:saving?"not-allowed":"pointer", fontFamily:"inherit" }}>İptal</button>
@@ -4485,7 +4660,7 @@ function PaymentHistoryItem({ student, payment, index, onPaymentEdit, onPaymentD
           {editing ? (
             <div style={{ marginTop:10 }}>
               <label style={{ ...LBL, marginTop:0 }}>Ödeme Tarihi</label>
-              <input style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+              <DatePickerField dateLabel="Ödeme Tarihi" style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
               <label style={LBL}>Tutar (TL)</label>
               <input style={INP} type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="Örn. 5600" />
               <label style={LBL}>Kapsadığı İlk Ders</label>
@@ -5153,16 +5328,16 @@ function AddSheet({ teachers, onClose, onAdd }) {
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
       <StudentGenderFields form={f} onChange={s} />
       <label style={LBL}>Doğum Tarihi (opsiyonel)</label>
-      <input style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
+      <DatePickerField dateLabel="Doğum Tarihi" style={INP} type="date" value={f.dogum_tarihi||""} onChange={e=>s("dogum_tarihi",e.target.value)} />
       <label style={LBL}>Derse Başlama Tarihi</label>
-      <input style={INP} type="date" value={f.lesson_start_date||""} onChange={e=>s("lesson_start_date",e.target.value)} />
+      <DatePickerField dateLabel="Derse Başlama Tarihi" style={INP} type="date" value={f.lesson_start_date||""} onChange={e=>s("lesson_start_date",e.target.value)} />
       <label style={LBL}>Telefon (WhatsApp)</label>
       <input style={INP} value={f.phone} onChange={e=>s("phone",e.target.value)} placeholder={PHONE_INPUT_PLACEHOLDER} aria-describedby="student-add-phone-help" type="tel" />
       <PhoneInputHint id="student-add-phone-help" />
       <label style={LBL}>4 Ders Ücreti (TL)</label>
       <input style={INP} value={f.ucret} onChange={e=>s("ucret",e.target.value)} placeholder="5600" type="number" />
       <label style={LBL}>Son Zam Tarihi</label>
-      <input style={INP} type="date" value={f.last_raise_date||""} onChange={e=>s("last_raise_date",e.target.value)} />
+      <DatePickerField dateLabel="Son Zam Tarihi" style={INP} type="date" value={f.last_raise_date||""} onChange={e=>s("last_raise_date",e.target.value)} />
       <label style={LBL}>Enstrüman</label>
       <select style={INP} value={f.instrument} onChange={e=>s("instrument",e.target.value)}>
         {INSTRUMENTS.map(i=><option key={i}>{i}</option>)}
@@ -5184,7 +5359,7 @@ function AddSheet({ teachers, onClose, onAdd }) {
       <label style={LBL}>Paket (ders sayısı)</label>
       <input style={INP} type="number" value={f.count} onChange={e=>s("count",Math.max(1,parseInt(e.target.value)||1))} min={1} max={12} />
       <label style={LBL}>İlk Ders Tarihi</label>
-      <input style={INP} type="date" value={f.firstDate} onChange={e=>s("firstDate",e.target.value)} />
+      <DatePickerField dateLabel="İlk Ders Tarihi" style={INP} type="date" value={f.firstDate} onChange={e=>s("firstDate",e.target.value)} />
       {f.name && previewDates() ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginTop:12, fontSize:12, color:"#166534" }}><strong>Planlanacak dersler:</strong><br />{previewDates()}</div> : null}
       {saveError ? <p role="alert" style={{ color:"#b91c1c", fontSize:12 }}>{saveError}</p> : null}
       <div style={{ marginTop:16 }}><Btn bg="#111" disabled={saving} onClick={async() => {
@@ -6139,7 +6314,7 @@ function OdemeAlSheet({ student, onClose, onÖdemeAl, saving=false }) {
         <p style={{ margin:"10px 0 0", fontSize:15, fontWeight:900, color:"#111" }}>Toplam: {toplam.toLocaleString("tr-TR")} TL</p>
       </div>
       <label style={LBL}>Ödeme Tarihi</label>
-      <input style={INP} type="date" value={date} disabled={saving} onChange={e=>setDate(e.target.value)} />
+      <DatePickerField dateLabel="Ödeme Tarihi" style={INP} type="date" value={date} disabled={saving} onChange={e=>setDate(e.target.value)} />
       <div style={{ marginTop:16 }}>
         {toplam > 0 ? <Btn bg="#10b981" disabled={saving} onClick={async() => { if(await onÖdemeAl(student.id, date)) onClose(); }}>{saving ? "Kaydediliyor…" : "Ödemeyi Kaydet"}</Btn> : <p style={{ margin:"0 0 12px", fontSize:13, color:"#999", fontWeight:700, textAlign:"center" }}>Kaydedilecek ödeme yok</p>}
         <Btn bg="#111" outline disabled={saving} onClick={onClose}>İptal</Btn>
@@ -6160,7 +6335,7 @@ function ZamSheet({ student, onClose, onSave }) {
       <label style={LBL}>Yeni 4 Ders Ücreti (TL)</label>
       <input style={INP} type="number" value={fee} onChange={e=>setFee(e.target.value)} />
       <label style={LBL}>Zam Tarihi</label>
-      <input style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+      <DatePickerField dateLabel="Zam Tarihi" style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
       <div style={{ marginTop:16 }}>
         <Btn bg="#f97316" onClick={() => { onSave(student.id, fee, date); onClose(); }}>Zamı Kaydet</Btn>
         <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
@@ -8201,7 +8376,7 @@ function BugünÖdemeleri({ students, onÖdemeAl, paymentSavingId="", onMesaj, o
         <p style={{ fontSize:13, color:"#111", marginBottom:12 }}>{odemeModal.period} · {odemeModal.count} ders</p>
         {!modalValid ? <p role="alert" style={{ fontSize:13, color:"#be123c" }}>Dönem bilgisi değişti. Ödeme kaydedilmedi; güncel bildirimi yeniden açın.</p> : null}
         <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ödeme tarihi:</p>
-        <input style={INP} type="date" value={odemeDate} disabled={busy || !modalValid} onChange={e=>setÖdemeDate(e.target.value)} />
+        <DatePickerField dateLabel="Ödeme Tarihi" style={INP} type="date" value={odemeDate} disabled={busy || !modalValid} onChange={e=>setÖdemeDate(e.target.value)} />
         <div style={{ marginTop:16 }}>
           <Btn bg="#10b981" disabled={busy || !modalValid} onClick={async() => { if(modalValid && !busy && await onÖdemeAl(odemeModal.studentId, odemeDate, odemeModal.key)) setÖdemeModal(null); }}>{busy ? "Kaydediliyor…" : "Kaydet"}</Btn>
           <Btn bg="#111" outline disabled={busy} onClick={() => setÖdemeModal(null)}>İptal</Btn>
@@ -9055,7 +9230,7 @@ function FinansRaporu({ students, expenses, singleLessons=[], onExpenseAdd, onEx
           <label style={LBL}>Tutar</label>
           <input style={INP} type="number" min="0" step="0.01" value={expenseForm.amount} onChange={e=>setExpenseForm(f=>({...f,amount:e.target.value}))} placeholder="0" />
           <label style={LBL}>Başlangıç / Gider Tarihi</label>
-          <input style={INP} type="date" value={expenseForm.expense_date} onChange={e=>setExpenseForm(f=>({...f,expense_date:e.target.value}))} />
+          <DatePickerField dateLabel="Gider Tarihi" style={INP} type="date" value={expenseForm.expense_date} onChange={e=>setExpenseForm(f=>({...f,expense_date:e.target.value}))} />
           <label style={{ display:"flex", alignItems:"center", gap:9, margin:"4px 0 18px", fontSize:13, fontWeight:750, color:"#374151", cursor:"pointer" }}><input type="checkbox" checked={expenseForm.is_recurring} onChange={e=>setExpenseForm(f=>({...f,is_recurring:e.target.checked}))} /> Her ay otomatik tekrarla</label>
           {expenseForm.is_recurring ? <p style={{ margin:"-8px 0 16px", padding:"9px 10px", background:"#eff6ff", borderRadius:9, fontSize:11, color:"#1d4ed8", fontWeight:650 }}>Bu gider başlangıç ayından itibaren her ay net kâr hesabına katılır.</p> : null}
           {expenseError ? <p style={{ margin:"0 0 12px", color:"#b91c1c", fontSize:12, fontWeight:700 }}>{expenseError}</p> : null}
@@ -9553,7 +9728,7 @@ function SingleLessonSheet({ lesson=null, students, teachers, onClose, onSave, s
         <div><label style={LBL}>Enstrüman</label><input style={INP} value={instrument} maxLength={120} onChange={event=>setInstrument(event.target.value)} placeholder="Örn. Piyano" disabled={saving} /></div>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-        <div><label style={LBL}>Tarih</label><input style={INP} type="date" value={date} onChange={event=>setDate(event.target.value)} disabled={saving} /></div>
+        <div><label style={LBL}>Tarih</label><DatePickerField dateLabel="Ders Tarihi" style={INP} type="date" value={date} onChange={event=>setDate(event.target.value)} disabled={saving} /></div>
         <div><label style={LBL}>Saat</label><select style={INP} value={time} onChange={event=>setTime(event.target.value)} disabled={saving}>
           <option value="">Saat seçin</option>
           {existingTime && !TIMES.includes(existingTime) ? <option value={existingTime}>{existingTime} · Mevcut saat</option> : null}
@@ -16826,7 +17001,7 @@ export default function App() {
       {odemeKaydetModal ? (
         <Sheet title="Ödeme Alındı" subtitle={odemeKaydetModal.name} onClose={() => { if(paymentSavingId!==odemeKaydetModal.id) setÖdemeKaydetModal(null); }}>
           <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Ödeme tarihi:</p>
-          <input style={INP} type="date" value={odemeKaydetDate} disabled={paymentSavingId===odemeKaydetModal.id} onChange={e=>setÖdemeKaydetDate(e.target.value)} />
+          <DatePickerField dateLabel="Ödeme Tarihi" style={INP} type="date" value={odemeKaydetDate} disabled={paymentSavingId===odemeKaydetModal.id} onChange={e=>setÖdemeKaydetDate(e.target.value)} />
           <div style={{ marginTop:16 }}>
             <Btn bg="#10b981" disabled={paymentSavingId===odemeKaydetModal.id} onClick={async() => { if(await handleÖdemeKaydet(odemeKaydetModal.id, odemeKaydetDate)) setÖdemeKaydetModal(null); }}>{paymentSavingId===odemeKaydetModal.id ? "Kaydediliyor…" : "Kaydet"}</Btn>
             <Btn bg="#111" outline disabled={paymentSavingId===odemeKaydetModal.id} onClick={() => setÖdemeKaydetModal(null)}>İptal</Btn>
