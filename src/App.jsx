@@ -371,17 +371,39 @@ function expiry30FromLessonDate(value) {
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 }
 function daysLeft(iso) { if (!iso) return null; return Math.ceil((new Date(iso) - new Date()) / 86400000); }
+function makeupExpiryDay(record) {
+  const raw=record?.expiry;
+  return typeof raw==='string' && /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(raw) ? calendarDayKey(raw) : '';
+}
+function makeupDaysLeft(record,now=new Date()) {
+  const expiry=makeupExpiryDay(record),today=turkeyDateKey(now);
+  return expiry && today ? Math.round((Date.parse(expiry+'T00:00:00Z')-Date.parse(today+'T00:00:00Z'))/86400000) : null;
+}
+function makeupPlanProblem(record,plannedAt='',now=new Date()) {
+  const expiry=makeupExpiryDay(record),today=turkeyDateKey(now);
+  if(!expiry) return 'Son geçerlilik tarihi doğrulanamadığı için bu telafi planlanamaz.';
+  if(!today || expiry<today) return 'Süresi dolmuş telafi planlanamaz.';
+  if(plannedAt){const day=calendarDayKey(plannedAt);if(!day)return 'Geçerli telafi tarihi ve saati seçin.';if(day>expiry)return 'Telafi, son geçerlilik tarihinden sonraya planlanamaz.';}
+  return '';
+}
+function makeupHasActivePlan(record,now=new Date()) {
+  return !record?.done && !!telafiPlannedAt(record) && !makeupPlanProblem(record,telafiPlannedAt(record),now);
+}
+function makeupCalendarPlanAt(record,now=new Date()) {
+  const plannedAt=telafiPlannedAt(record),day=calendarDayKey(plannedAt),expiry=makeupExpiryDay(record);
+  // Preserve completed/past events and unresolved legacy reservations; no record is rewritten.
+  return plannedAt && (record?.done || !expiry || day && day<turkeyDateKey(now) || makeupHasActivePlan(record,now)) ? plannedAt : '';
+}
+
 function isCurrentTelafi(record) {
   if (!record || record.done) return false;
-  if (!record.expiry) return true;
-  const expiryDate = /^\d{4}-\d{2}-\d{2}$/.test(record.expiry) ? new Date(record.expiry+"T00:00:00") : new Date(record.expiry);
-  if (isNaN(expiryDate.getTime())) return true;
-  return midday(expiryDate).getTime() >= midday().getTime();
+  const expiry=makeupExpiryDay(record);
+  return !expiry || expiry>=turkeyDateKey();
 }
 function activeTelafiRecords(records) { return (records || []).filter(isCurrentTelafi); }
 function isTodayPlannedTelafi(record) {
   const plannedAt = telafiPlannedAt(record);
-  return !record?.done && !!plannedAt && isToday(plannedAt);
+  return !record?.done && !!makeupCalendarPlanAt(record) && !!plannedAt && isToday(plannedAt);
 }
 function telafiPolicyDate(value) {
   if (!value) return null;
@@ -1757,7 +1779,7 @@ function calendarEventsFromStudents(students) {
     });
 
     (student.telafi_records || []).forEach(record => {
-      const plannedAt = telafiPlannedAt(record);
+      const plannedAt = makeupCalendarPlanAt(record);
       if (!plannedAt) return;
       const start = new Date(plannedAt);
       if (isNaN(start.getTime())) return;
@@ -2913,6 +2935,9 @@ function normalLessonMakeupPlanKnownRejection(error) {
     "NORMAL_LESSON_MAKEUP_PLAN_INVALID_INPUT",
     "NORMAL_LESSON_MAKEUP_PLAN_INPUT_TOO_LONG",
     "NORMAL_LESSON_MAKEUP_PLAN_INVALID_DATE",
+    "NORMAL_LESSON_MAKEUP_PLAN_INVALID_EXPIRY",
+    "NORMAL_LESSON_MAKEUP_PLAN_EXPIRED",
+    "NORMAL_LESSON_MAKEUP_PLAN_AFTER_EXPIRY",
     "NORMAL_LESSON_MAKEUP_PLAN_STUDENT_NOT_FOUND",
     "NORMAL_LESSON_MAKEUP_PLAN_STALE_STUDENT",
     "NORMAL_LESSON_MAKEUP_PLAN_INVALID_STUDENT_DATA",
@@ -2926,6 +2951,9 @@ function normalLessonMakeupPlanKnownRejection(error) {
 
 function normalLessonMakeupPlanErrorText(error) {
   const message = String(error?.message || error || "");
+  if(message.includes("AFTER_EXPIRY")) return "Telafi son geçerlilik tarihinden sonraya planlanamaz. Plan kaydedilmedi.";
+  if(message.includes("DATE_EXPIRED")) return "Süresi dolmuş telafi planlanamaz. Plan kaydedilmedi.";
+  if(message.includes("INVALID_EXPIRY")) return "Son geçerlilik tarihi doğrulanamadı; yeni tarih tahmin edilmedi. Plan kaydedilmedi.";
   if (message.includes("STALE_STUDENT")) return "Öğrenci kaydı başka bir işlemle değişti. Eski telafi planı gönderilmedi; liste Supabase'den yenilendi.";
   if (message.includes("ALREADY_COMPLETED")) return "Bu telafi dersi bu sırada tamamlanmış. Plan değişikliği kaydedilmedi; liste yenilendi.";
   if (message.includes("NOT_AUTHORIZED")) return "Bu öğrencinin şubesinde telafi planlama yetkisi doğrulanamadı. Kayıt yapılmadı.";
@@ -4027,12 +4055,13 @@ function ResumeProgramSheet({ student, onClose, onResume, error="" }) {
   );
 }
 
-function makeupReversalTarget(record, action) {
+function makeupReversalTarget(record, action, policy={policyVersion:279,at:new Date()}) {
   if (!record?.id || !["clear_plan","undo_completion"].includes(action)) return null;
   const done=record.done === true || String(record.done).toLowerCase() === "true";
   const plannedAt=telafiPlannedAt(record);
-  if (!plannedAt || (action === "clear_plan" ? done : !done)) return null;
-  if (action === "undo_completion" && (!/[T ]\d{2}:\d{2}/.test(plannedAt) || !isValidDateValue(plannedAt))) return null;
+  const expiry=makeupExpiryDay(record),expired=policy?.policyVersion===279 && !!expiry && expiry<turkeyDateKey(policy.at);
+  if ((action === "clear_plan" ? !plannedAt || done : !done)) return null;
+  if (action === "undo_completion" && !expired && (!plannedAt || !/[T ]\d{2}:\d{2}/.test(plannedAt) || !isValidDateValue(plannedAt))) return null;
   const keys=action === "clear_plan" ? ["plannedAt","planned_at","plannedDurationMinutes","planned_duration_minutes","plannedNote","planned_note"] : [
     "doneStatus","done_status","doneAt","done_at","doneNote","activeMinutes","taskFocusMinutes","task_focus_minutes","focusMinutes","focus_minutes",
     "redirectionCount","redirection_count","lessonFocus","lesson_focus","lessonScore","lesson_score","lessonScoreBreakdown","lesson_score_breakdown",
@@ -4040,12 +4069,16 @@ function makeupReversalTarget(record, action) {
     "focusSection","focus_section","productiveWindow","productive_window","cognitiveMinutes",
   ];
   const result={...record};keys.forEach(key=>delete result[key]);
-  if(action === "undo_completion") result.done=false;
+  if(action === "undo_completion") {
+    result.done=false;
+    if(expired)["plannedAt","planned_at","plannedDurationMinutes","planned_duration_minutes","plannedNote","planned_note"].forEach(key=>delete result[key]);
+  }
   return result;
 }
 
 function makeupReversalReceipt(data, issue) {
-  const q=issue?.request,r=data?.receipt,s=data?.student,after=makeupReversalTarget(q?.target,q?.action);
+  const q=issue?.request,r=data?.receipt,s=data?.student,after=makeupReversalTarget(q?.target,q?.action,q?.policyVersion===279?{policyVersion:279,at:r?.savedAt}:{policyVersion:278});
+  if(q?.policyVersion===279 && (r?.policyVersion!==279 || r.policyCheckedAt!==r.savedAt))return false;
   if(!q || !after || data?.operationId!==q.operationId || r?.operationId!==q.operationId || r.actorUserId!==q.actorUserId
     || r.branchId!==q.branchId || r.studentId!==q.studentId || programJSON(r.request)!==programJSON(q)
     || r.recordVersion!==q.expectedRecordVersion+1 || !Number.isFinite(Date.parse(r.savedAt))
@@ -4074,14 +4107,14 @@ function makeupReversalStoredIssue(actor) {
   if(issue?.version!==1 || q?.actorUserId!==actor || !SINGLE_LESSON_MOVE_UUID.test(q.operationId || '')
     || !SINGLE_LESSON_MOVE_UUID.test(q.studentId || '') || !SINGLE_LESSON_MOVE_UUID.test(q.branchId || '')
     || !Number.isInteger(q.expectedRecordVersion) || q.expectedRecordVersion<0 || !q.makeupRecordId || q.target?.id!==q.makeupRecordId
-    || !makeupReversalTarget(q.target,q.action) || typeof q.reason!=="string" || q.reason.length>1000
+    || !makeupReversalTarget(q.target,q.action,q.policyVersion===279?{policyVersion:279,at:new Date()}:{policyVersion:278}) || (q.policyVersion!==undefined && q.policyVersion!==279) || typeof q.reason!=="string" || q.reason.length>1000
     || (q.action==='undo_completion' && !q.reason.trim())) throw new Error('MAKEUP_REVERSAL_LOCAL_EVIDENCE_INVALID');
   return issue;
 }
 
 function makeupReversalErrorText(error) {
   const message=String(error?.message || error || '');
-  if(error?.code==='PGRST202') return 'v278 telafi geri alma SQL kurulumu gerekli. Kayıt değiştirilmedi.';
+  if(error?.code==='PGRST202') return 'v279 telafi geçerlilik SQL kurulumu gerekli. Kayıt değiştirilmedi.';
   if(/HOMEWORK|HISTORY_CHANGED/.test(message)) return 'Bu telafinin ödev veya değerlendirme bağlantısı sonradan değişmiş ya da doğrulanamamış. Diğer kayıtları korumak için geri alma yapılmadı.';
   if(/PLAN_DATE_UNVERIFIED/.test(message)) return 'Bu telafinin kayıtlı plan günü ve saati doğrulanamadı. Tarih tahmin edilmedi; geri alma yapılmadı.';
   if(/STALE_STUDENT|TARGET_CHANGED|ALREADY_COMPLETED|NOT_COMPLETED/.test(message)) return 'Öğrenci veya telafi durumu değişmiş. İşlem yapılmadı; güncel kaydı yeniden açın.';
@@ -4153,13 +4186,13 @@ function useMakeupReversal(options) {
       }
       const note=String(reason).trim();
       if(note.length>1000 || (prompt.action==='undo_completion' && !note)){p.notify('Geri alma nedenini girin (en fazla 1000 karakter).',7000);return false;}
-      const request={actorUserId:p.actor,branchId:p.branch,studentId:student.id,makeupRecordId:records[0].id,expectedRecordVersion:student.record_version,
+      const request={policyVersion:279,actorUserId:p.actor,branchId:p.branch,studentId:student.id,makeupRecordId:records[0].id,expectedRecordVersion:student.record_version,
         action:prompt.action,reason:note,target:records[0],operationId:uid()};
       const item={version:1,request,label:(student.name || 'Öğrenci')+' · '+(prompt.action==='clear_plan'?'Planı Kaldır':'Tamamlamayı Geri Al'),state:'writing'};
       if(!persist(item)){p.notify('İşlem bilgisi güvenli saklanamadı; kayıt gönderilmedi.',8000);return false;}
       const before=scope();writing.current=true;setBusy(true);
       try {
-        const result=await timedSingleLessonRequest(()=>p.client.rpc('reverse_makeup_record',{p_request:request}));
+        const result=await timedSingleLessonRequest(()=>p.client.rpc('reverse_makeup_record_v279',{p_request:request}));
         if(!current(before,item))return false;
         if(!result.error && makeupReversalReceipt(result.data,item)){
           p.onSaved(result.data.student);persist({...item,state:'verified'});p.notify(prompt.action==='clear_plan'?'Telafi planı kaldırıldı.':'Telafi tamamlaması geri alındı.');return true;
@@ -4187,7 +4220,7 @@ function useMakeupReversal(options) {
 
 function MakeupReversalSheet({ prompt, onClose, onConfirm }) {
   const[reason,setReason]=useState(''),[saving,setSaving]=useState(false),[error,setError]=useState('');
-  const undo=prompt.action==='undo_completion',record=prompt.record;
+  const undo=prompt.action==='undo_completion',record=prompt.record,expired=!!makeupExpiryDay(record) && makeupExpiryDay(record)<turkeyDateKey();
   const confirm=async()=>{
     if(saving)return;
     if(undo && !reason.trim()){setError('Geri alma nedenini yazın.');return;}
@@ -4199,7 +4232,7 @@ function MakeupReversalSheet({ prompt, onClose, onConfirm }) {
     <div data-makeup-reversal-control style={{textAlign:'left'}}>
       <p style={{fontSize:13,color:'#475569'}}>{fmtDate(record.lessonDate)} dersinin telafisi</p>
       <p style={{fontSize:13,fontWeight:800,color:'#7e22ce'}}>Kayıtlı plan: {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p>
-      <p style={{fontSize:13,lineHeight:1.6,color:'#334155'}}>{undo?'Tamamlandı işareti geri alınacak. Kayıtlı gün ve saat korunacak; önceki sonuç bilgileri işlem geçmişinde saklanacak.':'Belirlenen telafi randevusu kaldırılacak. Telafi hakkı korunacak ve yeniden planlanabilecek.'}</p>
+      <p style={{fontSize:13,lineHeight:1.6,color:'#334155'}}>{undo?(expired?'Tamamlandı işareti geri alınacak. Süresi dolduğu için aktif plan kaldırılacak; eski plan ve sonuç bilgileri işlem geçmişinde saklanacak.':'Tamamlandı işareti geri alınacak. Kayıtlı gün ve saat korunacak; önceki sonuç bilgileri işlem geçmişinde saklanacak.'):'Belirlenen telafi randevusu kaldırılacak. Telafi hakkı korunacak ve yeniden planlanabilecek.'}</p>
       <p style={{fontSize:12,lineHeight:1.6,color:'#64748b'}}>Son geçerlilik tarihi değişmez: {record.expiry?fmtMed(record.expiry):'Belirtilmedi'}. Süresi bitmiş hak yeniden açılmaz.</p>
       {undo?<><label style={LBL}>Geri Alma Nedeni</label><textarea aria-label="Geri Alma Nedeni" style={{...INP,minHeight:84,resize:"vertical"}} maxLength={1000} value={reason} onChange={event=>{setReason(event.target.value);setError('');}} placeholder="Örn: Yanlışlıkla tamamlandı olarak işaretledim" /></>:null}
       {error?<p role="alert" style={{fontSize:12,color:'#b91c1c'}}>{error}</p>:null}
@@ -4259,11 +4292,15 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
 
   const [savingPlan, setSavingPlan] = useState(false);
   const [savingCompletion, setSavingCompletion] = useState(false);
-  const days = daysLeft(record.expiry);
-  const expired = days !== null && days < 0;
+  const days = makeupDaysLeft(record);
+  const expiryDay=makeupExpiryDay(record),planProblem=makeupPlanProblem(record,`${date}T${time}:00`);
+  const expired=!!expiryDay && expiryDay<turkeyDateKey();
   const urgent = !expired && days !== null && days <= 7;
+  const activePlan=makeupHasActivePlan(record);
   const savePlan = async () => {
     if (savingPlan) return;
+    const problem=makeupPlanProblem(record,`${date}T${time}:00`);
+    if(problem){setFormError(problem);return;}
     setSavingPlan(true);
     try {
       const saved = await onSave(record.id, {
@@ -4306,14 +4343,14 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
             <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:700, color: expired?"#dc2626":urgent?"#d97706":"#166534" }}>{fmtMed(record.expiry)}</p>
           </div>
           <div style={{ background: expired?"#dc2626":urgent?"#d97706":"#16a34a", color:"#fff", borderRadius:20, padding:"6px 14px", fontWeight:800, fontSize:14 }}>
-            {expired ? "Süresi Doldu" : `${days} gün`}
+            {expired ? "Süresi Doldu" : days===null ? "Tarih Doğrulanamadı" : days===0 ? "Son Gün" : `${days} gün`}
           </div>
         </div>
       </div>
       <Btn bg="#25D366" disabled={savingPlan || savingCompletion} onClick={()=>{ if (!savingPlan && !savingCompletion) setRightMessageOpen(true); }}>Telafi Hakkı Mesajı</Btn>
       {plannedAt ? (
         <div style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
-          <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#7e22ce", letterSpacing:1 }}>Planlanan Telafi</p>
+          <p style={{ margin:0, fontSize:11, fontWeight:700, color:"#7e22ce", letterSpacing:1 }}>{record.done || activePlan ? "Planlanan Telafi" : "Eski Plan · Aktif Değil"}</p>
           <p style={{ margin:"4px 0 0", fontSize:15, fontWeight:800, color:"#111" }}>{fmtDate(plannedAt)} · {timeFromISO(plannedAt)}</p>
           <p style={{ margin:"4px 0 0", fontSize:12, color:"#64748b" }}>{record.plannedDurationMinutes || getLessonDuration(student)} dk</p>
           {record.plannedNote ? <p style={{ margin:"4px 0 0", fontSize:12, color:"#475569", fontStyle:"italic" }}>{record.plannedNote}</p> : null}
@@ -4349,7 +4386,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
         : step === "plan"
           ? <>
               <label style={{ ...LBL, marginTop:0 }}>Telafi Tarihi</label>
-              <DatePickerField dateLabel="Telafi Tarihi" style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+              <DatePickerField dateLabel="Telafi Tarihi" style={INP} type="date" max={expiryDay || undefined} disabled={!!makeupPlanProblem(record)} value={date} onChange={e=>{setDate(e.target.value);setFormError("");}} />
               <label style={LBL}>Telafi Saati</label>
               <select style={INP} value={time} onChange={e=>setTime(e.target.value)}>
                 {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -4358,7 +4395,8 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
               <input style={INP} type="number" min={15} step={5} value={duration} onChange={e=>setDuration(e.target.value)} />
               <label style={LBL}>Plan Notu</label>
               <NoteArea value={note} onChange={setNote} placeholder="Örn: Bu hafta uygunluk oluştu" />
-              <Btn bg="#10b981" disabled={savingPlan} onClick={savePlan}>{savingPlan ? "Kaydediliyor..." : "Telafiyi Planla"}</Btn>
+              {planProblem || formError ? <p role="alert" style={{fontSize:12,color:"#b91c1c"}}>{planProblem || formError}</p> : null}
+              <Btn bg="#10b981" disabled={savingPlan || !!planProblem} onClick={savePlan}>{savingPlan ? "Kaydediliyor..." : "Telafiyi Planla"}</Btn>
               {plannedAt ? <Btn bg="#111" outline disabled={savingPlan} onClick={() => setStep("main")}>Geri</Btn> : null}
             </>
           : step === "attended"
@@ -4444,10 +4482,11 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
                   <Btn bg="#111" outline disabled={savingCompletion} onClick={() => setStep("main")}>Geri</Btn>
                 </>
               : <>
-                  <Btn bg="#25D366" onClick={() => onPlanMessage(record)}>Plan Mesajını Gönder</Btn>
+                  <Btn bg="#25D366" disabled={!activePlan} onClick={() => {if(makeupHasActivePlan(record))onPlanMessage(record);}}>Plan Mesajını Gönder</Btn>
                   <Btn bg="#10b981" onClick={() => setStep("attended")}>Katıldı</Btn>
                   <Btn bg="#f97316" onClick={() => setStep("counted")}>Yapıldı Say</Btn>
-                  <Btn bg="#6366f1" onClick={() => setStep("plan")}>Planı Düzenle</Btn>
+                  {!record.done && !activePlan ? <p style={{fontSize:12,color:"#9f1239"}}>{makeupPlanProblem(record,plannedAt)}</p> : null}
+                  <Btn bg="#6366f1" disabled={!!makeupPlanProblem(record)} onClick={() => setStep("plan")}>Planı Düzenle</Btn>
                   {onReversal ? <Btn bg="#7e22ce" outline onClick={()=>onReversal(record,"clear_plan")}>Planı Kaldır</Btn> : null}
                 </>
       }
@@ -5066,7 +5105,7 @@ function StudentTelafiList({ student, records, groups, currentQuota, onSelect })
     { key:"expired", title:"Süresi Dolan", open:false, color:"#9f1239", background:"#fff1f2", records:[], empty:"Süresi dolan telafi yok." },
   ];
   records.forEach(record => {
-    const key = record.done ? "done" : !isCurrentTelafi(record) ? "expired" : telafiPlannedAt(record) ? "planned" : "unplanned";
+    const key = record.done ? "done" : !isCurrentTelafi(record) ? "expired" : telafiPlannedAt(record) && (!makeupExpiryDay(record) || makeupHasActivePlan(record)) ? "planned" : "unplanned";
     sections.find(section=>section.key === key).records.push(record);
   });
   const sortValue = (record,key) => key === "planned" ? telafiPlannedAt(record) : key === "done" ? record.doneAt || record.done_at : record.expiry;
@@ -5111,7 +5150,7 @@ function StudentTelafiList({ student, records, groups, currentQuota, onSelect })
         {section.records.map(record=>{
           const plannedAt = telafiPlannedAt(record);
           const doneAt = record.doneAt || record.done_at;
-          const leftDays = daysLeft(record.expiry);
+          const leftDays = makeupDaysLeft(record);
           const urgent = !record.done && isCurrentTelafi(record) && Number.isFinite(leftDays) && leftDays <= 7;
           const kind = recordKinds.get(record);
           const status = section.key === "done" ? telafiStatusLabel(record) : section.key === "expired" ? "Süresi doldu" : section.key === "planned" ? "Planlandı" : "Planlanacak";
@@ -5120,7 +5159,7 @@ function StudentTelafiList({ student, records, groups, currentQuota, onSelect })
               <span style={{ minWidth:0, fontSize:13, fontWeight:800 }}>{fullDate(record.lessonDate)} dersinin telafisi</span>
               <span style={{ color:section.color, background:section.background, borderRadius:20, padding:"3px 8px", fontSize:11, fontWeight:850, flexShrink:0 }}>{status}</span>
             </span>
-            {section.key !== "done" && plannedAt ? <span style={{ display:"block", marginTop:6, color:section.key === "planned" ? "#7e22ce" : "#64748b", fontSize:12, fontWeight:700 }}>Plan tarihi: {occurrence(plannedAt)}</span> : null}
+            {section.key !== "done" && plannedAt ? <span style={{ display:"block", marginTop:6, color:section.key === "planned" ? "#7e22ce" : "#64748b", fontSize:12, fontWeight:700 }}>{makeupHasActivePlan(record)?"Plan tarihi: ":"Eski plan (aktif değil): "}{occurrence(plannedAt)}</span> : null}
             {section.key === "done" ? <span style={{ display:"block", marginTop:6, color:"#166534", fontSize:12 }}>Sonuç tarihi: {doneAt ? occurrence(doneAt) : "Belirtilmedi"}</span> : <span style={{ display:"block", marginTop:6, color:urgent ? "#b45309" : "#64748b", fontSize:12 }}>
               Son geçerlilik: {fullDate(record.expiry)}
               {section.key !== "expired" && Number.isFinite(leftDays) ? " · "+(leftDays === 0 ? "Son gün" : leftDays+" gün kaldı") : ""}
@@ -5301,7 +5340,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
           const currentStart = telafiWindowItems.length ? Math.min(...telafiWindowItems.map(l => new Date(l.date).getTime())) : null;
           const currentEnd = telafiWindowItems.length ? Math.max(...telafiWindowItems.map(l => new Date(l.date).getTime())) : null;
           const plannedTelafiler = telafiRecords
-            .filter(r => telafiPlannedAt(r))
+            .filter(r => makeupCalendarPlanAt(r))
             .filter(r => {
               const t = new Date(telafiPlannedAt(r)).getTime();
               if (!Number.isFinite(t) || currentStart === null || currentEnd === null) return true;
@@ -6450,24 +6489,34 @@ function TelafiHakkiMesajSheet({ student, record, onClose, onSent }) {
   );
 }
 
-function TelafiPlanMesajSheet({ student, record, onClose, onSent }) {
-  const text = msgTelafiPlanlandi(student, record);
-  const send = async () => {
-    const phone = calendarAvailabilityPhone(student.phone);
-    if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
-    else await navigator.clipboard.writeText(text);
-    await onSent(phone ? "whatsapp" : "copied");
+function TelafiPlanMesajSheet({ student, record, onClose, onSent, onVerify }) {
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const busyRef=useRef(false),alive=useRef(true),popup=useRef(null);
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;try{popup.current?.close();}catch{}};},[]);
+  const text=msgTelafiPlanlandi(student,record),problem=record.done?'Tamamlanmış telafi için aktif plan mesajı gönderilemez.':makeupPlanProblem(record,telafiPlannedAt(record));
+  const send=async()=>{
+    if(busyRef.current)return;
+    const problem=record.done?'Tamamlanmış telafi için aktif plan mesajı gönderilemez.':makeupPlanProblem(record,telafiPlannedAt(record));
+    if(problem || !telafiPlannedAt(record)){setError(problem || 'Aktif telafi planı bulunamadı.');return;}
+    const phone=calendarAvailabilityPhone(student.phone);busyRef.current=true;setBusy(true);setError('');
+    try{
+      if(phone){popup.current=window.open('about:blank','_blank');if(!popup.current)throw Error('Tarayıcı yeni pencereyi engelledi.');popup.current.opener=null;}
+      const verified=await onVerify?.();
+      if(!alive.current)return;
+      if(!verified?.data || !verified.isCurrent?.())throw Error(verified?.message || 'Güncel telafi planı doğrulanamadı. Pencereyi kapatıp yeniden açın.');
+      const fresh=verified.data,verifiedText=msgTelafiPlanlandi(fresh.student,fresh.record);
+      if(phone){if(!popup.current || popup.current.closed)throw Error('Mesaj penceresi kapatıldı.');popup.current.location.replace('https://wa.me/'+phone+'?text='+encodeURIComponent(verifiedText));popup.current=null;}
+      else await navigator.clipboard.writeText(verifiedText);
+      if(alive.current && verified.isCurrent())await onSent(phone?'whatsapp':'copied');
+    }catch(e){try{popup.current?.close();}catch{}popup.current=null;if(alive.current)setError(e?.message || 'Plan doğrulanamadı; mesaj hazırlanmadı.');}
+    finally{busyRef.current=false;if(alive.current)setBusy(false);}
   };
-  return (
-    <Sheet title="Telafi Planını Bildir" subtitle={student.name+" · "+fmtDate(telafiPlannedAt(record))+" · "+timeFromISO(telafiPlannedAt(record))} onClose={onClose}>
-      <div style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
-        <p style={{ margin:0, fontSize:12, color:"#581c87", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
-      </div>
-      <p style={{ margin:"0 0 12px", fontSize:12, color:"#64748b" }}>Telafi günü ve saati veritabanına kaydedildi. Plan bilgisini şimdi veliye gönderebilirsiniz.</p>
-      <Btn bg="#25D366" onClick={send}>{calendarAvailabilityPhone(student.phone) ? "WhatsApp'tan Gönder" : "Mesajı Kopyala"}</Btn>
-      <Btn bg="#111" outline onClick={onClose}>Şimdi Değil</Btn>
-    </Sheet>
-  );
+  return <Sheet title="Telafi Planını Bildir" subtitle={student.name+" · "+fmtDate(telafiPlannedAt(record))+" · "+timeFromISO(telafiPlannedAt(record))} onClose={()=>{if(!busyRef.current)onClose();}}>
+    <div style={{background:'#faf5ff',border:'1px solid #e9d5ff',borderRadius:12,padding:'12px 14px',marginBottom:14}}><p style={{margin:0,fontSize:12,color:'#581c87',lineHeight:1.65,whiteSpace:'pre-line'}}>{text}</p></div>
+    {problem || error ? <p role="alert" style={{fontSize:12,color:'#b91c1c'}}>{error || problem}</p> : <p style={{fontSize:12,color:'#64748b'}}>Paylaşmadan önce güncel telafi planı kontrol edilir.</p>}
+    <Btn bg="#25D366" disabled={busy || !!problem} onClick={send}>{busy?'Kontrol Ediliyor…':calendarAvailabilityPhone(student.phone)?"WhatsApp'tan Gönder":"Mesajı Kopyala"}</Btn>
+    <Btn bg="#111" outline disabled={busy} onClick={onClose}>Şimdi Değil</Btn>
+  </Sheet>;
 }
 
 function ÖdemeSheet({ student, onClose, onÖdemeAl, onMesajGonder }) {
@@ -7270,7 +7319,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     });
 
     (student.telafi_records || []).forEach(record => {
-      const plannedAt = telafiPlannedAt(record);
+      const plannedAt = makeupCalendarPlanAt(record);
       if (!plannedAt) return;
       if (!visibleRecordedDate(plannedAt,calendarTime(plannedAt),!!record.done)) return;
       if (!matchesTeacher(student,plannedAt,record,calendarTime(plannedAt),record.plannedDurationMinutes || record.planned_duration_minutes || getLessonDuration(student))) return;
@@ -8676,7 +8725,7 @@ function BekleyenTelafiler({ students, onStudentClick }) {
   students.forEach(student => {
     if (isStudentLeft(student)) return;
     (student.telafi_records || []).forEach(record => {
-      if (isCurrentTelafi(record) && !telafiPlannedAt(record)) telafiler.push({ student, record });
+      if (isCurrentTelafi(record) && !makeupHasActivePlan(record)) telafiler.push({ student, record });
     });
   });
   telafiler.sort((a,b) => {
@@ -8690,7 +8739,7 @@ function BekleyenTelafiler({ students, onStudentClick }) {
   return (
     <AçılırBugünBölümü title={`Bekleyen Telafiler (${telafiler.length})`} color="#1d4ed8" style={{ background:"#eff6ff", border:"1.5px solid #93c5fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
       {telafiler.map(({student, record}, index) => {
-        const kalan = daysLeft(record.expiry);
+        const kalan = makeupDaysLeft(record);
         const acil = Number.isFinite(kalan) && kalan <= 7;
         const renk = acil ? "#d97706" : "#0284c7";
         return (
@@ -8698,7 +8747,7 @@ function BekleyenTelafiler({ students, onStudentClick }) {
             <div style={{ textAlign:"left" }}>
               <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
               <p style={{ margin:"2px 0 0", fontSize:12, color:"#475569" }}>{fmtShort(record.lessonDate)} dersinin telafisi</p>
-              {telafiPlannedAt(record) ? <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Plan: {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p> : null}
+              {telafiPlannedAt(record) ? <p style={{ margin:"2px 0 0", fontSize:12, color:"#7e22ce", fontWeight:700 }}>Eski plan (aktif değil): {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p> : null}
             </div>
             <div style={{ textAlign:"right", flexShrink:0 }}>
               <p style={{ margin:"0 0 4px", fontSize:11, color:"#64748b" }}>{record.expiry ? fmtMed(record.expiry) : "Süre belirtilmedi"}</p>
@@ -14387,6 +14436,8 @@ export default function App() {
       pop("Telafi süresi veya plan notu doğrulanamadı; kayıt gönderilmedi.",7000);
       return false;
     }
+    const problem=makeupPlanProblem(intent.record,intent.plannedAt);
+    if(problem){pop(problem,8000);return false;}
     const operationId = uid();
     const issue = {
       operationId,
@@ -15016,6 +15067,18 @@ export default function App() {
       return true;
     },
   });
+  const verifyMakeupPlanMessage=async(student,record)=>{
+    if(!requireProtectedSources(["students"],"Telafi plan mesajı") || !browserOnline || connectionRevalidationRequired)return null;
+    const actor=programChangeActorRef.current,branch=student.branch_id,generation=protectedDataLoadGenerationRef.current;
+    const isCurrent=()=>actor===programChangeActorRef.current && generation===protectedDataLoadGenerationRef.current && branch===paymentReceiptScopeRef.current?.branchId;
+    if(branch!==currentBranch?.id || !isCurrent())return null;
+    const result=await timedSingleLessonRequest(()=>supabase.rpc("read_valid_makeup_plan",{p_branch_id:branch,p_student_id:student.id,p_makeup_record_id:record.id,p_expected_version:student.record_version}));
+    const data=result.data;
+    if(result.error || !isCurrent() || data?.student?.id!==student.id || data.student.branch_id!==branch || data.student.record_version!==student.record_version
+      || data?.record?.id!==record.id || programJSON(data.record)!==programJSON(record) || !Number.isFinite(Date.parse(data.verifiedAt))
+      || makeupPlanProblem(data.record,telafiPlannedAt(data.record),data.verifiedAt))return {message:"Telafi planı değişmiş, süresi dolmuş veya doğrulanamamış. Güncel kaydı yeniden açın."};
+    return {data,isCurrent};
+  };
   const handleMakeupReversal=(student,record,action)=>{
     if(!requireProtectedSources(["students"],"Telafi geri alma") || makeupReversal.isPending()) return;
     const current=students.find(s=>s.id===student.id),targets=(current?.telafi_records || []).filter(r=>r?.id===record?.id);
@@ -17286,7 +17349,7 @@ export default function App() {
               </AçılırBugünBölümü>
             ) : null}
             <BugünÖdemeleri students={operationalStudents} onPaymentNoticeConfirmed={handlePaymentDayReminder} paymentNoticeScopeKey={paymentReminderScopeKey} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onMesaj={(s)=>setMesajSt(s)} onStudentClick={setDetailSt} />
-            {pendingGoogleReviews.length===0 && pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && pendingWeeklyReports.length===0 && !weeklyVisibleState.error && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(record=>isCurrentTelafi(record) && !telafiPlannedAt(record))) && !operationalStudents.some(s=>!s.frozen&&!isStudentLeft(s)&&(s.telafi_records||[]).some(isTodayPlannedTelafi)) ? (
+            {pendingGoogleReviews.length===0 && pendingPeriodEvaluations.length===0 && overdueSinglePayments.length===0 && pendingSingleResults.length===0 && pendingMonthlyReports.length===0 && pendingWeeklyReports.length===0 && !weeklyVisibleState.error && operationalStudents.filter(s=>{ if (s.frozen) return false; const l=s.schedule.find(x=>x.status==="upcoming"); return l&&isToday(l.date); }).length===0 && todayExtraLessons(operationalStudents).length===0 && !singleLessons.some(lesson=>!lesson.deleted_at && lesson.lesson_status==="planned" && isToday(lesson.starts_at)) && !operationalStudents.some(s=>isÖdemeBekleyen(s)) && !operationalStudents.some(s=>!isStudentLeft(s)&&(s.telafi_records||[]).some(record=>isCurrentTelafi(record) && !makeupHasActivePlan(record))) && !operationalStudents.some(s=>!s.frozen&&!isStudentLeft(s)&&(s.telafi_records||[]).some(isTodayPlannedTelafi)) ? (
               <div style={{ textAlign:"center", padding:"48px 20px" }}>
                 <p style={{ fontSize:36 }}>☀️</p>
                 <p style={{ fontWeight:600, color:"#aaa" }}>Bugün için bir şey yok</p>
@@ -17469,7 +17532,7 @@ export default function App() {
       {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiReversal={handleMakeupReversal} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onPieceEdit={handlePieceHistoryUpdate} pieceEditScope={pieceEditScope} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onPreviewProgram={previewProgramChange} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {makeupReversalPrompt && makeupReversalPrompt.scopeKey===programJSON([authSession?.user?.id || "",currentBranch?.id || "",protectedDataLoadGenerationRef.current]) ? <MakeupReversalSheet key={makeupReversalPrompt.action+"|"+makeupReversalPrompt.record.id} prompt={makeupReversalPrompt} onClose={()=>setMakeupReversalPrompt(null)} onConfirm={async reason=>{const saved=await makeupReversal.reverse(makeupReversalPrompt,reason);if(saved || makeupReversal.isPending())setMakeupReversalPrompt(null);return saved;}} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
-      {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
+      {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet onVerify={()=>verifyMakeupPlanMessage(telafiPlanMessagePrompt.student,telafiPlanMessagePrompt.record)} student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mainTab==='tekders' && showSinglePeople ? <SingleLessonPeopleSheet key={paymentReceiptScopeKey} scope={paymentReceiptScopeRef.current} isCurrent={key=>paymentReceiptScopeRef.current.key===key && paymentReceiptScopeRef.current.ready} teachers={teachers} lessons={singleLessons} onBusy={busy=>{branchScopedWriteCountRef.current=Math.max(0,branchScopedWriteCountRef.current+(busy?1:-1));}} onClose={()=>setShowSinglePeople(false)} onChoose={person=>{setShowSinglePeople(false);setSingleLessonSheet({mode:'add',person});}} onOpenLesson={lesson=>{setShowSinglePeople(false);setSingleLessonSheet({mode:'edit',lesson});}} />:null}
       {dailySingleLessonActions && dailySingleLessonActionLesson && !activePaymentReceipt ? <DailySingleLessonActionsSheet key={dailySingleLessonActions.scopeKey+dailySingleLessonActions.id} lesson={dailySingleLessonActionLesson} busy={!!singleLessonBusyIds[dailySingleLessonActionLesson.id]} blocked={!!dailySingleLessonActionBlocked} onAction={(lesson,action)=>handleDailySingleLessonAction(lesson,action,dailySingleLessonActions.scopeKey)} onClose={()=>setDailySingleLessonActions(null)} /> : null}
