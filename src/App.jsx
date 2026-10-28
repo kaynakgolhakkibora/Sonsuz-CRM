@@ -4874,6 +4874,91 @@ function studentLinkedSingleLessons(singleLessons, studentId) {
     .sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at));
 }
 
+function StudentTelafiList({ student, records, groups, currentQuota, onSelect }) {
+  const sections = [
+    { key:"unplanned", title:"Planlanacak", open:true, color:"#0f766e", background:"#f0fdfa", records:[], empty:"Planlanacak telafi yok." },
+    { key:"planned", title:"Planlanan", open:true, color:"#7e22ce", background:"#faf5ff", records:[], empty:"Planlanan telafi yok." },
+    { key:"done", title:"Yapılan", open:false, color:"#166534", background:"#f0fdf4", records:[], empty:"Yapılan telafi yok." },
+    { key:"expired", title:"Süresi Dolan", open:false, color:"#9f1239", background:"#fff1f2", records:[], empty:"Süresi dolan telafi yok." },
+  ];
+  records.forEach(record => {
+    const key = record.done ? "done" : !isCurrentTelafi(record) ? "expired" : telafiPlannedAt(record) ? "planned" : "unplanned";
+    sections.find(section=>section.key === key).records.push(record);
+  });
+  const sortValue = (record,key) => key === "planned" ? telafiPlannedAt(record) : key === "done" ? record.doneAt || record.done_at : record.expiry;
+  sections.forEach(section => section.records.sort((a,b) => {
+    const aTime = new Date(sortValue(a,section.key) || "").getTime();
+    const bTime = new Date(sortValue(b,section.key) || "").getTime();
+    if (!Number.isFinite(aTime) || !Number.isFinite(bTime)) return Number.isFinite(aTime) ? -1 : Number.isFinite(bTime) ? 1 : 0;
+    return ["done","expired"].includes(section.key) ? bTime-aTime : aTime-bTime;
+  }));
+  const fullDate = value => !value ? "Belirtilmedi" : isValidDateValue(value)
+    ? new Date(value).toLocaleDateString("tr-TR", { weekday:"short", day:"numeric", month:"long", year:"numeric" })
+    : "Tarih doğrulanamadı";
+  const occurrence = value => fullDate(value)+(/[T ]\d{2}:\d{2}/.test(String(value || "")) && isValidDateValue(value) && timeFromISO(value) ? " · "+timeFromISO(value) : "");
+  const recordKinds = new Map();
+  const periodQuotas = new Map();
+  groups.forEach(group => {
+    const quota = group.period && !group.period.beforeStart ? telafiQuotaInfo(student,group.period.start,group.records) : null;
+    periodQuotas.set(group.key,quota);
+    group.records.forEach(record=>recordKinds.set(record,{
+      exception:!!quota?.exceptionRecords?.includes(record),
+      legacy:!!quota?.legacyOverflowRecords?.includes(record),
+    }));
+  });
+  const quotaSummary = quota => quota && quota.count !== null ? <p style={{ margin:"6px 0 0", color:"#475569", fontSize:12, lineHeight:1.5 }}>
+    <strong>{quota.count}/6 normal hak kullanıldı</strong> · {quota.remaining} hak kaldı
+    {quota.exceptionCount>0 ? " · "+quota.exceptionCount+" yönetici inisiyatifi" : ""}
+    {quota.legacyOverflowCount>0 ? " · "+quota.legacyOverflowCount+" geçmiş ek kayıt" : ""}
+  </p> : null;
+  const pastGroups = groups.filter(group=>!group.period || group.period.key !== currentQuota.period?.key);
+
+  return <div aria-label="Öğrenci telafileri" style={{ textAlign:"left" }}>
+    {currentQuota.period && !currentQuota.period.beforeStart ? <div style={{ padding:"11px 12px", border:"1px solid #e2e8f0", borderRadius:12, marginBottom:12, background:"#fff" }}>
+      <p style={{ margin:0, fontSize:12, fontWeight:850, color:"#334155" }}>{telafiPeriodTitle(currentQuota.period)} · Güncel dönem</p>
+      <p style={{ margin:"4px 0 0", fontSize:11, color:"#64748b", lineHeight:1.5 }}>{telafiPeriodDateRange(currentQuota.period)}</p>
+      {quotaSummary(currentQuota)}
+    </div> : null}
+    {records.length === 0 ? <p style={{ margin:"0 0 12px", color:"#64748b", fontSize:12 }}>Henüz telafi kaydı yok.</p> : null}
+    {sections.map(section=><details key={student.id+"|"+section.key} open={section.open} data-telafi-section={section.key} style={{ background:section.background, border:"1px solid #e2e8f0", borderRadius:12, marginBottom:10 }}>
+      <summary style={{ padding:"12px", cursor:"pointer", fontSize:13, fontWeight:850, color:section.color }}>{section.title} ({section.records.length})</summary>
+      <div style={{ padding:"0 10px 10px" }}>
+        {section.records.length === 0 ? <p style={{ margin:0, padding:"3px 2px", color:"#64748b", fontSize:12 }}>{section.empty}</p> : null}
+        {section.records.map(record=>{
+          const plannedAt = telafiPlannedAt(record);
+          const doneAt = record.doneAt || record.done_at;
+          const leftDays = daysLeft(record.expiry);
+          const urgent = !record.done && isCurrentTelafi(record) && Number.isFinite(leftDays) && leftDays <= 7;
+          const kind = recordKinds.get(record);
+          const status = section.key === "done" ? telafiStatusLabel(record) : section.key === "expired" ? "Süresi doldu" : section.key === "planned" ? "Planlandı" : "Planlanacak";
+          return <button type="button" key={record.id} data-telafi-record={record.id} onClick={()=>onSelect(record)} style={{ width:"100%", display:"block", boxSizing:"border-box", textAlign:"left", background:"#fff", border:"1px solid #e2e8f0", borderRadius:10, padding:"11px 12px", margin:"0 0 7px", cursor:"pointer", fontFamily:"inherit", color:"#0f172a", lineHeight:1.5, overflowWrap:"anywhere" }}>
+            <span style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:"5px 9px" }}>
+              <span style={{ minWidth:0, fontSize:13, fontWeight:800 }}>{fullDate(record.lessonDate)} dersinin telafisi</span>
+              <span style={{ color:section.color, background:section.background, borderRadius:20, padding:"3px 8px", fontSize:11, fontWeight:850, flexShrink:0 }}>{status}</span>
+            </span>
+            {section.key !== "done" && plannedAt ? <span style={{ display:"block", marginTop:6, color:section.key === "planned" ? "#7e22ce" : "#64748b", fontSize:12, fontWeight:700 }}>Plan tarihi: {occurrence(plannedAt)}</span> : null}
+            {section.key === "done" ? <span style={{ display:"block", marginTop:6, color:"#166534", fontSize:12 }}>Sonuç tarihi: {doneAt ? occurrence(doneAt) : "Belirtilmedi"}</span> : <span style={{ display:"block", marginTop:6, color:urgent ? "#b45309" : "#64748b", fontSize:12 }}>
+              Son geçerlilik: {fullDate(record.expiry)}
+              {section.key !== "expired" && Number.isFinite(leftDays) ? " · "+(leftDays === 0 ? "Son gün" : leftDays+" gün kaldı") : ""}
+            </span>}
+            {kind?.exception ? <span style={{ display:"block", marginTop:5, color:"#c2410c", fontSize:11, fontWeight:800 }}>Yönetici İnisiyatifiyle Verildi</span> : null}
+            {kind?.legacy ? <span style={{ display:"block", marginTop:5, color:"#475569", fontSize:11, fontWeight:800 }}>v98 Öncesi Ek Telafi · Türü İşaretlenmemiş</span> : null}
+          </button>;
+        })}
+      </div>
+    </details>)}
+    {pastGroups.length>0 ? <details style={{ border:"1px solid #e2e8f0", borderRadius:12, background:"#fff", marginTop:14 }}>
+      <summary style={{ padding:12, cursor:"pointer", color:"#64748b", fontSize:12, fontWeight:800 }}>Geçmiş Hak Dönemleri ({pastGroups.length})</summary>
+      <div style={{ padding:"0 12px 12px" }}>{pastGroups.map(group=><div key={group.key} style={{ padding:"9px 0", borderTop:"1px solid #eef2f7" }}>
+        <p style={{ margin:0, fontSize:12, fontWeight:800, color:"#334155" }}>{telafiPeriodTitle(group.period)}</p>
+        {telafiPeriodDateRange(group.period) ? <p style={{ margin:"4px 0 0", color:"#64748b", fontSize:11 }}>{telafiPeriodDateRange(group.period)}</p> : null}
+        {quotaSummary(periodQuotas.get(group.key))}
+        <p style={{ margin:"4px 0 0", fontSize:11, color:"#64748b" }}>{group.records.length} kayıt</p>
+      </div>)}</div>
+    </details> : null}
+  </div>;
+}
+
 function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onPieceEdit, pieceEditScope, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onPreviewProgram, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
@@ -5090,68 +5175,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
         })()}
 
         {tab === "telafi" ? (
-          <div>
-            {telafiRecords.length === 0 ? <p style={{ textAlign:"center", color:"#aaa", padding:"24px 0", fontWeight:600 }}>Henüz telafi kaydı yok</p> : null}
-            {telafiGroups.map(group => {
-              const waiting = group.records.filter(isCurrentTelafi);
-              const expiredInPeriod = group.records.filter(record=>!record.done && !isCurrentTelafi(record));
-              const doneInPeriod = group.records.filter(record=>record.done);
-              const groupQuota = group.period && !group.period.beforeStart ? telafiQuotaInfo(student, group.period.start, group.records) : null;
-              const exceptionCount = groupQuota?.exceptionCount || 0;
-              const legacyOverflowCount = groupQuota?.legacyOverflowCount || 0;
-              const isCurrentPeriod = !!group.period && group.period.key === currentTelafiQuota.period?.key;
-              const renderRecord = (record,status) => {
-                const managerExceptionRecord = !!groupQuota?.exceptionRecords?.includes(record);
-                const legacyOverflowRecord = !!groupQuota?.legacyOverflowRecords?.includes(record);
-                const leftDays = daysLeft(record.expiry);
-                const urgent = status === "waiting" && leftDays !== null && leftDays <= 7;
-                const doneRecord = status === "done";
-                const expiredRecord = status === "expired";
-                const background = doneRecord?"#f0fdf4":expiredRecord?"#fff1f2":urgent?"#fffbeb":"#f0f9ff";
-                const border = doneRecord?"#bbf7d0":expiredRecord?"#fca5a5":urgent?"#fcd34d":"#bae6fd";
-                const tone = doneRecord?"#166534":expiredRecord?"#dc2626":urgent?"#d97706":"#0369a1";
-                return <div key={record.id} onClick={() => setTelafiSel(record)} style={{ background, border:"1px solid "+border, borderRadius:11, padding:"11px 12px", marginBottom:7, cursor:"pointer" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:9 }}>
-                    <div style={{ minWidth:0 }}>
-                      <p style={{ margin:0, fontSize:13, fontWeight:850, color:doneRecord?"#166534":"#0f172a" }}>{fmtDate(record.lessonDate)} dersi</p>
-                      {record.note ? <p style={{ margin:"5px 0 0", fontSize:12, color:"#64748b", fontStyle:"italic", lineHeight:1.45 }}>{record.note}</p> : null}
-                      {telafiPlannedAt(record) ? <p style={{ margin:"6px 0 0", fontSize:11, color:"#7e22ce", fontWeight:800 }}>Planlandı: {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p> : null}
-                      {doneRecord && telafiDoneAt(record) ? <p style={{ margin:"5px 0 0", fontSize:11, color:"#16a34a", fontWeight:700 }}>{telafiDoneDateText(record)}</p> : null}
-                      {doneRecord && telafiMetricText(record) ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#166534" }}>{telafiMetricText(record)}</p> : null}
-                      {managerExceptionRecord ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#c2410c", fontWeight:900 }}>Yönetici İnisiyatifiyle Verildi</p> : null}
-                      {legacyOverflowRecord ? <p style={{ margin:"4px 0 0", fontSize:11, color:"#475569", fontWeight:900 }}>v98 Öncesi Ek Telafi · Türü İşaretlenmemiş</p> : null}
-                      {!doneRecord ? <p style={{ margin:"6px 0 0", fontSize:11, color:"#64748b" }}>Son geçerlilik <strong style={{ color:tone }}>· {record.expiry?fmtMed(record.expiry):"Belirtilmedi"}</strong></p> : null}
-                    </div>
-                    <span style={{ background:tone, color:"#fff", borderRadius:20, padding:"4px 9px", fontSize:11, fontWeight:800, flexShrink:0 }}>{doneRecord?"Yapıldı":expiredRecord?"Doldu":leftDays===null?"Bekliyor":leftDays+"g"}</span>
-                  </div>
-                </div>;
-              };
-              const quotaSummary = groupQuota ? <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                <span style={{ background:groupQuota.count>=6?"#fee2e2":"#eef2ff", color:groupQuota.count>=6?"#b91c1c":"#4338ca", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900 }}>{groupQuota.count}/6 kullanıldı</span>
-                <span style={{ background:"#ecfdf5", color:"#047857", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900 }}>{groupQuota.remaining} hak kaldı</span>
-                {exceptionCount>0?<span style={{ background:"#fff7ed", color:"#c2410c", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900 }}>{exceptionCount} yönetici inisiyatifi</span>:null}
-                {legacyOverflowCount>0?<span style={{ background:"#f1f5f9", color:"#475569", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900 }}>{legacyOverflowCount} geçmiş ek kayıt</span>:null}
-              </div> : null;
-              const recordSections = <div style={{ display:"grid", gap:8 }}>
-                {waiting.length>0?<div><div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", margin:"0 0 7px" }}><p style={{ fontSize:10, fontWeight:900, color:"#0369a1", letterSpacing:1, margin:0 }}>BEKLEYEN TELAFİLER</p><span style={{ fontSize:10, fontWeight:900, color:"#0369a1" }}>{waiting.length}</span></div>{waiting.map(record=>renderRecord(record,"waiting"))}</div>:isCurrentPeriod?<div style={{ background:"#f8fafc", borderRadius:10, padding:"10px 12px", fontSize:12, color:"#64748b", fontWeight:700 }}>Bu dönemde bekleyen telafi yok.</div>:null}
-                {expiredInPeriod.length>0?<details style={{ borderTop:"1px solid #e5e7eb", paddingTop:8 }}><summary style={{ cursor:"pointer", padding:"3px 0 8px" }}><span style={{ display:"inline-flex", alignItems:"center", gap:6 }}><p style={{ margin:0, fontSize:11, fontWeight:850, color:"#dc2626" }}>SÜRESİ DOLAN</p><strong style={{ fontSize:10, color:"#dc2626" }}>{expiredInPeriod.length}</strong></span></summary>{expiredInPeriod.map(record=>renderRecord(record,"expired"))}</details>:null}
-                {doneInPeriod.length>0?<details style={{ borderTop:"1px solid #e5e7eb", paddingTop:8 }}><summary style={{ cursor:"pointer", padding:"3px 0 8px" }}><span style={{ display:"inline-flex", alignItems:"center", gap:6 }}><p style={{ margin:0, fontSize:11, fontWeight:850, color:"#166534" }}>YAPILMIŞ</p><strong style={{ fontSize:10, color:"#166534" }}>{doneInPeriod.length}</strong></span></summary>{doneInPeriod.map(record=>renderRecord(record,"done"))}</details>:null}
-              </div>;
-              if (!isCurrentPeriod) return <details key={group.key} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, padding:"0 11px", marginBottom:9 }}>
-                <summary style={{ cursor:"pointer", padding:"11px 1px", listStyle:"none" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"center" }}><div><p style={{ margin:0, fontSize:12, fontWeight:900, color:"#334155" }}>{telafiPeriodTitle(group.period)}</p>{telafiPeriodDateRange(group.period)?<p style={{ margin:"3px 0 0", fontSize:10, color:"#94a3b8" }}>{telafiPeriodDateRange(group.period)}</p>:null}</div><span style={{ color:"#64748b", fontSize:11, fontWeight:850 }}>{group.records.length} kayıt · Aç</span></div>
-                </summary>
-                <div style={{ borderTop:"1px solid #eef2f7", padding:"10px 0 4px" }}>{quotaSummary}<div style={{ height:9 }} />{recordSections}</div>
-              </details>;
-              return <div key={group.key} style={{ background:"#fff", border:"1.5px solid #c4b5fd", borderRadius:14, padding:"13px", marginBottom:12 }}>
-                <div style={{ marginBottom:12 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10, marginBottom:9 }}><div><p style={{ margin:0, fontSize:13, color:"#111", fontWeight:950 }}>{telafiPeriodTitle(group.period)}</p><p style={{ margin:"4px 0 0", fontSize:11, color:"#64748b" }}>{telafiPeriodDateRange(group.period)}</p></div><span style={{ background:"#f3e8ff", color:"#7e22ce", borderRadius:20, padding:"5px 9px", fontSize:10, fontWeight:900, whiteSpace:"nowrap" }}>Güncel dönem</span></div>
-                  {quotaSummary}
-                </div>
-                {recordSections}
-              </div>;
-            })}
-          </div>
+          <StudentTelafiList key={student.id} student={student} records={telafiRecords} groups={telafiGroups} currentQuota={currentTelafiQuota} onSelect={setTelafiSel} />
         ) : null}
 
         {tab === "ekders" ? (
