@@ -4876,8 +4876,8 @@ function studentLinkedSingleLessons(singleLessons, studentId) {
 
 function StudentTelafiList({ student, records, groups, currentQuota, onSelect }) {
   const sections = [
-    { key:"unplanned", title:"Planlanacak", open:true, color:"#0f766e", background:"#f0fdfa", records:[], empty:"Planlanacak telafi yok." },
-    { key:"planned", title:"Planlanan", open:true, color:"#7e22ce", background:"#faf5ff", records:[], empty:"Planlanan telafi yok." },
+    { key:"unplanned", title:"Planlanacak", open:false, color:"#0f766e", background:"#f0fdfa", records:[], empty:"Planlanacak telafi yok." },
+    { key:"planned", title:"Planlanan", open:false, color:"#7e22ce", background:"#faf5ff", records:[], empty:"Planlanan telafi yok." },
     { key:"done", title:"Yapılan", open:false, color:"#166534", background:"#f0fdf4", records:[], empty:"Yapılan telafi yok." },
     { key:"expired", title:"Süresi Dolan", open:false, color:"#9f1239", background:"#fff1f2", records:[], empty:"Süresi dolan telafi yok." },
   ];
