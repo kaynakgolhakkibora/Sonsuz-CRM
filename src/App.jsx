@@ -4027,7 +4027,189 @@ function ResumeProgramSheet({ student, onClose, onResume, error="" }) {
   );
 }
 
-function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvaluationMessage }) {
+function makeupReversalTarget(record, action) {
+  if (!record?.id || !["clear_plan","undo_completion"].includes(action)) return null;
+  const done=record.done === true || String(record.done).toLowerCase() === "true";
+  const plannedAt=telafiPlannedAt(record);
+  if (!plannedAt || (action === "clear_plan" ? done : !done)) return null;
+  if (action === "undo_completion" && (!/[T ]\d{2}:\d{2}/.test(plannedAt) || !isValidDateValue(plannedAt))) return null;
+  const keys=action === "clear_plan" ? ["plannedAt","planned_at","plannedDurationMinutes","planned_duration_minutes","plannedNote","planned_note"] : [
+    "doneStatus","done_status","doneAt","done_at","doneNote","activeMinutes","taskFocusMinutes","task_focus_minutes","focusMinutes","focus_minutes",
+    "redirectionCount","redirection_count","lessonFocus","lesson_focus","lessonScore","lesson_score","lessonScoreBreakdown","lesson_score_breakdown",
+    "evaluatedHomework","evaluatedHomeworkStatus","homework","homeworkStatus","homeworkCheckNote","homeworkCheckedAt","homeworkCheckedInRef",
+    "focusSection","focus_section","productiveWindow","productive_window","cognitiveMinutes",
+  ];
+  const result={...record};keys.forEach(key=>delete result[key]);
+  if(action === "undo_completion") result.done=false;
+  return result;
+}
+
+function makeupReversalReceipt(data, issue) {
+  const q=issue?.request,r=data?.receipt,s=data?.student,after=makeupReversalTarget(q?.target,q?.action);
+  if(!q || !after || data?.operationId!==q.operationId || r?.operationId!==q.operationId || r.actorUserId!==q.actorUserId
+    || r.branchId!==q.branchId || r.studentId!==q.studentId || programJSON(r.request)!==programJSON(q)
+    || r.recordVersion!==q.expectedRecordVersion+1 || !Number.isFinite(Date.parse(r.savedAt))
+    || programJSON(r.targetBefore)!==programJSON(q.target) || programJSON(r.targetAfter)!==programJSON(after)
+    || !Array.isArray(r.homeworkEffects) || r.homeworkEffects.length>1000
+    || (q.action === "clear_plan" && r.homeworkEffects.length)
+    || r.homeworkEffects.some(e=>!["schedule","telafi"].includes(e?.sourceKind) || !e.sourceId || e.before?.id!==e.sourceId || e.after?.id!==e.sourceId || !SINGLE_LESSON_MOVE_UUID.test(e.completionOperationId || ""))
+    || s?.id!==q.studentId || s.branch_id!==q.branchId || !Number.isInteger(s.record_version) || s.record_version<r.recordVersion
+    || !["schedule","telafi_records","odemeler","ek_dersler"].every(key=>Object.hasOwn(s,key) && (s[key]===null || Array.isArray(s[key])))) return false;
+  const hwKeys=["homeworkStatus","homeworkCheckNote","homeworkCheckedAt","homeworkCheckedInRef"];
+  const withoutChecks=record=>Object.fromEntries(Object.entries(record).filter(([key])=>!hwKeys.includes(key)));
+  if(r.homeworkEffects.some(effect=>programJSON(withoutChecks(effect.before))!==programJSON(withoutChecks(effect.after))))return false;
+  const records=(s.telafi_records || []).filter(record=>record?.id===q.makeupRecordId);
+  const finalEffects=new Map(r.homeworkEffects.map(effect=>[effect.sourceKind+"|"+effect.sourceId,effect]));
+  const effectsMatch=[...finalEffects.values()].every(effect=>{
+    const matches=(s[effect.sourceKind==="schedule"?"schedule":"telafi_records"] || []).filter(record=>record?.id===effect.sourceId);
+    return matches.length===1 && programJSON(matches[0])===programJSON(effect.after);
+  });
+  return s.record_version>r.recordVersion || (s.last_write_id===q.operationId && records.length===1 && programJSON(records[0])===programJSON(after) && effectsMatch);
+}
+
+function makeupReversalStoredIssue(actor) {
+  if(!actor) return null;
+  const raw=localStorage.getItem('sonsuz-makeup-reversal-v278:'+actor);if(!raw)return null;
+  const issue=JSON.parse(raw),q=issue?.request;
+  if(issue?.version!==1 || q?.actorUserId!==actor || !SINGLE_LESSON_MOVE_UUID.test(q.operationId || '')
+    || !SINGLE_LESSON_MOVE_UUID.test(q.studentId || '') || !SINGLE_LESSON_MOVE_UUID.test(q.branchId || '')
+    || !Number.isInteger(q.expectedRecordVersion) || q.expectedRecordVersion<0 || !q.makeupRecordId || q.target?.id!==q.makeupRecordId
+    || !makeupReversalTarget(q.target,q.action) || typeof q.reason!=="string" || q.reason.length>1000
+    || (q.action==='undo_completion' && !q.reason.trim())) throw new Error('MAKEUP_REVERSAL_LOCAL_EVIDENCE_INVALID');
+  return issue;
+}
+
+function makeupReversalErrorText(error) {
+  const message=String(error?.message || error || '');
+  if(error?.code==='PGRST202') return 'v278 telafi geri alma SQL kurulumu gerekli. Kayıt değiştirilmedi.';
+  if(/HOMEWORK|HISTORY_CHANGED/.test(message)) return 'Bu telafinin ödev veya değerlendirme bağlantısı sonradan değişmiş ya da doğrulanamamış. Diğer kayıtları korumak için geri alma yapılmadı.';
+  if(/PLAN_DATE_UNVERIFIED/.test(message)) return 'Bu telafinin kayıtlı plan günü ve saati doğrulanamadı. Tarih tahmin edilmedi; geri alma yapılmadı.';
+  if(/STALE_STUDENT|TARGET_CHANGED|ALREADY_COMPLETED|NOT_COMPLETED/.test(message)) return 'Öğrenci veya telafi durumu değişmiş. İşlem yapılmadı; güncel kaydı yeniden açın.';
+  if(/NOT_AUTHORIZED|UNAUTHORIZED|DELETED_STUDENT/.test(message)) return 'Bu öğrenci için telafi geri alma yetkisi doğrulanamadı. Kayıt değiştirilmedi.';
+  return 'Telafi geri alma kaydedilemedi. Sonucu üstteki uyarıdan kontrol edin; işlemi tekrar göndermeyin.';
+}
+
+function useMakeupReversal(options) {
+  const optionsRef=useRef(options);optionsRef.current=options;
+  const pending=useRef(null),writing=useRef(false),checking=useRef(false),held=useRef(false),mounted=useRef(false);
+  const[issue,setIssue]=useState(null),[busy,setBusy]=useState(false);
+  const hold=value=>{if(held.current!==value){held.current=value;optionsRef.current.onHold(value);}};
+  const show=value=>{pending.current=value;setIssue(value);hold(!!value);};
+  const scope=()=>[optionsRef.current.actor,optionsRef.current.branch,optionsRef.current.generation];
+  const current=(before,item)=>mounted.current && programJSON(scope())===programJSON(before) && pending.current?.request?.operationId===item.request.operationId;
+  const persist=item=>{
+    try {
+      const actor=item.request.actorUserId,existing=makeupReversalStoredIssue(actor);
+      if(existing && existing.request.operationId!==item.request.operationId) return false;
+      localStorage.setItem('sonsuz-makeup-reversal-v278:'+actor,JSON.stringify(item));
+      if(programJSON(makeupReversalStoredIssue(actor))!==programJSON(item))return false;
+      show(item);return true;
+    } catch {return false;}
+  };
+  const clear=item=>{
+    if(writing.current || checking.current || !['verified','not_applied'].includes(item?.state) || item.request?.actorUserId!==optionsRef.current.actor) return false;
+    try {
+      const stored=makeupReversalStoredIssue(item.request.actorUserId);
+      if(stored && stored.request.operationId!==item.request.operationId)return false;
+      localStorage.removeItem('sonsuz-makeup-reversal-v278:'+item.request.actorUserId);
+      if(makeupReversalStoredIssue(item.request.actorUserId))return false;
+      show(null);return true;
+    } catch {return false;}
+  };
+  const check=async(item=pending.current,knownRejected=false)=>{
+    const p=optionsRef.current;
+    if(!item?.request || item.invalid || checking.current || writing.current && item.state==='writing'
+      || item.request.actorUserId!==p.actor || !p.online)return false;
+    const before=scope();checking.current=true;setBusy(true);
+    try {
+      const result=await timedSingleLessonRequest(()=>p.client.rpc('read_makeup_reversal',{p_branch_id:item.request.branchId,p_operation_id:item.request.operationId}));
+      if(!current(before,item))return false;
+      if(result.error)throw result.error;
+      if(!result.data){persist({...item,state:knownRejected || item.state==='not_applied'?'not_applied':'unknown'});return false;}
+      if(!makeupReversalReceipt(result.data,item)){persist({...item,state:'conflict'});return false;}
+      if(p.branch===item.request.branchId)p.onSaved(result.data.student);
+      persist({...item,state:'verified'});return true;
+    } catch {if(current(before,item))persist({...item,state:'unknown'});return false;}
+    finally {
+      checking.current=false;if(mounted.current)setBusy(writing.current);
+      if(current(before,item) && !writing.current && pending.current?.state==='verified')clear(pending.current);
+    }
+  };
+  const reverse=async(prompt,reason='')=>{
+    const p=optionsRef.current;
+    if(!p.actor || !p.branch || !p.online || !p.canStart())return false;
+    if(!navigator.locks?.request){p.notify('Güvenli telafi geri alma için güncel tarayıcı gerekiyor; kayıt gönderilmedi.',8000);return false;}
+    const beforeLock=scope();
+    return navigator.locks.request('sonsuz-makeup-reversal:'+p.actor,{ifAvailable:true},async lock=>{
+      const p=optionsRef.current;
+      if(!lock || !mounted.current || programJSON(scope())!==programJSON(beforeLock) || !p.online || pending.current || writing.current || checking.current || !p.canStart())return false;
+      try {const saved=makeupReversalStoredIssue(p.actor);if(saved){show(saved);p.notify('Önce bekleyen telafi geri alma sonucunu kontrol edin.',8000);return false;}}
+      catch{show({invalid:true,state:'conflict'});return false;}
+      const student=p.students.find(s=>s.id===prompt?.studentId),records=(student?.telafi_records || []).filter(r=>r?.id===prompt?.record?.id);
+      if(!student || student.branch_id!==p.branch || prompt.scopeKey!==programJSON(beforeLock) || records.length!==1
+        || student.record_version!==prompt.recordVersion || programJSON(records[0])!==programJSON(prompt.record)
+        || !makeupReversalTarget(records[0],prompt.action)){
+        p.notify('Öğrenci, plan veya telafi durumu değişmiş ya da doğrulanamamış. İşlem gönderilmedi; güncel kaydı yeniden açın.',9000);return false;
+      }
+      const note=String(reason).trim();
+      if(note.length>1000 || (prompt.action==='undo_completion' && !note)){p.notify('Geri alma nedenini girin (en fazla 1000 karakter).',7000);return false;}
+      const request={actorUserId:p.actor,branchId:p.branch,studentId:student.id,makeupRecordId:records[0].id,expectedRecordVersion:student.record_version,
+        action:prompt.action,reason:note,target:records[0],operationId:uid()};
+      const item={version:1,request,label:(student.name || 'Öğrenci')+' · '+(prompt.action==='clear_plan'?'Planı Kaldır':'Tamamlamayı Geri Al'),state:'writing'};
+      if(!persist(item)){p.notify('İşlem bilgisi güvenli saklanamadı; kayıt gönderilmedi.',8000);return false;}
+      const before=scope();writing.current=true;setBusy(true);
+      try {
+        const result=await timedSingleLessonRequest(()=>p.client.rpc('reverse_makeup_record',{p_request:request}));
+        if(!current(before,item))return false;
+        if(!result.error && makeupReversalReceipt(result.data,item)){
+          p.onSaved(result.data.student);persist({...item,state:'verified'});p.notify(prompt.action==='clear_plan'?'Telafi planı kaldırıldı.':'Telafi tamamlaması geri alındı.');return true;
+        }
+        if(result.error?.code==='PGRST202'){persist({...item,state:'not_applied',message:makeupReversalErrorText(result.error)});p.notify(makeupReversalErrorText(result.error),9000);return false;}
+        const rejected=['22023','22P02','42501','40001','P0001','P0002','23502','23503','23505','23514','55P03','57014'].includes(result.error?.code);
+        persist({...item,state:'unknown',message:rejected?makeupReversalErrorText(result.error):''});
+        const verified=await check(pending.current,rejected);
+        if(verified)p.notify(prompt.action==='clear_plan'?'Telafi planı kaldırıldı.':'Telafi tamamlaması geri alındı.');
+        else p.notify(rejected?makeupReversalErrorText(result.error):'Sonuç henüz doğrulanmadı. Üstteki Yeniden Kontrol Et yalnız kaydı okur; işlemi tekrar göndermeyin.',9000);
+        return verified;
+      }catch{if(current(before,item)){persist({...item,state:'unknown'});p.notify('Sonuç henüz doğrulanmadı. İşlemi tekrar göndermeyin; üstteki kontrolü kullanın.',9000);}return false;}
+      finally{writing.current=false;if(mounted.current)setBusy(checking.current);if(current(before,item) && pending.current?.state==='verified')clear(pending.current);}
+    });
+  };
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;if(held.current){held.current=false;optionsRef.current.onHold(false);}};},[]);
+  useEffect(()=>{
+    const read=()=>{if(writing.current || checking.current)return;try{show(makeupReversalStoredIssue(optionsRef.current.actor));}catch{show({invalid:true,state:'conflict'});}};
+    try{show(makeupReversalStoredIssue(options.actor));}catch{show({invalid:true,state:'conflict'});}
+    setBusy(writing.current || checking.current);window.addEventListener('storage',read);window.addEventListener('focus',read);
+    return()=>{window.removeEventListener('storage',read);window.removeEventListener('focus',read);};
+  },[options.actor]);
+  return {reverse,check,clear,issue,busy,isPending:()=>!!pending.current || writing.current || checking.current};
+}
+
+function MakeupReversalSheet({ prompt, onClose, onConfirm }) {
+  const[reason,setReason]=useState(''),[saving,setSaving]=useState(false),[error,setError]=useState('');
+  const undo=prompt.action==='undo_completion',record=prompt.record;
+  const confirm=async()=>{
+    if(saving)return;
+    if(undo && !reason.trim()){setError('Geri alma nedenini yazın.');return;}
+    setSaving(true);setError('');
+    try{if(await onConfirm(reason)!==true)setError('İşlem tamamlanmadı. Bildirimi kontrol edin; kaydı güncel hâliyle yeniden açabilirsiniz.');}
+    finally{setSaving(false);}
+  };
+  return <Sheet title={undo?'Telafiyi Geri Al':'Telafi Planını Kaldır'} subtitle={prompt.studentName} onClose={()=>{if(!saving)onClose();}}>
+    <div data-makeup-reversal-control style={{textAlign:'left'}}>
+      <p style={{fontSize:13,color:'#475569'}}>{fmtDate(record.lessonDate)} dersinin telafisi</p>
+      <p style={{fontSize:13,fontWeight:800,color:'#7e22ce'}}>Kayıtlı plan: {fmtDate(telafiPlannedAt(record))} · {timeFromISO(telafiPlannedAt(record))}</p>
+      <p style={{fontSize:13,lineHeight:1.6,color:'#334155'}}>{undo?'Tamamlandı işareti geri alınacak. Kayıtlı gün ve saat korunacak; önceki sonuç bilgileri işlem geçmişinde saklanacak.':'Belirlenen telafi randevusu kaldırılacak. Telafi hakkı korunacak ve yeniden planlanabilecek.'}</p>
+      <p style={{fontSize:12,lineHeight:1.6,color:'#64748b'}}>Son geçerlilik tarihi değişmez: {record.expiry?fmtMed(record.expiry):'Belirtilmedi'}. Süresi bitmiş hak yeniden açılmaz.</p>
+      {undo?<><label style={LBL}>Geri Alma Nedeni</label><textarea aria-label="Geri Alma Nedeni" style={{...INP,minHeight:84,resize:"vertical"}} maxLength={1000} value={reason} onChange={event=>{setReason(event.target.value);setError('');}} placeholder="Örn: Yanlışlıkla tamamlandı olarak işaretledim" /></>:null}
+      {error?<p role="alert" style={{fontSize:12,color:'#b91c1c'}}>{error}</p>:null}
+      <Btn bg="#7e22ce" disabled={saving} onClick={confirm}>{saving?'Kaydediliyor…':undo?'Tamamlamayı Geri Al':'Planı Kaldır'}</Btn>
+      <Btn bg="#111" outline disabled={saving} onClick={onClose}>Vazgeç</Btn>
+    </div>
+  </Sheet>;
+}
+
+function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvaluationMessage, onReversal }) {
   const [rightMessageOpen, setRightMessageOpen] = useState(false);
   const plannedAt = telafiPlannedAt(record);
   const telafiCheckRef = homeworkCheckRef("telafi", record?.id);
@@ -4162,6 +4344,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
             <Btn bg="#10b981" onClick={() => setStep("attended")}>Telafi Verilerini Düzenle</Btn>
             <Btn bg="#25D366" onClick={() => onEvaluationMessage(record)}>WhatsApp Değerlendirmesini Tekrar Aç</Btn>
           </> : null}
+          {onReversal ? <Btn bg="#7e22ce" outline onClick={()=>onReversal(record,"undo_completion")}>Tamamlamayı Geri Al</Btn> : null}
           </>
         : step === "plan"
           ? <>
@@ -4265,6 +4448,7 @@ function TelafiSheet({ record, student, onClose, onSave, onPlanMessage, onEvalua
                   <Btn bg="#10b981" onClick={() => setStep("attended")}>Katıldı</Btn>
                   <Btn bg="#f97316" onClick={() => setStep("counted")}>Yapıldı Say</Btn>
                   <Btn bg="#6366f1" onClick={() => setStep("plan")}>Planı Düzenle</Btn>
+                  {onReversal ? <Btn bg="#7e22ce" outline onClick={()=>onReversal(record,"clear_plan")}>Planı Kaldır</Btn> : null}
                 </>
       }
     </Sheet>
@@ -4959,7 +5143,7 @@ function StudentTelafiList({ student, records, groups, currentQuota, onSelect })
   </div>;
 }
 
-function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onPieceAdd, onPieceEdit, pieceEditScope, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onPreviewProgram, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onTelafiReversal, onPieceAdd, onPieceEdit, pieceEditScope, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onPreviewProgram, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -5287,7 +5471,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
           </div>
         </AçılırBugünBölümü>
       </Sheet>
-      {telafiSel ? <TelafiSheet record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => onTelafiDone(student.id, id, payload)} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
+      {telafiSel ? <TelafiSheet onReversal={onTelafiReversal ? (record,action)=>{setTelafiSel(null);onTelafiReversal(student,record,action);} : undefined} record={telafiSel} student={student} onClose={() => setTelafiSel(null)} onSave={(id, payload) => onTelafiDone(student.id, id, payload)} onPlanMessage={(record) => { setTelafiSel(null); onTelafiPlanMessage(student, record); }} onEvaluationMessage={(record) => { setTelafiSel(null); onTelafiEvaluationMessage(student, record); }} /> : null}
       {shiftSel ? <ShiftSheet lesson={shiftSel} student={student} onClose={() => setShiftSel(null)} onShift={(lid, days) => { onShift(student.id, lid, days); setShiftSel(null); }} onMoveOne={(lid, date, time) => onMoveOne(student.id, lid, date, time)} /> : null}
       {showOdemeAl ? <OdemeAlSheet student={student} saving={paymentSavingId===student.id} onClose={() => setShowOdemeAl(false)} onÖdemeAl={onÖdemeAl} /> : null}
       {showPaketYukle ? <ÖdemeSheet student={student} onClose={() => setShowPaketYukle(false)} onÖdemeAl={async(sid, date, count, periodCount) => { const saved=await onRecharge(sid,date,count,periodCount); if(saved) {setShowPaketYukle(false);onClose();} return saved; }} onMesajGonder={onMesaj} /> : null}
@@ -10246,6 +10430,7 @@ export default function App() {
   const [lessonEvaluationPrompt, setLessonEvaluationPrompt] = useState(null);
   const [telafiMessagePrompt, setTelafiMessagePrompt] = useState(null);
   const [telafiPlanMessagePrompt, setTelafiPlanMessagePrompt] = useState(null);
+  const [makeupReversalPrompt,setMakeupReversalPrompt]=useState(null);
   const [periodEvaluationModal, setPeriodEvaluationModal] = useState(null);
   const [periodSummaryPrompt, setPeriodSummaryPrompt] = useState(null);
   const [periodCorrectionModal,setPeriodCorrectionModal]=useState(null);
@@ -10389,7 +10574,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const warnWhilePaymentIsWriting = event => {
-      if (!weeklyShift.isPending() && !programChangeWritingRef.current && !singleLessonMoveWritingRef.current && !extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !normalLessonMakeupCompletionWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
+      if (!makeupReversal.isPending() && !weeklyShift.isPending() && !programChangeWritingRef.current && !singleLessonMoveWritingRef.current && !extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !normalLessonMakeupCompletionWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -10830,6 +11015,7 @@ export default function App() {
   };
 
   const runBranchScopedWrite = async task => {
+    if(makeupReversal.isPending()) throw new Error("MAKEUP_REVERSAL_PENDING");
     if(weeklyShift.isPending()) throw new Error("WEEKLY_SHIFT_PENDING");
     if(programChangeIssueRef.current || programChangeWritingRef.current || readProgramChangeIssue(programChangeActorRef.current)) throw new Error("PROGRAM_CHANGE_PENDING");
     // Do not let a legacy full-row writer race an unresolved single move.
@@ -14815,6 +15001,31 @@ export default function App() {
       return true;
     },
   });
+  const makeupReversal=useMakeupReversal({
+    client:supabase,actor:authSession?.user?.id || "",branch:currentBranch?.id || "",generation:protectedDataLoadGenerationRef.current,
+    students,online:browserOnline && !connectionRevalidationRequired,notify:pop,
+    onHold:value=>{branchScopedWriteCountRef.current=Math.max(0,branchScopedWriteCountRef.current+(value?1:-1));},
+    onSaved:student=>setStudents(previous=>previous.map(s=>s.id===student.id && s.branch_id===student.branch_id && (s.record_version || 0)<=student.record_version ? student : s)),
+    canStart:()=>{
+      if(!requireProtectedSources(["students"],"Telafi geri alma")) return false;
+      if(branchScopedWriteCountRef.current || failedOps.length || programChangeIssueRef.current || programChangeWritingRef.current
+        || singleLessonMoveIssueRef.current || singleLessonMoveWritingRef.current || packagePaymentIssueRef.current || packagePaymentWritingRef.current
+        || extraLessonPaymentIssueRef.current || extraLessonPaymentWritingRef.current || normalLessonEvaluationIssueRef.current || normalLessonEvaluationWritingRef.current
+        || normalLessonMakeupIssueRef.current || normalLessonMakeupWritingRef.current || normalLessonMakeupPlanIssueRef.current || normalLessonMakeupPlanWritingRef.current
+        || normalLessonMakeupCompletionIssueRef.current || normalLessonMakeupCompletionWritingRef.current){pop("Önce devam eden veya sonucu bekleyen işlemi tamamlayın; Telafi geri alma gönderilmedi.",8000);return false;}
+      return true;
+    },
+  });
+  const handleMakeupReversal=(student,record,action)=>{
+    if(!requireProtectedSources(["students"],"Telafi geri alma") || makeupReversal.isPending()) return;
+    const current=students.find(s=>s.id===student.id),targets=(current?.telafi_records || []).filter(r=>r?.id===record?.id);
+    if(!current || current.branch_id!==currentBranch?.id || !authSession?.user?.id || targets.length!==1
+      || current.record_version!==student.record_version || programJSON(targets[0])!==programJSON(record) || !makeupReversalTarget(record,action)){
+      pop("Telafinin planı veya durumu doğrulanamadı. Güncel kaydı yeniden açın; tarih tahmin edilmedi.",8000);return;
+    }
+    setMakeupReversalPrompt({studentId:current.id,studentName:current.name,record:JSON.parse(JSON.stringify(record)),
+      recordVersion:current.record_version,action,scopeKey:programJSON([authSession.user.id,currentBranch.id,protectedDataLoadGenerationRef.current])});
+  };
   const handleShift = async (sid, fromLid, days) => weeklyShift.shift(sid,fromLid,days);
 
   const handleMoveOneLesson = async (sid, lid, date, time) => {
@@ -16348,6 +16559,10 @@ export default function App() {
   const visibleProgramChangeIssue=programChangeIssue?.actorUserId===authSession?.user?.id ? programChangeIssue : null;
   const visibleSingleLessonMoveIssue = singleLessonMoveIssue?.actorUserId === authSession?.user?.id ? singleLessonMoveIssue : null;
   const guardSingleLessonMoveInteraction = event => {
+    if(makeupReversal.isPending()) {
+      if(event.target.closest?.("[data-makeup-reversal-control],.crm-nav-btn,.crm-mobile-nav,.crm-branch-switch,.crm-desktop-logout,[data-crm-security]")) return;
+      event.preventDefault();event.stopPropagation();pop("Önce telafi geri alma sonucunu üstteki uyarıdan kontrol edin.",7000);return;
+    }
     if(weeklyShift.isPending()) {
       if(event.target.closest?.("[data-weekly-shift-control],.crm-nav-btn,.crm-mobile-nav,.crm-branch-switch,.crm-desktop-logout,[data-crm-security]")) return;
       event.preventDefault();event.stopPropagation();pop("Önce Shift sonucunu üstteki uyarıdan kontrol edin.",7000);return;
@@ -16692,6 +16907,13 @@ export default function App() {
           <p style={{fontSize:12}}>İşlem sonucu henüz doğrulanmadı. Yeniden Kontrol Et yalnız kayıtları okur; program değişikliğini tekrar göndermez.</p>
           <p style={{fontSize:12}}>{visibleProgramChangeIssue.label}</p>
           <button disabled={!browserOnline || programChangeChecking || programChangeWritingRef.current} onClick={()=>checkProgramChange(visibleProgramChangeIssue)}>{programChangeChecking ? "Kontrol Ediliyor…" : "Yeniden Kontrol Et"}</button>
+        </div> : null}
+        {makeupReversal.issue ? <div data-makeup-reversal-control role="alert" style={{background:"#fff7ed",border:"1.5px solid #fdba74",borderRadius:14,padding:"12px 14px",marginBottom:14}}>
+          <p style={{margin:"0 0 5px",fontSize:13,fontWeight:850,color:"#9a3412"}}>Telafi geri alma kontrolü</p>
+          <p style={{fontSize:12,color:"#9a3412",lineHeight:1.5}}>{makeupReversal.issue.message || (makeupReversal.issue.state==="not_applied" ? "Geri alma kaydedilmedi. Uyarıyı kapatıp güncel kaydı yeniden açabilirsiniz." : makeupReversal.issue.invalid || makeupReversal.issue.state==="conflict" ? "İşlem bilgisi doğrulanamadı. Kaydı korumak için işlemi tekrar göndermeyin; kontrol gerekiyor." : "Sonuç kontrol ediliyor. Yeniden Kontrol Et yalnız kaydı okur; geri alma işlemini tekrar göndermez.")}</p>
+          <p style={{fontSize:11,color:"#9a3412"}}>{makeupReversal.issue.label}</p>
+          <button type="button" disabled={makeupReversal.busy || !browserOnline || makeupReversal.issue.invalid} onClick={()=>makeupReversal.check()}>{makeupReversal.busy?"Kontrol Ediliyor…":"Yeniden Kontrol Et"}</button>
+          {makeupReversal.issue.state==="not_applied" ? <button type="button" disabled={makeupReversal.busy} onClick={()=>makeupReversal.clear(makeupReversal.issue)}>Uyarıyı Gördüm</button> : null}
         </div> : null}
         {weeklyShift.issue ? <div data-weekly-shift-control role="alert" style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:14,padding:14,marginBottom:14}}>
           <p style={{fontWeight:850}}>Shift kontrolü</p>
@@ -17244,7 +17466,8 @@ export default function App() {
       })() : null}
       {actionModal && actionModal.kind !== "telafi" ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} saving={normalLessonEvaluationBusyId===actionModal.lessonId || normalLessonMakeupBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current || normalLessonMakeupWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onPieceEdit={handlePieceHistoryUpdate} pieceEditScope={pieceEditScope} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onPreviewProgram={previewProgramChange} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiReversal={handleMakeupReversal} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onPieceEdit={handlePieceHistoryUpdate} pieceEditScope={pieceEditScope} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onPreviewProgram={previewProgramChange} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {makeupReversalPrompt && makeupReversalPrompt.scopeKey===programJSON([authSession?.user?.id || "",currentBranch?.id || "",protectedDataLoadGenerationRef.current]) ? <MakeupReversalSheet key={makeupReversalPrompt.action+"|"+makeupReversalPrompt.record.id} prompt={makeupReversalPrompt} onClose={()=>setMakeupReversalPrompt(null)} onConfirm={async reason=>{const saved=await makeupReversal.reverse(makeupReversalPrompt,reason);if(saved || makeupReversal.isPending())setMakeupReversalPrompt(null);return saved;}} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
