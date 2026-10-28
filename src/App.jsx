@@ -6667,6 +6667,216 @@ function TeacherCalendarPanel({students,teachers,singleLessons,branchId,branchNa
   </>;
 }
 
+// V275: new weekly Shift evidence; older Shift sources are never inferred.
+function weeklyShiftPlan(student, fromLessonId, days) {
+  if (!student || ![7,14].includes(days) || !Array.isArray(student.schedule)) return null;
+  const ids=student.schedule.map(l=>l?.id);
+  if (ids.some(id=>typeof id!=="string" || !id) || new Set(ids).size!==ids.length) return null;
+  const index=student.schedule.findIndex(l=>l.id===fromLessonId);
+  if (index<0) return null;
+  const changes=[];
+  let schedule;
+  try {
+    schedule=student.schedule.map((lesson,i)=>{
+      if(i<index || lesson.status!=="upcoming") return lesson;
+      const after={...lesson,date:addDays(lesson.date,days)};
+      changes.push({before:lesson,after});
+      return after;
+    });
+  } catch { return null; }
+  const position=lesson=>{
+    const date=calendarDayKey(lesson.date),time=calendarLessonTime(student,lesson);
+    return isValidLocalDateInput(date) && /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? date+"|"+time : null;
+  };
+  const actual=new Set(schedule.map(position)),sources=changes.map(c=>position(c.before));
+  if(actual.has(null) || sources.includes(null)) return null;
+  const vacancies=[...new Set(sources)].filter(key=>!actual.has(key)).sort().map(key=>({date:key.slice(0,10),time:key.slice(11)}));
+  return {schedule,changes,vacancies};
+}
+
+function weeklyShiftReceipt(data, issue) {
+  const r=data?.receipt,s=data?.student,q=issue?.request;
+  return !!(q && data.operationId===q.operationId && r?.operationId===q.operationId && r.actorUserId===q.actorUserId
+    && r.branchId===q.branchId && r.studentId===q.studentId && programJSON(r.request)===programJSON(q)
+    && r.recordVersion===q.expectedRecordVersion+1 && Number.isFinite(Date.parse(r.savedAt))
+    && programJSON(r.changes)===programJSON(issue.changes) && programJSON(r.vacancies)===programJSON(issue.vacancies)
+    && s?.id===q.studentId && s.branch_id===q.branchId && typeof s.name==="string" && Number.isInteger(s.record_version) && s.record_version>=r.recordVersion
+    && Array.isArray(s.schedule) && s.schedule.every(l=>l?.id && Number.isFinite(Date.parse(l.date))) && new Set(s.schedule.map(l=>l.id)).size===s.schedule.length
+    && ["odemeler","telafi_records","ek_dersler"].every(key=>Object.hasOwn(s,key) && (s[key]===null || Array.isArray(s[key])))
+    && (s.record_version>r.recordVersion || (s.weekly_shift_operation_id===q.operationId && programJSON(s.schedule)===programJSON(issue.schedule))));
+}
+
+function weeklyShiftStoredIssue(actor) {
+  if(!actor) return null;
+  const raw=localStorage.getItem('sonsuz-weekly-shift-v275:'+actor);
+  if(!raw) return null;
+  const issue=JSON.parse(raw),q=issue?.request;
+  if(issue?.version!==1 || q?.actorUserId!==actor || !SINGLE_LESSON_MOVE_UUID.test(q.operationId || '')
+    || !SINGLE_LESSON_MOVE_UUID.test(q.studentId || '') || !SINGLE_LESSON_MOVE_UUID.test(q.branchId || '')
+    || ![7,14].includes(q.days) || !Number.isInteger(q.expectedRecordVersion) || q.expectedRecordVersion<0
+    || !Array.isArray(q.changes) || !Array.isArray(issue.changes) || !Array.isArray(issue.vacancies) || !Array.isArray(issue.schedule)) throw new Error('WEEKLY_SHIFT_LOCAL_EVIDENCE_INVALID');
+  return issue;
+}
+
+function useWeeklyScheduleShift(options) {
+  const optionsRef=useRef(options);optionsRef.current=options;
+  const pending=useRef(null),writing=useRef(false),checking=useRef(false),held=useRef(false),mounted=useRef(false);
+  const [issue,setIssue]=useState(null),[busy,setBusy]=useState(false);
+  const hold=value=>{if(held.current!==value){held.current=value;optionsRef.current.onHold(value);}};
+  const show=value=>{pending.current=value;setIssue(value);hold(!!value);};
+  const scope=()=>[optionsRef.current.actor,optionsRef.current.branch,optionsRef.current.generation];
+  const current=(before,item)=>mounted.current && programJSON(scope())===programJSON(before)
+    && pending.current?.request?.operationId===item.request.operationId;
+  const persist=item=>{
+    try {
+      const actor=item.request.actorUserId,key='sonsuz-weekly-shift-v275:'+actor,existing=weeklyShiftStoredIssue(actor);
+      if(existing && existing.request.operationId!==item.request.operationId) return false;
+      localStorage.setItem(key,JSON.stringify(item));
+      if(programJSON(weeklyShiftStoredIssue(actor))!==programJSON(item)) return false;
+      show(item);return true;
+    } catch { return false; }
+  };
+  const clear=item=>{
+    if(writing.current || checking.current || item?.request?.actorUserId!==optionsRef.current.actor) return false;
+    try {
+      const existing=weeklyShiftStoredIssue(item.request.actorUserId);
+      if(existing && existing.request.operationId!==item.request.operationId) return false;
+      localStorage.removeItem('sonsuz-weekly-shift-v275:'+item.request.actorUserId);
+      if(weeklyShiftStoredIssue(item.request.actorUserId)) return false;
+      show(null);return true;
+    } catch { return false; }
+  };
+  const check=async(item=pending.current,knownRejected=false)=>{
+    const p=optionsRef.current;
+    if(!item?.request || item.invalid || checking.current || item.request.actorUserId!==p.actor || item.request.branchId!==p.branch || !p.online) return false;
+    const before=scope();checking.current=true;setBusy(true);
+    try {
+      const result=await timedSingleLessonRequest(()=>p.client.rpc('read_weekly_schedule_shift',{p_branch_id:item.request.branchId,p_operation_id:item.request.operationId}));
+      if(!current(before,item)) return false;
+      if(result.error) throw result.error;
+      if(!result.data) {
+        persist({...item,state:knownRejected || item.state==='not_applied'?'not_applied':'unknown'});
+        return false;
+      }
+      if(!weeklyShiftReceipt(result.data,item)) {persist({...item,state:'conflict'});return false;}
+      p.onSaved(result.data.student);
+      persist({...item,state:'verified'});
+      return true;
+    } catch {
+      if(current(before,item)) persist({...item,state:'unknown'});
+      return false;
+    } finally {
+      checking.current=false;
+      if(mounted.current)setBusy(writing.current);
+      if(current(before,item) && !writing.current && pending.current?.state==='verified') clear(pending.current);
+    }
+  };
+  const shift=async(studentId,fromLessonId,days)=>{
+    const p=optionsRef.current;
+    if(!p.actor || !p.branch) return false;
+    if(!p.online){p.notify("İnternet doğrulanmadan Shift kaydedilemez; kayıt gönderilmedi.",8000);return false;}
+    if(!p.canStart()) return false;
+    if(!navigator.locks?.request){p.notify('Güvenli Shift için güncel tarayıcı gerekiyor; kayıt gönderilmedi.',8000);return false;}
+    const beforeLock=scope();
+    return navigator.locks.request('sonsuz-weekly-shift:'+p.actor,{ifAvailable:true},async lock=>{
+      const p=optionsRef.current;
+      if(!mounted.current || programJSON(scope())!==programJSON(beforeLock) || !p.online || !lock || pending.current || writing.current || checking.current) return false;
+      if(!p.canStart()) return false;
+      try {const saved=weeklyShiftStoredIssue(p.actor);if(saved){show(saved);p.notify('Önce bekleyen Shift sonucunu üstteki uyarıdan kontrol edin.',8000);return false;}}
+      catch {show({invalid:true,state:'conflict'});return false;}
+      const student=p.students.find(s=>s.id===studentId),plan=weeklyShiftPlan(student,fromLessonId,days);
+      if(!plan || student.branch_id!==p.branch || !Number.isInteger(student.record_version) || student.record_version<0){p.notify('Ders ve güncel kayıt sürümü doğrulanamadı; Shift gönderilmedi.',8000);return false;}
+      const request={actorUserId:p.actor,branchId:p.branch,studentId,fromLessonId,days,expectedRecordVersion:student.record_version,operationId:uid(),
+        changes:plan.changes.map(c=>({lessonId:c.before.id,fromDate:c.before.date,toDate:c.after.date}))};
+      const item={version:1,request,changes:plan.changes,vacancies:plan.vacancies,schedule:plan.schedule,label:(student.name || "Öğrenci")+" · "+(days/7)+" hafta",state:'writing'};
+      if(!persist(item)){p.notify('Shift niyeti güvenli saklanamadı; kayıt gönderilmedi.',8000);return false;}
+      const before=scope();writing.current=true;setBusy(true);
+      try {
+        const result=await timedSingleLessonRequest(()=>p.client.rpc('shift_student_schedule',{p_request:request}));
+        if(!current(before,item)) return false;
+        if(!result.error && weeklyShiftReceipt(result.data,item)) {
+          p.onSaved(result.data.student);persist({...item,state:'verified'});p.notify((days/7)+' hafta ileri alındı');return true;
+        }
+        if(result.error?.code==='PGRST202') {
+          persist({...item,state:'not_applied'});p.notify('v275 Shift veritabanı kurulumu gerekli. Dersler kaydırılmadı.',9000);return false;
+        }
+        persist({...item,state:'unknown'});
+        const rejected=['22023','22P02','42501','40001','P0001','P0002','23502','23503','23505','23514','55P03','57014'].includes(result.error?.code);
+        const verified=await check(pending.current,rejected);
+        if(verified)p.notify((days/7)+' hafta ileri alındı');
+        else p.notify('Shift sonucu henüz doğrulanmadı. Üstteki Yeniden Kontrol Et yalnız kaydı okur; işlemi yeniden göndermeyin.',9000);
+        return verified;
+      } catch {
+        if(current(before,item)){persist({...item,state:'unknown'});p.notify('Shift sonucu henüz doğrulanmadı. İşlemi yeniden göndermeyin; üstteki kontrolü kullanın.',9000);}
+        return false;
+      } finally {
+        writing.current=false;
+        if(mounted.current)setBusy(checking.current);
+        if(current(before,item) && pending.current?.state==='verified')clear(pending.current);
+      }
+    });
+  };
+  useEffect(()=>{
+    mounted.current=true;
+    return()=>{mounted.current=false;if(held.current){held.current=false;optionsRef.current.onHold(false);}};
+  },[]);
+  useEffect(()=>{
+    const read=()=>{
+      if(writing.current || checking.current)return;
+      try {show(weeklyShiftStoredIssue(optionsRef.current.actor));}
+      catch {show({invalid:true,state:'conflict'});}
+    };
+    try {show(weeklyShiftStoredIssue(options.actor));} catch {show({invalid:true,state:'conflict'});}
+    setBusy(writing.current || checking.current);
+    window.addEventListener('storage',read);window.addEventListener('focus',read);
+    return()=>{window.removeEventListener('storage',read);window.removeEventListener('focus',read);};
+  },[options.actor]);
+  return {shift,check,clear,issue,busy,isPending:()=>!!pending.current || writing.current || checking.current};
+}
+
+async function readWeeklyShiftCalendar(client, students, scope, week, isCurrent=()=>true) {
+  if(!scope?.actorUserId || !scope.branchId) throw new Error('WEEKLY_SHIFT_READ_SCOPE_REQUIRED');
+  const records=[];
+  for(let i=0;i<students.length;i+=40){
+    const batch=students.slice(i,i+40);
+    if(!isCurrent() || batch.some(s=>s.branch_id!==scope.branchId)) throw new Error('WEEKLY_SHIFT_SCOPE_CHANGED');
+    const result=await timedSingleLessonRequest(()=>client.rpc('read_weekly_shift_calendar',{p_branch_id:scope.branchId,p_week:week,
+      p_students:batch.map(s=>({id:s.id,recordVersion:s.record_version,operationId:s.weekly_shift_operation_id}))}));
+    if(!isCurrent()) return null;
+    const data=result.data;
+    if(result.error || data?.actorUserId!==scope.actorUserId || data.branchId!==scope.branchId || data.week!==week || !Array.isArray(data.students)
+      || data.students.length!==batch.length || new Set(data.students.map(r=>r?.studentId)).size!==batch.length) throw new Error('WEEKLY_SHIFT_UNVERIFIED_CALENDAR');
+    for(const student of batch){
+      const row=data.students.find(r=>r?.studentId===student.id);
+      if(!row || row.branchId!==student.branch_id || row.recordVersion!==student.record_version || row.operationId!==student.weekly_shift_operation_id
+        || !Array.isArray(row.vacancies) || row.vacancies.length>1000) throw new Error('WEEKLY_SHIFT_UNVERIFIED_CALENDAR');
+      const keys=row.vacancies.map(v=>v?.date+'|'+v?.time);
+      if(new Set(keys).size!==keys.length || row.vacancies.some(v=>!isValidLocalDateInput(v?.date) || v.date<week || v.date>=turkeyDateKey(calendarAddDays(week,7)) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(v?.time || ''))) throw new Error('WEEKLY_SHIFT_UNVERIFIED_CALENDAR');
+      records.push(row);
+    }
+  }
+  return records;
+}
+
+function useWeeklyShiftCalendar(students, scope, offset) {
+  const selected=students.filter(s=>s.weekly_shift_operation_id && !s.frozen && !isStudentLeft(s));
+  const week=calendarDayKey(calendarWeekDays(new Date(),offset)[0]);
+  const key=JSON.stringify([scope,week,selected.map(s=>[s.id,s.branch_id,s.record_version,s.weekly_shift_operation_id])]);
+  const current=useRef(key);current.current=key;
+  const [result,setResult]=useState(null),[retry,setRetry]=useState(0);
+  useEffect(()=>{
+    let cancelled=false;const valid=()=>!cancelled && current.current===key;
+    if(!selected.length){setResult(null);return()=>{cancelled=true;};}
+    setResult({key,state:'loading',records:[]});
+    readWeeklyShiftCalendar(supabase,selected,scope,week,valid).then(records=>{if(valid() && records)setResult({key,state:'ready',records});})
+      .catch(()=>{if(valid())setResult({key,state:'error',records:[]});});
+    return()=>{cancelled=true;};
+  },[key,retry]);
+  const state=selected.length?(result?.key===key?result.state:'loading'):'';
+  const keys=new Map(state==='ready'?result.records.map(r=>[r.studentId,new Set(r.vacancies.map(v=>v.date+'|'+v.time))]):[]);
+  return {state,keys,retry:()=>setRetry(value=>value+1)};
+}
+
 function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "", calendarTeacher=null, calendarTeachers=[], calendarMoveReadScope=null, availabilityOpen=false, onAvailabilityClose=()=>{} }) {
   students = students.filter(student=>!isStudentDeleted(student));
   const ownerFor=(student,date=null,item=null)=>calendarTeacherOwner(calendarTeacherReference(student,date,item),calendarTeachers);
@@ -6710,6 +6920,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   },[programReadKey,programReadRetry]);
   const programReadState=programStudents.length ? (programReadResult?.key===programReadKey ? programReadResult.state : "loading") : "";
   const programRecords=programReadResult?.key===programReadKey && programReadResult.state==="ready" ? programReadResult.records : [];
+  const weeklyShiftCalendar=useWeeklyShiftCalendar(students.filter(s=>!calendarTeacher || ownerFor(s)===calendarTeacher.id),calendarMoveReadScope,offset);
   const now = new Date();
   const days = calendarWeekDays(now,offset);
   const closureControl=useCalendarClosures(calendarMoveReadScope,calendarTeacher,calendarDayKey(days[0]),'dated',!!calendarTeacher,JSON.stringify([students,singleLessons,calendarTeachers]));
@@ -6738,6 +6949,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     return owner===calendarTeacher.id;
   };
   if(programReadState && programReadState!=="ready") availabilityInvalid=true;
+  if(weeklyShiftCalendar.state && weeklyShiftCalendar.state!=="ready") availabilityInvalid=true;
   const observeAvailability = (date,time,duration,kind) => {
     if (!availabilityOpen || kind==="telafi-slot") return;
     const interval = calendarAvailabilityInterval(date,time,duration);
@@ -6836,6 +7048,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       if (actualKeys.has(dayIndex+"|"+slot.time)) return;
       if (movedSourceKeys.has(turkeyDateKey(slotDate)+"|"+slot.time)) return;
       if (timeline.sourceKeys.includes(turkeyDateKey(slotDate)+"|"+slot.time)) return;
+      if (weeklyShiftCalendar.keys.get(student.id)?.has(turkeyDateKey(slotDate)+"|"+slot.time)) return;
       observeAvailability(slotDate,slot.time,getLessonDuration(student),packageEnded?"package-ended":"normal");
       addItem({
         key:"slot-"+student.id+"-"+slotIndex+"-"+calendarDayKey(slotDate),
@@ -6976,6 +7189,9 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
         {programReadState==="error" ? <button onClick={()=>setProgramReadRetry(value=>value+1)}>Yalnız takvimi yeniden kontrol et</button> : null}
       </div> : null}
       <p className="week-calendar-v66-scroll-hint">Diğer günleri görmek için takvimi yana kaydırın.</p>
+      {weeklyShiftCalendar.state && weeklyShiftCalendar.state!=="ready" ? <div role="status" style={{padding:12,marginBottom:10,color:weeklyShiftCalendar.state==="error"?"#9a3412":"#77717d",background:weeklyShiftCalendar.state==="error"?"#fff7ed":"transparent",fontSize:12}}>
+        {weeklyShiftCalendar.state==="error" ? <>Shift ile boşalan saatler doğrulanamadı. Veriler değiştiyse sayfayı yenileyin. <button type="button" onClick={weeklyShiftCalendar.retry}>Yeniden Kontrol Et</button></> : "Shift ile boşalan saatler kontrol ediliyor…"}
+      </div> : null}
       <div className="week-calendar-v66" role="region" aria-label="Haftalık ders takvimi" tabIndex={0}>
         <div className="week-calendar-v66-grid">
           <div className="week-calendar-v66-corner" style={{ gridColumn:1, gridRow:1, background:"#fbfaf9", borderRight:"1px solid #d1d5db", borderBottom:"1px solid #d1d5db", zIndex:2 }} />
@@ -7007,7 +7223,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
           </div>)}
         </div>
       </div>
-      {availabilityOpen ? <CalendarAvailabilitySheet key={JSON.stringify([calendarMoveReadScope,calendarTeacher?.id,offset])} closureControl={closureControl} teacherName={calendarTeacher?.name || ""} teacherIssue={teacherUnresolved} days={days} intervals={availabilityIntervals} invalid={availabilityInvalid} moveReadState={programReadState && programReadState!=="ready" ? programReadState : moveReadState} onRetry={()=>{setMoveReadRetry(value=>value+1);setProgramReadRetry(value=>value+1);}} onClose={onAvailabilityClose} recipients={calendarAvailabilityRecipients(students,calendarMoveReadScope?.branchId)} /> : null}
+      {availabilityOpen ? <CalendarAvailabilitySheet key={JSON.stringify([calendarMoveReadScope,calendarTeacher?.id,offset])} closureControl={closureControl} teacherName={calendarTeacher?.name || ""} teacherIssue={teacherUnresolved} days={days} intervals={availabilityIntervals} invalid={availabilityInvalid} moveReadState={weeklyShiftCalendar.state && weeklyShiftCalendar.state!=="ready" ? weeklyShiftCalendar.state : programReadState && programReadState!=="ready" ? programReadState : moveReadState} onRetry={()=>{weeklyShiftCalendar.retry();setMoveReadRetry(value=>value+1);setProgramReadRetry(value=>value+1);}} onClose={onAvailabilityClose} recipients={calendarAvailabilityRecipients(students,calendarMoveReadScope?.branchId)} /> : null}
     </div>
   );
 }
@@ -10149,7 +10365,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const warnWhilePaymentIsWriting = event => {
-      if (!programChangeWritingRef.current && !singleLessonMoveWritingRef.current && !extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !normalLessonMakeupCompletionWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
+      if (!weeklyShift.isPending() && !programChangeWritingRef.current && !singleLessonMoveWritingRef.current && !extraLessonPaymentWritingRef.current && !packagePaymentWritingRef.current && !normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonMakeupPlanWritingRef.current && !normalLessonMakeupCompletionWritingRef.current && !branchLifecycleWritingRef.current && !staffInvitationWritingRef.current && !staffActivationWritingRef.current && !staffAssignmentWritingRef.current && !staffDeactivationWritingRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -10590,6 +10806,7 @@ export default function App() {
   };
 
   const runBranchScopedWrite = async task => {
+    if(weeklyShift.isPending()) throw new Error("WEEKLY_SHIFT_PENDING");
     if(programChangeIssueRef.current || programChangeWritingRef.current || readProgramChangeIssue(programChangeActorRef.current)) throw new Error("PROGRAM_CHANGE_PENDING");
     // Do not let a legacy full-row writer race an unresolved single move.
     if (singleLessonMoveIssueRef.current || singleLessonMoveWritingRef.current || readSingleLessonMoveIssue(singleLessonMoveActorRef.current)) throw new Error("SINGLE_LESSON_MOVE_PENDING");
@@ -14559,17 +14776,22 @@ export default function App() {
     }
   };
 
-  const handleShift = async (sid, fromLid, days) => {
-    const updated = students.map(s => {
-      if (s.id!==sid) return s;
-      const idx = s.schedule.findIndex(l=>l.id===fromLid);
-      if (idx===-1) return s;
-      return {...s, schedule: s.schedule.map((l,i) => i>=idx && l.status==="upcoming" ? {...l, date:addDays(l.date,days)} : l)};
-    });
-    setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
-    pop((days/7)+" hafta ileri alındı");
-  };
+  const weeklyShift=useWeeklyScheduleShift({
+    client:supabase,actor:authSession?.user?.id || "",branch:currentBranch?.id || "",generation:protectedDataLoadGenerationRef.current,
+    students,online:browserOnline && !connectionRevalidationRequired,notify:pop,
+    onHold:value=>{branchScopedWriteCountRef.current=Math.max(0,branchScopedWriteCountRef.current+(value?1:-1));},
+    onSaved:student=>setStudents(previous=>previous.map(s=>s.id===student.id && s.branch_id===student.branch_id && (s.record_version || 0)<=student.record_version ? student : s)),
+    canStart:()=>{
+      if(!requireProtectedSources(["students"],"Shift")) return false;
+      if(branchScopedWriteCountRef.current || failedOps.length || programChangeIssueRef.current || programChangeWritingRef.current
+        || singleLessonMoveIssueRef.current || singleLessonMoveWritingRef.current || packagePaymentIssueRef.current || packagePaymentWritingRef.current
+        || extraLessonPaymentIssueRef.current || extraLessonPaymentWritingRef.current || normalLessonEvaluationIssueRef.current || normalLessonEvaluationWritingRef.current
+        || normalLessonMakeupIssueRef.current || normalLessonMakeupWritingRef.current || normalLessonMakeupPlanIssueRef.current || normalLessonMakeupPlanWritingRef.current
+        || normalLessonMakeupCompletionIssueRef.current || normalLessonMakeupCompletionWritingRef.current){pop("Önce devam eden veya sonucu bekleyen işlemi tamamlayın; Shift gönderilmedi.",8000);return false;}
+      return true;
+    },
+  });
+  const handleShift = async (sid, fromLid, days) => weeklyShift.shift(sid,fromLid,days);
 
   const handleMoveOneLesson = async (sid, lid, date, time) => {
     if (!requireProtectedSources(["students"],"Ders taşıma") || !browserOnline || connectionRevalidationRequired) return false;
@@ -16102,6 +16324,10 @@ export default function App() {
   const visibleProgramChangeIssue=programChangeIssue?.actorUserId===authSession?.user?.id ? programChangeIssue : null;
   const visibleSingleLessonMoveIssue = singleLessonMoveIssue?.actorUserId === authSession?.user?.id ? singleLessonMoveIssue : null;
   const guardSingleLessonMoveInteraction = event => {
+    if(weeklyShift.isPending()) {
+      if(event.target.closest?.("[data-weekly-shift-control],.crm-nav-btn,.crm-mobile-nav,.crm-branch-switch,.crm-desktop-logout,[data-crm-security]")) return;
+      event.preventDefault();event.stopPropagation();pop("Önce Shift sonucunu üstteki uyarıdan kontrol edin.",7000);return;
+    }
     if(visibleProgramChangeIssue || programChangeWritingRef.current) {
       if(event.target.closest?.("[data-program-change-control],.crm-nav-btn,.crm-mobile-nav,.crm-branch-switch,.crm-desktop-logout,[data-crm-security]")) return;
       event.preventDefault();event.stopPropagation();pop("Önce program değişikliği sonucunu üstteki uyarıdan kontrol edin.",7000);return;
@@ -16442,6 +16668,13 @@ export default function App() {
           <p style={{fontSize:12}}>İşlem sonucu henüz doğrulanmadı. Yeniden Kontrol Et yalnız kayıtları okur; program değişikliğini tekrar göndermez.</p>
           <p style={{fontSize:12}}>{visibleProgramChangeIssue.label}</p>
           <button disabled={!browserOnline || programChangeChecking || programChangeWritingRef.current} onClick={()=>checkProgramChange(visibleProgramChangeIssue)}>{programChangeChecking ? "Kontrol Ediliyor…" : "Yeniden Kontrol Et"}</button>
+        </div> : null}
+        {weeklyShift.issue ? <div data-weekly-shift-control role="alert" style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:14,padding:14,marginBottom:14}}>
+          <p style={{fontWeight:850}}>Shift kontrolü</p>
+          <p style={{fontSize:12}}>{weeklyShift.issue.label || "Shift bilgisi"}</p>
+          <p style={{fontSize:12}}>{weeklyShift.issue.state==="not_applied" ? "Shift kaydedilmedi. Uyarıyı kapatıp güncel kayıtla yeniden işlem yapabilirsiniz." : weeklyShift.issue.invalid || weeklyShift.issue.state==="conflict" ? "Shift bilgisi doğrulanamadı. İşlemi yeniden göndermeyin; kayıt kontrolü gerekiyor." : "Shift sonucu kontrol ediliyor. Yeniden Kontrol Et yalnız kaydı okur; dersleri tekrar kaydırmaz."}</p>
+          <button type="button" disabled={weeklyShift.busy || !browserOnline || weeklyShift.issue.invalid} onClick={()=>weeklyShift.check()}>{weeklyShift.busy ? "Kontrol Ediliyor…" : "Yeniden Kontrol Et"}</button>
+          {weeklyShift.issue.state==="not_applied" ? <button type="button" disabled={weeklyShift.busy} onClick={()=>weeklyShift.clear(weeklyShift.issue)}>Uyarıyı Gördüm</button> : null}
         </div> : null}
         {visibleSingleLessonMoveIssue ? (
           <div role="alert" data-single-lesson-move-control style={{ background:"#fff7ed",border:"1.5px solid #fdba74",borderRadius:14,padding:"12px 14px",marginBottom:14 }}>
