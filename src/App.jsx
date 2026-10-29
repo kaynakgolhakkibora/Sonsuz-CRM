@@ -5725,6 +5725,14 @@ function msgTekDersHatirlatma(lesson) {
 function msgTelafiHakki(student, record) {
   const lessonText = record?.lessonDate ? fmtMed(record.lessonDate)+" tarihli dersiniz" : "Dersiniz";
   const expiryText = record?.expiry ? fmtMed(record.expiry) : "asıl ders tarihinden itibaren 30 gün";
+  if (isQuotaExemptMakeup(record)) {
+    const reasonText = record.cancellationReason === "health" ? "Sağlık problemi" : "Olumsuz hava koşulları";
+    const cancelledLessonText = record?.lessonDate ? lessonText : "dersiniz";
+    const validityText = record?.expiry
+      ? "Telafi hakkınızı 30 gün içinde, "+expiryText+" tarihine kadar kullanabilirsiniz."
+      : "Telafi hakkınız, asıl ders tarihinden itibaren 30 gün geçerlidir.";
+    return "Merhaba,\n\n"+reasonText+" nedeniyle iptal edilen "+cancelledLessonText+" için telafi hakkı oluşturulmuştur.\n\nBu telafi, yıllık normal telafi hakkınızdan düşülmemiştir.\n\n"+validityText+"\n\nUygunluk oluştuğunda telafi dersi planlaması için sizinle iletişime geçeceğiz.\n\nBodrum Sonsuz Sanat";
+  }
   const exceptionText = isManagerTelafiException(record) ? "\n\nBu telafi hak dönemindeki 6 normal telafi hakkınız dolmuş olmasına rağmen, bildirilen durum kurum yönetimi tarafından değerlendirilmiş ve yönetici inisiyatifiyle istisnai bir telafi hakkı tanımlanmıştır." : "";
   return "Merhaba,\n\n"+lessonText+" için telafi hakkı oluşturulmuştur."+exceptionText+" Telafi hakkınızı 30 gün içinde, "+expiryText+" tarihine kadar kullanabilirsiniz.\n\nUygunluk oluştuğunda telafi dersi planlaması için sizinle iletişime geçeceğiz.\n\nBodrum Sonsuz Sanat";
 }
