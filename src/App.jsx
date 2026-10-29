@@ -2946,8 +2946,9 @@ function normalLessonMakeupSuccessMessage(actionKind, createdRecord, quotaNormal
   if (isQuotaExemptMakeup(createdRecord)) return "Telafi hakkı oluşturuldu · Normal kotadan düşmedi";
   const managerException = createdRecord?.managerException === true || createdRecord?.manager_exception === true;
   if (managerException) return actionKind === "lm-telafi" ? "Yönetici inisiyatifiyle son dakika telafisi oluşturuldu" : "Yönetici inisiyatifiyle telafi oluşturuldu";
-  if (Number(quotaNormalCount) === 6) return "6/6 telafi hakkı doldu";
-  if (Number(quotaNormalCount) === 5) return "5. telafi uyarisi";
+  const quotaNotice=normalMakeupQuotaNotice(Number(quotaNormalCount));
+  if (quotaNotice?.kind==='last') return "Son normal telafi hakkı kullanıldı · Kalan hak: 0";
+  if (quotaNotice?.kind==='penultimate') return "Telafi hakkı oluşturuldu · 1 normal telafi hakkı kaldı";
   return actionKind === "lm-telafi" ? "Son dakika + telafi kaydedildi" : "Telafi oluşturuldu";
 }
 
@@ -3867,8 +3868,9 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
   useEffect(()=>setCancellationReason(""),[student.id,lessonId]);
   const quotaRecordsForLesson = telafiRecordsWithoutLesson(student.telafi_records, lesson);
   const telafiQuota = telafiQuotaInfo(student, lesson?.date || new Date(), quotaRecordsForLesson);
-  const willWarn = quotaApplies && telafiQuota.count === 4;
-  const willFill = quotaApplies && telafiQuota.count === 5;
+  const quotaAfter=quotaApplies && Number.isSafeInteger(telafiQuota.count) ? normalMakeupQuotaNotice(telafiQuota.count+1) : null;
+  const willWarn = quotaAfter?.kind==='penultimate';
+  const willFill = quotaAfter?.kind==='last';
   const needsException = quotaApplies && telafiQuota.count !== null && telafiQuota.count >= 6;
   const storedScoreValue = lesson?.lessonScore ?? lesson?.lesson_score;
   const correctionRequired = !!lesson && ((lesson.status || "upcoming") !== "upcoming" || (storedScoreValue !== null && storedScoreValue !== undefined && String(storedScoreValue).trim() !== ""));
@@ -3883,8 +3885,9 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
 
   const TelafiWarn = () => (
     <>
-      {willWarn && <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#92400e", fontWeight:600 }}>Uyarı: Bu telafi ile 5. hakka ulaşılacak.</div>}
-      {willFill && <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#9a3412", fontWeight:700 }}>Bilgi: Bu telafi ile öğrencinin normal hakkı 6/6 dolacak. Program devam eder; sonraki telafiler yönetici inisiyatifi gerektirir.</div>}
+      {quotaAfter ? <p style={{margin:"0 0 12px",fontSize:13,color:"#475569",lineHeight:1.6}}>Kullanılacak normal hak: {quotaAfter.used}/{quotaAfter.limit} · İşlemden sonra kalan normal hak: {quotaAfter.remaining}</p> : null}
+      {willWarn && <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#92400e", fontWeight:600 }}>Bu işlemden sonra öğrencinin 1 normal telafi hakkı kalacak.</div>}
+      {willFill && <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#9a3412", fontWeight:700 }}>Bu işlemle öğrencinin son normal telafi hakkı kullanılacak. İşlemden sonra normal telafi hakkı kalmayacak.</div>}
       {needsException && <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#9a3412", fontWeight:700 }}>Bu telafi hak döneminin normal kotası 6/6 dolu. Devam ederseniz ayrıca yönetici inisiyatifi onayı istenir.</div>}
       {telafiQuota.count === null && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, color:"#991b1b", fontWeight:700 }}>Derse başlangıç tarihi eksik olduğu için telafi hak dönemi hesaplanamıyor. Tarihi öğrenci düzenleme ekranından girin.</div>}
     </>
@@ -5722,7 +5725,62 @@ function msgTekDersHatirlatma(lesson) {
   }
   return "Günaydın :) Bugünkü "+mode+(lesson?.instrument || "müzik")+(lesson?.participant_kind === "guest" ? " dersinizin saati " : " tek dersimizin saati ")+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
 }
-function msgTelafiHakki(student, record) {
+// V285: display-only policy mapping; v281 server quota remains authoritative.
+function normalMakeupNoticeLimit(policyVersion=281) {
+  return policyVersion === 281 ? 6 : null;
+}
+function normalMakeupQuotaNotice(used, limit=normalMakeupNoticeLimit()) {
+  if (!Number.isSafeInteger(limit) || limit<1 || !Number.isSafeInteger(used) || used<0 || used>limit) return null;
+  const remaining=limit-used;
+  return {limit,used,remaining,kind:remaining===1?'penultimate':remaining===0?'last':null};
+}
+function normalMakeupNoticeEligible(record) {
+  return record?.cancellationPolicyVersion===281 && record.cancellationReason==='other'
+    && record.quotaExempt===false && !isManagerTelafiException(record);
+}
+function normalMakeupNoticeEvidence(student,record,row) {
+  const created=row?.created_makeup_record,request=row?.request_payload;
+  const limit=normalMakeupNoticeLimit(request?.policyVersion ?? null);
+  const state=normalMakeupQuotaNotice(row?.quota_normal_count_after,limit);
+  const sourceDate=record?.lessonDate ? turkeyDateKey(new Date(record.lessonDate)) : '';
+  if (!normalMakeupNoticeEligible(record) || !normalMakeupNoticeEligible(created) || !state
+    || !SINGLE_LESSON_MOVE_UUID.test(student?.id || '') || !SINGLE_LESSON_MOVE_UUID.test(student?.branch_id || '')
+    || !SINGLE_LESSON_MOVE_UUID.test(record?.id || '') || !SINGLE_LESSON_MOVE_UUID.test(row?.actor_user_id || '')
+    || row.operation_id!==record.id || row.student_id!==student.id || row.branch_id!==student.branch_id || row.lesson_id!==record.lessonId
+    || typeof record.lessonId!=='string' || !record.lessonId.trim() || !Number.isFinite(Date.parse(record.createdAt || ''))
+    || !/^\d{4}-\d{2}-\d{2}$/.test(record.expiry || '') || !Array.isArray(student.telafi_records)
+    || created.id!==record.id || created.lessonId!==record.lessonId || created.lessonDate!==record.lessonDate
+    || created.expiry!==record.expiry || created.createdAt!==record.createdAt
+    || row.manager_exception!==false || !['created','corrected'].includes(row.operation_kind) || !['telafi','lm-telafi'].includes(row.action_kind)
+    || request.policyVersion!==record.cancellationPolicyVersion || request.cancellationReason!=='other'
+    || request.studentId!==student.id || request.lessonId!==record.lessonId || request.actionKind!==row.action_kind
+    || !Number.isSafeInteger(row.quota_normal_count_before) || row.quota_normal_count_before<0
+    || row.quota_normal_count_before+1!==state.used
+    || !/^\d{4}-\d{2}-\d{2}$/.test(row.quota_period_start || '') || !/^\d{4}-\d{2}-\d{2}$/.test(row.quota_period_end || '')
+    || !sourceDate || sourceDate<row.quota_period_start || sourceDate>row.quota_period_end
+    || (student.telafi_records || []).filter(item=>item.id===record.id && item.lessonId===record.lessonId).length!==1) return null;
+  return Object.freeze({...state,operationId:record.id,studentId:student.id,branchId:student.branch_id,lessonId:record.lessonId,policyVersion:request.policyVersion});
+}
+async function readNormalMakeupQuotaNotice(student,record) {
+  if (!normalMakeupNoticeEligible(record)) return null;
+  if (!SINGLE_LESSON_MOVE_UUID.test(student?.id || '') || !SINGLE_LESSON_MOVE_UUID.test(student?.branch_id || '') || !SINGLE_LESSON_MOVE_UUID.test(record?.id || '')) throw new Error('MAKEUP_NOTICE_UNVERIFIED');
+  const result=await timedSingleLessonRequest(()=>supabase.from('normal_lesson_makeup_operations')
+    .select('operation_id,student_id,branch_id,lesson_id,operation_kind,action_kind,manager_exception,request_payload,created_makeup_record,quota_normal_count_before,quota_normal_count_after,quota_period_start,quota_period_end,actor_user_id')
+    .eq('operation_id',record.id).eq('student_id',student.id).eq('branch_id',student.branch_id).maybeSingle());
+  const notice=!result.error && normalMakeupNoticeEvidence(student,record,result.data);
+  if (!notice) throw new Error('MAKEUP_NOTICE_UNVERIFIED');
+  return notice;
+}
+function normalMakeupQuotaMessage(student,record,notice) {
+  if (!normalMakeupNoticeEligible(record) || !notice || notice.operationId!==record.id || notice.studentId!==student?.id
+    || notice.branchId!==student?.branch_id || notice.lessonId!==record.lessonId || notice.policyVersion!==record.cancellationPolicyVersion) return '';
+  const state=normalMakeupQuotaNotice(notice.used,normalMakeupNoticeLimit(notice.policyVersion));
+  if (!state || state.limit!==notice.limit || state.remaining!==notice.remaining || state.kind!==notice.kind) return '';
+  return state.kind==='penultimate' ? 'Bu telafiyle birlikte, mevcut telafi hakkı döneminiz için 1 normal telafi hakkınız kalmıştır.'
+    : state.kind==='last' ? 'Bu telafiyle birlikte, mevcut telafi hakkı döneminizdeki normal telafi haklarınızın tamamı kullanılmıştır.' : '';
+}
+
+function msgTelafiHakki(student, record, quotaNotice=null) {
   const lessonText = record?.lessonDate ? fmtMed(record.lessonDate)+" tarihli dersiniz" : "Dersiniz";
   const expiryText = record?.expiry ? fmtMed(record.expiry) : "asıl ders tarihinden itibaren 30 gün";
   if (isQuotaExemptMakeup(record)) {
@@ -5733,6 +5791,8 @@ function msgTelafiHakki(student, record) {
       : "Telafi hakkınız, asıl ders tarihinden itibaren 30 gün geçerlidir.";
     return "Merhaba,\n\n"+reasonText+" nedeniyle iptal edilen "+cancelledLessonText+" için telafi hakkı oluşturulmuştur.\n\nBu telafi, yıllık normal telafi hakkınızdan düşülmemiştir.\n\n"+validityText+"\n\nUygunluk oluştuğunda telafi dersi planlaması için sizinle iletişime geçeceğiz.\n\nBodrum Sonsuz Sanat";
   }
+  const quotaText=normalMakeupQuotaMessage(student,record,quotaNotice);
+  if (quotaText) return "Merhaba,\n\n"+lessonText+" için telafi hakkı oluşturulmuştur. Telafi hakkınızı 30 gün içinde, "+expiryText+" tarihine kadar kullanabilirsiniz.\n\n"+quotaText+"\n\nBodrum Sonsuz Sanat";
   const exceptionText = isManagerTelafiException(record) ? "\n\nBu telafi hak dönemindeki 6 normal telafi hakkınız dolmuş olmasına rağmen, bildirilen durum kurum yönetimi tarafından değerlendirilmiş ve yönetici inisiyatifiyle istisnai bir telafi hakkı tanımlanmıştır." : "";
   return "Merhaba,\n\n"+lessonText+" için telafi hakkı oluşturulmuştur."+exceptionText+" Telafi hakkınızı 30 gün içinde, "+expiryText+" tarihine kadar kullanabilirsiniz.\n\nUygunluk oluştuğunda telafi dersi planlaması için sizinle iletişime geçeceğiz.\n\nBodrum Sonsuz Sanat";
 }
@@ -6545,8 +6605,22 @@ function DondurmaMesajSheet({ student, onClose, onSent }) {
 }
 
 function TelafiHakkiMesajSheet({ student, record, onClose, onSent }) {
-  const text = msgTelafiHakki(student, record);
+  const eligible=normalMakeupNoticeEligible(record);
+  const quotaKey=programJSON([student?.id,student?.branch_id,student?.record_version,record?.id,record?.lessonId,record?.createdAt,record?.lessonDate,record?.expiry,record?.cancellationPolicyVersion,record?.cancellationReason,record?.quotaExempt,isManagerTelafiException(record)]);
+  const [quotaState,setQuotaState]=useState({key:quotaKey,status:eligible?'loading':'ready',notice:null});
+  const [quotaRetry,setQuotaRetry]=useState(0);
+  useEffect(()=>{
+    let alive=true;
+    if (!eligible) {setQuotaState({key:quotaKey,status:'ready',notice:null});return ()=>{alive=false;};}
+    setQuotaState({key:quotaKey,status:'loading',notice:null});
+    readNormalMakeupQuotaNotice(student,record).then(notice=>{if(alive)setQuotaState({key:quotaKey,status:'ready',notice});})
+      .catch(()=>{if(alive)setQuotaState({key:quotaKey,status:'error',notice:null});});
+    return ()=>{alive=false;};
+  },[quotaKey,quotaRetry]);
+  const ready=!eligible || quotaState.key===quotaKey && quotaState.status==='ready';
+  const text = msgTelafiHakki(student, record,eligible && ready?quotaState.notice:null);
   const send = async () => {
+    if (!ready) return;
     const phone = calendarAvailabilityPhone(student.phone);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
     else await navigator.clipboard.writeText(text);
@@ -6554,11 +6628,14 @@ function TelafiHakkiMesajSheet({ student, record, onClose, onSent }) {
   };
   return (
     <Sheet title="Veliye Bilgi Ver" subtitle={student.name+" · Telafi hakkı oluşturuldu"} onClose={onClose}>
-      <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
+      {!ready ? <div role={quotaState.key===quotaKey && quotaState.status==='error'?'alert':'status'} style={{marginBottom:14,fontSize:13,lineHeight:1.6}}>
+        {quotaState.key===quotaKey && quotaState.status==='error' ? <>Telafi hak bilgisi doğrulanamadı. Mesajı açmadan önce yeniden kontrol edin.<Btn bg="#111" outline onClick={()=>setQuotaRetry(value=>value+1)}>Yeniden Kontrol Et</Btn></> : 'Telafi hak bilgisi kontrol ediliyor…'}
+      </div> : null}
+      {ready ? <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
         <p style={{ margin:0, fontSize:12, color:"#1e3a8a", lineHeight:1.65, whiteSpace:"pre-line" }}>{text}</p>
-      </div>
+      </div> : null}
       <p style={{ margin:"0 0 12px", fontSize:12, color:"#64748b" }}>Telafi hakkı veritabanına kaydedildi. Mesajı şimdi veliye gönderebilirsiniz.</p>
-      <Btn bg="#25D366" onClick={send}>{calendarAvailabilityPhone(student.phone) ? "WhatsApp'tan Gönder" : "Mesajı Kopyala"}</Btn>
+      <Btn bg="#25D366" onClick={send} disabled={!ready}>{calendarAvailabilityPhone(student.phone) ? "WhatsApp'tan Gönder" : "Mesajı Kopyala"}</Btn>
       <Btn bg="#111" outline onClick={onClose}>Şimdi Değil</Btn>
     </Sheet>
   );
@@ -16753,7 +16830,6 @@ export default function App() {
   });
 
   const stats = { total:operationalStudents.length, active:operationalStudents.filter(s=>!s.frozen && !isStudentLeft(s)).length, frozen:operationalStudents.filter(s=>s.frozen && !isStudentLeft(s)).length, left:operationalStudents.filter(isStudentLeft).length, telafi:operationalStudents.filter(s=>s.telafi_records.some(isCurrentTelafi)).length, odeme:todayPayments.length };
-  const telafiWarnList = operationalStudents.filter(s => telafiQuotaInfo(s).count===5 && !s.frozen);
   const pendingMonthlyReports = monthlyReports.filter(report=>!report.downloadedAt);
   const branchOptions = accessBranchOptions(accessContext);
   const selectableBranchOptions = branchOptions.filter(option=>option.selectable);
@@ -17510,12 +17586,6 @@ export default function App() {
         {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} singleLessons={singleLessons} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /></> : null}
         {mainTab === "liste" ? (
           <div>
-            {telafiWarnList.length > 0 ? (
-              <div style={{ background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
-                <p style={{ margin:0, fontWeight:700, fontSize:13, color:"#92400e" }}>Telafi limitine yaklaşan öğrenciler:</p>
-                {telafiWarnList.map(s=>(<p key={s.id} style={{ margin:"4px 0 0", fontSize:13, color:"#78350f" }}>· {s.name} 5/6 telafi</p>))}
-              </div>
-            ) : null}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8, marginBottom:14 }}>
               {[
                 { key:"all", label:"Toplam", val:stats.total, bg:"#fff", color:"#111" },
