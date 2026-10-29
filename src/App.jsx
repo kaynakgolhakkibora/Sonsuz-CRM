@@ -6964,7 +6964,7 @@ function CalendarClosureCell({cell,mode,editing,selection,onSelection,disabled=f
   };
   return <button type="button" className={'crm-closure-cell '+className} style={{...(closed?calendarClosureStyle(closed):{}),fontFamily:'inherit',borderRadius:8,padding:'10px 3px',fontWeight:700,...(!closed?{border:'1px solid #d8dce4',background:cell.busy?'#f3f0f2':'#e4f5ed',color:cell.busy?'#74656d':'#217653'}:{})}}
     disabled={!editing && !wrongSource || disabled && !wrongSource || cell.busy && !closed} aria-label={cell.date+' '+cell.time+' '+label} aria-pressed={editing?selection.includes(cell.key):undefined} onClick={click}>
-    <span style={{textDecoration:cell.busy && !closed?'line-through':undefined}}>{cell.time}</span>{closed?<small style={{display:'block',fontSize:9,marginTop:3}}>Kapalı</small>:null}
+    <span style={{textDecoration:cell.busy && !closed?'line-through':undefined}}>{cell.time}</span>
   </button>;
 }
 
