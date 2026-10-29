@@ -1306,12 +1306,31 @@ function singleLessonMoveIntent(student, lessonId, targetDate, targetTime) {
     || (Object.hasOwn(lesson,"time") && lesson.time !== source.time)
     || !isValidLocalDateInput(targetDate) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(targetTime || "")
     || !Number.isInteger(student.record_version) || student.record_version < 0
-    || source.localDate < turkeyDateKey() || targetDate < turkeyDateKey()
     || (source.localDate === targetDate && source.time === targetTime)) return null;
   return {
     studentId:student.id, lessonId, expectedRecordVersion:student.record_version,
     expectedDate:lesson.date, expectedTime:source.time, targetDate, targetTime,
   };
+}
+
+function singleLessonMoveMessageMatches(issue, row, student) {
+  if (!singleLessonMoveEvidenceMatches(issue,row) || student?.id !== issue.requestPayload.studentId
+    || student.branch_id !== issue.branchId || student.deleted_at || !Array.isArray(student.schedule)
+    || (student.status_history != null && !Array.isArray(student.status_history)) || isStudentDeleted(student)
+    || !Number.isInteger(student.record_version) || student.record_version < row.resulting_record_version) return false;
+  const targets=(student.schedule || []).filter(lesson=>lesson.id===row.lesson_id);
+  const lesson=targets.length===1 ? targets[0] : null,after=row.target_after;
+  return !!lesson && lesson.status==='upcoming' && lesson.date===after.date && lesson.time===after.time
+    && programJSON(lesson.packageId)===programJSON(after.packageId)
+    && programJSON(lesson.packageLessonCount)===programJSON(after.packageLessonCount)
+    && programJSON(lesson.calendarMove)===programJSON(after.calendarMove);
+}
+
+function msgSingleLessonMoved(operation) {
+  const before=singleLessonMovePosition(operation?.target_before?.date),after=singleLessonMovePosition(operation?.target_after?.date);
+  if(!before || !after)return '';
+  const format=position=>new Intl.DateTimeFormat('tr-TR',{timeZone:'Europe/Istanbul',day:'numeric',month:'long',year:'numeric',weekday:'long'}).format(new Date(position.date))+' · '+position.time;
+  return 'Merhaba,\n\nDersinizin tarih ve saati güncellenmiştir.\n\nÖnceki tarih: '+format(before)+'\nYeni tarih: '+format(after)+'\n\nBodrum Sonsuz Sanat';
 }
 
 function readSingleLessonMoveIssue(actorUserId) {
@@ -6489,6 +6508,35 @@ function TelafiHakkiMesajSheet({ student, record, onClose, onSent }) {
   );
 }
 
+function SingleLessonMoveMesajSheet({ prompt, onVerify, onClose, onSent }) {
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const busyRef=useRef(false),alive=useRef(true),popup=useRef(null);
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;try{popup.current?.close();}catch{}};},[]);
+  const text=msgSingleLessonMoved(prompt.operation),phone=calendarAvailabilityPhone(prompt.student.phone);
+  const send=async()=>{
+    if(busyRef.current || !text)return;
+    busyRef.current=true;setBusy(true);setError('');
+    try{
+      if(phone){popup.current=window.open('about:blank','_blank');if(!popup.current)throw Error('Tarayıcı yeni pencereyi engelledi.');popup.current.opener=null;}
+      const verified=await onVerify();
+      if(!alive.current)return;
+      if(!verified?.data || !verified.isCurrent?.())throw Error(verified?.message || 'Güncel ders taşıması doğrulanamadı. Mesaj hazırlanmadı.');
+      const fresh=verified.data,verifiedPhone=calendarAvailabilityPhone(fresh.student.phone),verifiedText=msgSingleLessonMoved(fresh.operation);
+      if(!verifiedText || verifiedPhone!==phone)throw Error('Ders veya telefon bilgisi değişmiş. Mesaj hazırlanmadı.');
+      if(phone){if(!popup.current || popup.current.closed)throw Error('Mesaj penceresi kapatıldı.');popup.current.location.replace('https://wa.me/'+phone+'?text='+encodeURIComponent(verifiedText));popup.current=null;}
+      else await navigator.clipboard.writeText(verifiedText);
+      if(alive.current && verified.isCurrent())onSent(phone?'whatsapp':'copied');
+    }catch(e){try{popup.current?.close();}catch{}popup.current=null;if(alive.current)setError(e?.message || 'Mesaj hazırlanamadı.');}
+    finally{busyRef.current=false;if(alive.current)setBusy(false);}
+  };
+  return <Sheet title="Ders Taşımasını Bildir" subtitle={prompt.student.name} onClose={()=>{if(!busyRef.current)onClose();}}>
+    <div style={{background:'#f0f9ff',border:'1px solid #bae6fd',borderRadius:12,padding:'12px 14px',marginBottom:14}}><p style={{margin:0,fontSize:13,color:'#0f172a',lineHeight:1.65,whiteSpace:'pre-line',overflowWrap:'anywhere'}}>{text}</p></div>
+    {error ? <p role="alert" style={{fontSize:12,color:'#b91c1c'}}>{error}</p> : null}
+    <Btn bg="#25D366" disabled={busy || !text} onClick={send}>{busy?'Kontrol Ediliyor…':phone?"WhatsApp'tan Gönder":"Mesajı Kopyala"}</Btn>
+    <Btn bg="#111" outline disabled={busy} onClick={onClose}>Şimdi Değil</Btn>
+  </Sheet>;
+}
+
 function TelafiPlanMesajSheet({ student, record, onClose, onSent, onVerify }) {
   const [busy,setBusy]=useState(false),[error,setError]=useState('');
   const busyRef=useRef(false),alive=useRef(true),popup=useRef(null);
@@ -10479,6 +10527,7 @@ export default function App() {
   const [lessonEvaluationPrompt, setLessonEvaluationPrompt] = useState(null);
   const [telafiMessagePrompt, setTelafiMessagePrompt] = useState(null);
   const [telafiPlanMessagePrompt, setTelafiPlanMessagePrompt] = useState(null);
+  const [singleLessonMoveMessagePrompt, setSingleLessonMoveMessagePrompt] = useState(null);
   const [makeupReversalPrompt,setMakeupReversalPrompt]=useState(null);
   const [periodEvaluationModal, setPeriodEvaluationModal] = useState(null);
   const [periodSummaryPrompt, setPeriodSummaryPrompt] = useState(null);
@@ -15026,6 +15075,8 @@ export default function App() {
       // Write handler keeps its lock until finally; clearing there is deferred.
       if (singleLessonMoveWritingRef.current) persistSingleLessonMoveIssue({ ...issue,state:"verified" });
       else if (!clearSingleLessonMoveIssue(issue)) persistSingleLessonMoveIssue({ ...issue,state:"applied_pending_refresh" });
+      if(singleLessonMoveMessageMatches(issue,evidence.data,savedStudent))setSingleLessonMoveMessagePrompt({issue,operation:evidence.data,student:savedStudent,
+        scopeKey:programJSON([issue.actorUserId,issue.branchId,generation])});
       if (options.notify !== false) pop("Ders taşıması Supabase'de doğrulandı ve ekran yenilendi.",7000);
       return { ok:true, applied:true, student:savedStudent };
     } catch {
@@ -15089,6 +15140,17 @@ export default function App() {
     setMakeupReversalPrompt({studentId:current.id,studentName:current.name,record:JSON.parse(JSON.stringify(record)),
       recordVersion:current.record_version,action,scopeKey:programJSON([authSession.user.id,currentBranch.id,protectedDataLoadGenerationRef.current])});
   };
+  const verifySingleLessonMoveMessage=async prompt=>{
+    if(!requireProtectedSources(["students"],"Ders taşıma mesajı") || !browserOnline || connectionRevalidationRequired)return null;
+    const actor=singleLessonMoveActorRef.current,branch=prompt.issue.branchId,generation=protectedDataLoadGenerationRef.current;
+    const isCurrent=()=>actor===singleLessonMoveActorRef.current && branch===paymentReceiptScopeRef.current?.branchId
+      && generation===protectedDataLoadGenerationRef.current && prompt.scopeKey===programJSON([actor,branch,generation]);
+    if(!isCurrent())return null;
+    const result=await timedSingleLessonRequest(()=>supabase.rpc("read_single_lesson_move_message",{
+      p_operation_id:prompt.issue.operationId,p_student_id:prompt.issue.requestPayload.studentId}));
+    if(result.error || !isCurrent() || !singleLessonMoveMessageMatches(prompt.issue,result.data?.operation,result.data?.student))return {message:'Dersin güncel konumu doğrulanamadı veya değişmiş. Mesaj hazırlanmadı.'};
+    return {data:result.data,isCurrent};
+  };
   const handleShift = async (sid, fromLid, days) => weeklyShift.shift(sid,fromLid,days);
 
   const handleMoveOneLesson = async (sid, lid, date, time) => {
@@ -15114,7 +15176,7 @@ export default function App() {
         const intent = singleLessonMoveIntent(sourceStudent,lid,date,time);
         if (!intent || !branchId || sourceStudent.branch_id !== branchId || generation !== protectedDataLoadGenerationRef.current
           || actorUserId !== singleLessonMoveActorRef.current) {
-          pop("Ders konumu doğrulanamadı. Yalnız bugün/gelecekteki planlı ders için farklı geçerli tarih ve saat seçin; kayıt gönderilmedi.",9000);
+          pop("Ders konumu doğrulanamadı. Planlandı durumundaki ders için farklı, geçerli bir tarih ve saat seçin; kayıt gönderilmedi.",9000);
           return false;
         }
         if (programChangeIssueRef.current || programChangeWritingRef.current || branchScopedWriteCountRef.current || packagePaymentWritingRef.current || packagePaymentIssueRef.current
@@ -17533,6 +17595,7 @@ export default function App() {
       {makeupReversalPrompt && makeupReversalPrompt.scopeKey===programJSON([authSession?.user?.id || "",currentBranch?.id || "",protectedDataLoadGenerationRef.current]) ? <MakeupReversalSheet key={makeupReversalPrompt.action+"|"+makeupReversalPrompt.record.id} prompt={makeupReversalPrompt} onClose={()=>setMakeupReversalPrompt(null)} onConfirm={async reason=>{const saved=await makeupReversal.reverse(makeupReversalPrompt,reason);if(saved || makeupReversal.isPending())setMakeupReversalPrompt(null);return saved;}} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet onVerify={()=>verifyMakeupPlanMessage(telafiPlanMessagePrompt.student,telafiPlanMessagePrompt.record)} student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
+      {singleLessonMoveMessagePrompt?.scopeKey===programJSON([authSession?.user?.id || "",currentBranch?.id || "",protectedDataLoadGenerationRef.current]) ? <SingleLessonMoveMesajSheet key={singleLessonMoveMessagePrompt.scopeKey+singleLessonMoveMessagePrompt.issue.operationId} prompt={singleLessonMoveMessagePrompt} onVerify={()=>verifySingleLessonMoveMessage(singleLessonMoveMessagePrompt)} onClose={()=>setSingleLessonMoveMessagePrompt(null)} onSent={result=>{setSingleLessonMoveMessagePrompt(null);pop(result==='copied'?'Ders taşıma mesajı kopyalandı':"Ders taşıma mesajı WhatsApp'ta hazırlandı");}} /> : null}
       {showAdd ? <AddSheet teachers={teachers} onClose={()=>setShowAdd(false)} onAdd={handleAdd} /> : null}
       {mainTab==='tekders' && showSinglePeople ? <SingleLessonPeopleSheet key={paymentReceiptScopeKey} scope={paymentReceiptScopeRef.current} isCurrent={key=>paymentReceiptScopeRef.current.key===key && paymentReceiptScopeRef.current.ready} teachers={teachers} lessons={singleLessons} onBusy={busy=>{branchScopedWriteCountRef.current=Math.max(0,branchScopedWriteCountRef.current+(busy?1:-1));}} onClose={()=>setShowSinglePeople(false)} onChoose={person=>{setShowSinglePeople(false);setSingleLessonSheet({mode:'add',person});}} onOpenLesson={lesson=>{setShowSinglePeople(false);setSingleLessonSheet({mode:'edit',lesson});}} />:null}
       {dailySingleLessonActions && dailySingleLessonActionLesson && !activePaymentReceipt ? <DailySingleLessonActionsSheet key={dailySingleLessonActions.scopeKey+dailySingleLessonActions.id} lesson={dailySingleLessonActionLesson} busy={!!singleLessonBusyIds[dailySingleLessonActionLesson.id]} blocked={!!dailySingleLessonActionBlocked} onAction={(lesson,action)=>handleDailySingleLessonAction(lesson,action,dailySingleLessonActions.scopeKey)} onClose={()=>setDailySingleLessonActions(null)} /> : null}
