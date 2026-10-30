@@ -6327,7 +6327,7 @@ function paymentReceivedReceipt(kind, row, operationId) {
       }
     }
     if (!name || typeof phone!=="string") return null;
-    const text=["Merhaba,",body,"Ödeme tarihi: "+paidOn,"Teşekkür ederiz.","Bodrum Sonsuz Sanat"].join("\n");
+    const text=["Merhaba,",body,"Ödeme tarihi: "+paidOn,"Teşekkür ederiz.","","Bodrum Sonsuz Sanat"].join("\n");
     const recipient={name,phone:calendarAvailabilityPhone(phone)};
     return {key:kind+"|"+operationId,kind,operationId,recordId:row.id,branchId:row.branch_id,recipient,text,
       signature:JSON.stringify([kind,row.id,row.branch_id,operationId,recipient,text])};
