@@ -8941,8 +8941,8 @@ function BugünTekDersleri({ lessons, onWA, onReminderToggle, onOpen, onAction, 
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent?"Hatırlatma gönderildi":"Hatırlatma bekliyor"} · {singleLessonBillingLabel(lesson.billing_status)}</p>
           </div>
           <div style={{ display:"flex", flexWrap:"wrap", justifyContent:"flex-end", gap:6, marginLeft:"auto" }}>
-            {lesson.participant_phone ? <button disabled={busy} onClick={()=>onWA(lesson)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:10, padding:"7px 12px", fontSize:13, fontWeight:700, cursor:busy?"wait":"pointer", opacity:busy?.6:1 }}>WA</button> : null}
             {onAction ? <button type="button" disabled={busy || actionsDisabled} onClick={()=>onAction(lesson)} aria-label={lesson.participant_name+" için işlem"} style={{ background:"#fff", color:"#6d28d9", border:"1px solid #ddd6fe", borderRadius:10, padding:"7px 10px", fontSize:12, fontWeight:800, cursor:busy?"wait":"pointer", opacity:busy || actionsDisabled?.6:1 }}>İşlem</button> : null}
+            {lesson.participant_phone ? <button disabled={busy} onClick={()=>onWA(lesson)} style={{ background:"#25D366", color:"#fff", border:"none", borderRadius:10, padding:"7px 12px", fontSize:13, fontWeight:700, cursor:busy?"wait":"pointer", opacity:busy?.6:1 }}>WA</button> : null}
             <button disabled={busy} onClick={()=>onReminderToggle(lesson,!sent)} style={{ background:sent?"#dcfce7":"#fff", color:sent?"#166534":"#475569", border:"1px solid #ddd6fe", borderRadius:10, padding:"7px 10px", fontSize:12, fontWeight:700, cursor:busy?"wait":"pointer", opacity:busy?.6:1 }}>{sent?"Geri Al":"İşaretle"}</button>
           </div>
         </div>;
