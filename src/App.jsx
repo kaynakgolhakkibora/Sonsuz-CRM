@@ -1400,6 +1400,7 @@ function singleLessonMoveEvidenceMatches(issue, row) {
 }
 
 function singleLessonMoveKnownRejection(error) {
+  if (bookingKnownRejection(error)) return true;
   return /^SINGLE_LESSON_MOVE_(NOT_AUTHORIZED|INVALID_INPUT|INVALID_TARGET_DATE|STUDENT_NOT_FOUND|STALE_STUDENT|INVALID_SCHEDULE|LESSON_NOT_FOUND|AMBIGUOUS_LESSON|PROCESSED_LESSON|UNKNOWN_SOURCE_POSITION|SOURCE_POSITION_MISMATCH|PAST_LESSON|NO_CHANGE|SOURCE_EVIDENCE_CONFLICT|UNVERIFIED_SOURCE_EVIDENCE|INVALID_SCHEDULE_DATES)$/.test(String(error?.message || ""));
 }
 
@@ -1607,6 +1608,181 @@ function singleLessonIssueMessage(issue) {
   return "Tek Ders kayıtları yüklenemedi. Ekrandaki Tek Ders bilgileri eksik veya eski olabilir.";
 }
 
+// V287: shared interpretation of authoritative booking refusals; no optimistic success.
+function bookingKnownRejection(error) {
+  return error?.code === '23P01' || (/^BOOKING_/.test(String(error?.message || '')) && !/OPERATION_CONFLICT|IMMUTABLE/.test(String(error.message)));
+}
+function bookingErrorReport(error) {
+  if (!bookingKnownRejection(error)) return null;
+  try { const report=JSON.parse(error.details || '{}');if(Array.isArray(report.conflicts))return report; } catch {}
+  return {conflicts:[],warnings:[],unverified:true};
+}
+function bookingAnnounce(error) {
+  const report=bookingErrorReport(error);
+  if(report && typeof window!=='undefined')window.dispatchEvent(new CustomEvent('sonsuz-booking-refusal',{detail:report}));
+}
+function bookingConflictText(item) {
+  const kinds={normal:'normal ders',makeup:'telafi',extra:'ek ders',single:'tek ders',trial:'deneme dersi',reservation:'korunan haftalık yer',closure:'kapalı saat'};
+  const day=item.date ? calendarDateLabel(item.date,{day:'numeric',month:'long',year:'numeric'}) : 'Haftalık program';
+  return day+' · '+item.time+' · '+(item.permanent?'Kalıcı yer uygun değil. ':'')+(item.sameBranch===false?'Aynı öğretmenin başka şubedeki zamanı dolu.':(kinds[item.otherKind] || 'başka kayıt')+' ile çakışıyor.');
+}
+function bookingApplyOverrides(plan,overrides) {
+  const changes=new Map(overrides.map(x=>[x.index,x]));
+  const byId=new Map(plan.lessons.map((l,i)=>[l.id,{lesson:l,index:i}]));
+  return {...plan.student,schedule:plan.student.schedule.map(l=>{
+    const original=byId.get(l.id),choice=original && changes.get(original.index);
+    return choice ? {...l,date:calendarWallDate(choice.date,choice.time).toISOString(),time:choice.time,day:DAYS[(new Date(choice.date+'T12:00:00').getDay()+6)%7]} : l;
+  })};
+}
+function BookingWarningSheet({report,onClose}) {
+  return <Sheet title="Ders kaydedilmedi" onClose={onClose}>
+    <p role="alert" style={{color:'#991b1b',lineHeight:1.6}}>Dolu veya kapalı saate kayıt yapılamaz. Önceki kayıtlar korundu.</p>
+    {report.conflicts?.length ? <ul style={{paddingLeft:20,lineHeight:1.7}}>{report.conflicts.map((c,i)=><li key={i}>{bookingConflictText(c)}</li>)}</ul>
+      : <p>Saatlerin doluluğu doğrulanamadı. Güncel kayıtları ve bağlantıyı kontrol edin; işlem tamamlanmadı.</p>}
+    <Btn bg="#111" onClick={onClose}>Anladım</Btn>
+  </Sheet>;
+}
+function BookingPlanSheet({plan,onCheck,onConfirm,onClose}) {
+  const [overrides,setOverrides]=useState([]),[report,setReport]=useState(plan.initialReport || null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+  const sequence=useRef(0),alive=useRef(true);
+  const change=(index,key,value)=>{
+    sequence.current++;setReport(null);setError('');
+    setOverrides(prev=>{
+      const original=plan.lessons[index],parts=singleLessonMovePosition(original.date),current=prev.find(x=>x.index===index) || {index,date:parts.localDate,time:parts.time};
+      const next={...current,[key]:value};return [...prev.filter(x=>x.index!==index),next].filter(x=>x.date!==singleLessonMovePosition(plan.lessons[x.index].date).localDate || x.time!==singleLessonMovePosition(plan.lessons[x.index].date).time);
+    });
+  };
+  const check=async choices=>{
+    const token=++sequence.current;setBusy(true);setError('');setReport(null);
+    try {const result=await onCheck(choices);if(alive.current && token===sequence.current)setReport(result);}
+    catch(e){if(alive.current && token===sequence.current)setError(e.message || 'Doluluk kontrol edilemedi.');}
+    finally {if(alive.current && token===sequence.current)setBusy(false);}
+  };
+  useEffect(()=>{alive.current=true;if(!plan.initialReport)void check([]);return()=>{alive.current=false;sequence.current++;};},[]);
+  const hard=report?.conflicts || [];
+  return <Sheet title="Ders Saatlerini Kontrol Et" subtitle={plan.student.name+' · '+studentTeacherName(plan.student)+' · '+studentScheduleLabel(plan.student)} onClose={()=>{if(!busy)onClose();}}>
+    <p style={{fontSize:13,lineHeight:1.6}}>Haftalık yer korunur. Başka tarih seçmeniz yalnız ilgili dersi değiştirir.</p>
+    {plan.lessons.map((lesson,index)=>{
+      const choice=overrides.find(x=>x.index===index),parts=singleLessonMovePosition(lesson.date),date=choice?.date || parts.localDate,time=choice?.time || parts.time;
+      const conflicts=hard.filter(x=>x.lessonId===lesson.id);
+      return <fieldset key={lesson.id} disabled={busy} style={{border:'1px solid '+(conflicts.length?'#fca5a5':'#e5e7eb'),borderRadius:12,padding:12,margin:'12px 0',minWidth:0}}>
+        <legend>{index+1}. ders{choice?' · Tarihi değiştirildi':''}</legend>
+        <label style={LBL}>Tarih</label><DatePickerField dateLabel={(index+1)+'. ders tarihi'} style={INP} value={date} onChange={e=>change(index,'date',e.target.value)} />
+        <label style={LBL}>Saat</label><select aria-label={(index+1)+'. ders saati'} style={INP} value={time} onChange={e=>change(index,'time',e.target.value)}>{[...new Set([...TIMES,time])].map(t=><option key={t}>{t}</option>)}</select>
+        {conflicts.map((c,i)=><p key={i} role="alert" style={{fontSize:12,color:'#b91c1c'}}>{bookingConflictText(c)}</p>)}
+      </fieldset>;
+    })}
+    {hard.filter(x=>!x.lessonId || !plan.lessons.some(l=>l.id===x.lessonId)).map((c,i)=><p key={i} role="alert" style={{color:'#b91c1c'}}>{bookingConflictText(c)}</p>)}
+    {report?.warnings?.length ? <div style={{background:'#fffbeb',padding:12,borderRadius:12,fontSize:12,lineHeight:1.7}}>
+      <strong>İleri tarihli doluluklar</strong><p>Bu haftalık yerde önceden kaydedilmiş randevular var. Oluşturulan derslerle çakışanları şimdi düzeltin. Sonraki paketlere denk gelenler, o dersler oluşturulurken yeniden kontrol edilecek.</p>
+      <ul style={{paddingLeft:18}}>{report.warnings.map((c,i)=><li key={i}>{bookingConflictText(c)}</li>)}</ul>
+    </div>:null}
+    {error ? <p role="alert" style={{color:'#b91c1c'}}>{error}</p>:null}
+    {report && !hard.length ? <p role="status" style={{color:'#166534'}}>Oluşturulacak derslerde çakışma bulunmadı. Kayıt anında tekrar kontrol edilecek.</p>:null}
+    <Btn bg="#6366f1" disabled={busy} onClick={()=>check(overrides)}>{busy?'Kontrol ediliyor…':'Saatleri Yeniden Kontrol Et'}</Btn>
+    <Btn bg="#111" disabled={busy || !report || !!hard.length} onClick={()=>onConfirm(overrides)}>{plan.kind==='enroll'?'Öğrenci Kaydını Tamamla':plan.kind==='review'?'Kayda Devam Et':'Paketi Yükle'}</Btn>
+    <Btn bg="#111" outline disabled={busy} onClick={onClose}>Vazgeç</Btn>
+  </Sheet>;
+}
+function useStudentBooking(options) {
+  const latest=useRef(options);latest.current=options;
+  const [plan,setPlan]=useState(null),[issue,setIssue]=useState(null),[busy,setBusy]=useState(false),[warning,setWarning]=useState(null);
+  const pending=useRef(null),resolver=useRef(null),working=useRef(false),preparing=useRef(null);
+  const key=actor=>'sonsuz_student_booking_v287:'+actor;
+  const read=actor=>{try {const raw=localStorage.getItem(key(actor));if(!raw)return null;const x=JSON.parse(raw);return x?.actor===actor && SINGLE_LESSON_MOVE_UUID.test(x.operationId || '') && ['enroll','load'].includes(x.kind) && x.params && x.request ? x : {invalid:true,actor};}catch{return {invalid:true,actor};}};
+  const persist=(x,expected=pending.current?.operationId)=>{try {const actor=latest.current.actor,stored=read(actor);if(stored && (stored.invalid || stored.operationId!==(x?.operationId || expected)))return false;if(x){localStorage.setItem(key(actor),JSON.stringify(x));if(localStorage.getItem(key(actor))!==JSON.stringify(x))return false;}else localStorage.removeItem(key(actor));pending.current=x;setIssue(x);return true;}catch{return false;}};
+  const current=scope=>latest.current.ready && latest.current.scopeKey===scope;
+  const finish=(x,data,scope)=>{
+    if(!current(scope) || data?.id!==x.studentId || data.branch_id!==x.branch || !Number.isInteger(data.record_version) || data.record_version<1)return false;
+    latest.current.onSaved(data,x.kind);persist(null,x.operationId);return data;
+  };
+  const execute=async(x,scope)=>{
+    if(!current(scope) || working.current || x.invalid)return false;
+    working.current=true;setBusy(true);
+    try {
+      const result=await latest.current.runWrite(()=>timedSingleLessonRequest(()=>supabase.rpc(x.kind==='enroll'?'enroll_student_booking':'load_student_periods_booking',x.params)));
+      if(!current(scope))return false;
+      if(!result.error && result.data?.operationId===x.operationId && ['applied','replayed'].includes(result.data.state))return finish(x,result.data.student,scope);
+      if(bookingKnownRejection(result.error) || result.error?.code==='PGRST202' || (!result.timedOut && ['22023','22007','42501','40001','P0001','P0002','23502','23503','23505','23514','22P02','22001','40P01','57014'].includes(result.error?.code))) {
+        persist(null,x.operationId);latest.current.notify(result.error?.code==='PGRST202'?'v287 veritabanı kurulumu gerekli. Kayıt yapılmadı.':'İşlem sunucu tarafından reddedildi; kayıt yapılmadı.',9000);return false;
+      }
+      persist({...x,state:'unknown'});latest.current.notify('Kayıt sonucu henüz doğrulanamadı. Üstteki uyarıdan kontrol edin; yeni işlem oluşturmayın.',9000);return false;
+    } catch {if(current(scope))persist({...x,state:'unknown'});return false;}
+    finally {working.current=false;setBusy(false);}
+  };
+  const check=async()=>{
+    const x=pending.current,p=latest.current,scope=p.scopeKey;
+    if(!x || x.invalid || x.actor!==p.actor || x.branch!==p.branch || !p.ready || working.current)return false;
+    working.current=true;setBusy(true);
+    try {
+      const result=await timedSingleLessonRequest(()=>supabase.rpc('read_student_booking_operation',{p_branch_id:x.branch,p_operation_id:x.operationId}));
+      if(!current(scope) || result.error)return false;
+      if(result.data===null){persist({...x,state:'not_found'});return false;}
+      if(result.data.operationId!==x.operationId || result.data.kind!==x.kind || programJSON(result.data.request)!==programJSON(x.request)
+        || result.data.student?.record_version<result.data.resultingRecordVersion){persist({...x,state:'conflict'});return false;}
+      return finish(x,result.data.student,scope);
+    }finally{working.current=false;setBusy(false);}
+  };
+  const retry=async()=>{const x=pending.current,p=latest.current;if(x?.state==='not_found' && x.actor===p.actor && x.branch===p.branch)return execute(x,p.scopeKey);return false;};
+  const start=async draft=>{
+    const p=latest.current,scope=p.scopeKey;
+    if(!p.ready || !p.canStart() || working.current || preparing.current || resolver.current || read(p.actor)){p.notify('Önce bekleyen kayıt işlemini sonuçlandırın.',8000);return false;}
+    const preparation=uid();preparing.current=preparation;
+    try {
+    let initialReport;try{initialReport=await previewDraft(draft,[],scope);}catch(e){p.notify(e.message,9000);return false;}
+    if(!current(scope))return false;
+    const choices=initialReport.conflicts.length || initialReport.warnings.length
+      ? await new Promise(resolve=>{resolver.current=resolve;setPlan({...draft,scope,initialReport});}) : [];
+    if(!choices || !current(scope))return false;
+    const operationId=uid(),params=draft.kind==='enroll'?{p_student:draft.student,p_overrides:choices,p_operation_id:operationId}:{...draft.params,p_overrides:choices,p_operation_id:operationId};
+    const request=draft.kind==='enroll'?{student:draft.student,overrides:choices}:{studentId:params.p_student_id,branchId:params.p_branch_id,expectedRecordVersion:params.p_expected_record_version,totalCount:params.p_total_count,periodCount:params.p_period_count,plannedLessons:params.p_planned_lessons,overrides:choices};
+    const x={actor:p.actor,branch:p.branch,studentId:draft.student.id,operationId,kind:draft.kind,params,request,state:'writing',createdAt:new Date().toISOString()};
+    if(!navigator.locks?.request){p.notify('Güvenli kayıt için güncel bir tarayıcı gerekiyor.',8000);return false;}
+    return await navigator.locks.request('sonsuz-booking:'+p.actor,{ifAvailable:true},async lock=>{
+      if(!lock || !current(scope) || read(p.actor)){p.notify('Başka sekmede bekleyen kayıt var. Önce sonucunu kontrol edin.',8000);return false;}
+      if(!persist(x)){p.notify('İşlem güvenli saklanamadı. Kayıt gönderilmedi.',8000);return false;}
+      return execute(x,scope);
+    });
+    } finally {if(preparing.current===preparation)preparing.current=null;}
+  };
+  const previewDraft=async(draft,choices,scope)=>{
+    const p=latest.current;if(!current(scope))throw Error('Çalışma alanı değişti. Formu güncel kayıttan açın.');
+    const student=bookingApplyOverrides(draft,choices);
+    const result=await timedSingleLessonRequest(()=>supabase.rpc('preview_student_booking',{p_branch_id:p.branch,p_student:student,p_expected_record_version:draft.expectedVersion}));
+    if(!current(scope))throw Error('Çalışma alanı değişti.');
+    if(result.error || result.data?.actorUserId!==p.actor || result.data.branchId!==p.branch || result.data.studentId!==student.id
+      || result.data.expectedRecordVersion!==draft.expectedVersion || !Array.isArray(result.data.conflicts) || !Array.isArray(result.data.warnings))throw Error('Saatler doğrulanamadı. v287 SQL kurulumu ve güncel kayıtları kontrol edin.');
+    return result.data;
+  };
+  const checkPlan=choices=>plan?previewDraft(plan,choices,plan.scope):Promise.reject(Error('Form kapandı.'));
+  const review=async(student,expectedVersion)=>{
+    const p=latest.current,scope=p.scopeKey;if(!p.ready || resolver.current || working.current || preparing.current)return false;
+    const preparation=uid();preparing.current=preparation;
+    try {
+    const draft={kind:'review',student,lessons:[],expectedVersion};
+    let report;try{report=await previewDraft(draft,[],scope);}catch(e){p.notify(e.message,9000);return false;}
+    if(report.conflicts.length){setWarning(report);return false;}
+    if(!report.warnings.length)return true;
+    const choice=await new Promise(resolve=>{resolver.current=resolve;setPlan({...draft,scope,initialReport:report});});
+    return !!choice && current(scope);
+    } finally {if(preparing.current===preparation)preparing.current=null;}
+  };
+  const closePlan=choices=>{const resolve=resolver.current;resolver.current=null;setPlan(null);resolve?.(choices);};
+  useEffect(()=>{const x=options.actor?read(options.actor):null;pending.current=x;setIssue(x);preparing.current=null;closePlan(null);},[options.scopeKey]);
+  useEffect(()=>{setWarning(null);},[options.actor,options.branch]);
+  useEffect(()=>{
+    const onError=e=>{if(latest.current.ready && (!e.detail?.branchId || e.detail.branchId===latest.current.branch))setWarning(e.detail);},storage=e=>{if(e.key===key(latest.current.actor)){const x=read(latest.current.actor);pending.current=x;setIssue(x);}};
+    window.addEventListener('sonsuz-booking-refusal',onError);window.addEventListener('storage',storage);
+    return()=>{window.removeEventListener('sonsuz-booking-refusal',onError);window.removeEventListener('storage',storage);resolver.current?.(null);};
+  },[]);
+  const banner=issue?<div role="alert" style={{background:'#fff7ed',border:'1px solid #fdba74',borderRadius:12,padding:14,margin:'12px 0'}}>
+    <p>{issue.invalid || issue.state==='conflict'?'Bekleyen ders kaydı doğrulanamadı. Yeni kayıt durduruldu; işlem incelenmeli.':issue.branch!==options.branch?'Bekleyen kayıt kendi şubesinde kontrol edilmeli.':issue.state==='not_found'?'İşlem kaydı bulunamadı. Aynı işlem kimliğiyle yeniden deneyebilirsiniz; ikinci kayıt oluşturulmaz.':'Ders kaydının sonucu henüz kesin değil. Yeniden göndermeden önce kontrol edin.'}</p>
+    <Btn bg="#92400e" disabled={busy || issue.invalid || issue.branch!==options.branch} onClick={check}>Kayıt Sonucunu Kontrol Et</Btn>
+    {issue.state==='not_found'?<Btn bg="#111" disabled={busy || issue.branch!==options.branch} onClick={retry}>Aynı İşlemi Yeniden Dene</Btn>:null}
+  </div>:null;
+  return {start,review,issue,busy,banner,dialogs:<>{plan?<BookingPlanSheet key={plan.student.id} plan={plan} onCheck={checkPlan} onConfirm={closePlan} onClose={()=>closePlan(null)} />:null}{warning?<BookingWarningSheet report={warning} onClose={()=>setWarning(null)} />:null}</>};
+}
+
 async function timedSingleLessonRequest(buildRequest, timeoutMs = SINGLE_LESSON_REQUEST_TIMEOUT_MS) {
   const controller = typeof AbortController === "undefined" ? null : new AbortController();
   let timer = null;
@@ -1627,6 +1803,7 @@ async function timedSingleLessonRequest(buildRequest, timeoutMs = SINGLE_LESSON_
     const outcome = await Promise.race([requestResult, timeoutResult]);
     if (outcome.type === "timeout") return { data:null, error:new Error("SINGLE_LESSON_REQUEST_TIMEOUT"), timedOut:true };
     if (outcome.type === "error") return { data:null, error:outcome.error, timedOut:didTimeout };
+    bookingAnnounce(outcome.result?.error);
     return { ...(outcome.result || {}), timedOut:false };
   } catch (error) {
     return { data:null, error, timedOut:didTimeout };
@@ -2837,6 +3014,7 @@ function normalLessonEvaluationIntent(student, lessonId, detail={}, correctionRe
 }
 
 function normalLessonEvaluationKnownRejection(error) {
+  if (bookingKnownRejection(error)) return true;
   const message = String(error?.message || error || "");
   return [
     "LESSON_EVALUATION_V200_",
@@ -2906,6 +3084,7 @@ function normalLessonMakeupIntentSignature(value) {
 }
 
 function normalLessonMakeupKnownRejection(error) {
+  if (bookingKnownRejection(error)) return true;
   const message = String(error?.message || error || "");
   return [
     "NORMAL_LESSON_MAKEUP_NOT_AUTHORIZED",
@@ -2976,6 +3155,7 @@ function normalLessonMakeupPlanIntentSignature(value) {
 }
 
 function normalLessonMakeupPlanKnownRejection(error) {
+  if (bookingKnownRejection(error)) return true;
   const message = String(error?.message || error || "");
   return [
     "NORMAL_LESSON_MAKEUP_PLAN_NOT_AUTHORIZED",
@@ -3098,6 +3278,7 @@ function normalLessonMakeupCompletionHomeworkMatches(student, intent) {
 }
 
 function normalLessonMakeupCompletionKnownRejection(error) {
+  if (bookingKnownRejection(error)) return true;
   const message = String(error?.message || error || "");
   return [
     "LESSON_EVALUATION_V200_",
@@ -4265,7 +4446,7 @@ function useMakeupReversal(options) {
           p.onSaved(result.data.student);persist({...item,state:'verified'});p.notify(prompt.action==='clear_plan'?'Telafi planı kaldırıldı.':'Telafi tamamlaması geri alındı.');return true;
         }
         if(result.error?.code==='PGRST202'){persist({...item,state:'not_applied',message:makeupReversalErrorText(result.error)});p.notify(makeupReversalErrorText(result.error),9000);return false;}
-        const rejected=['22023','22P02','42501','40001','P0001','P0002','23502','23503','23505','23514','55P03','57014'].includes(result.error?.code);
+        const rejected=['23P01','22023','22P02','42501','40001','P0001','P0002','23502','23503','23505','23514','55P03','57014'].includes(result.error?.code);
         persist({...item,state:'unknown',message:rejected?makeupReversalErrorText(result.error):''});
         const verified=await check(pending.current,rejected);
         if(verified)p.notify(prompt.action==='clear_plan'?'Telafi planı kaldırıldı.':'Telafi tamamlaması geri alındı.');
@@ -7239,7 +7420,7 @@ function useWeeklyScheduleShift(options) {
           persist({...item,state:'not_applied'});p.notify('v275 Shift veritabanı kurulumu gerekli. Dersler kaydırılmadı.',9000);return false;
         }
         persist({...item,state:'unknown'});
-        const rejected=['22023','22P02','42501','40001','P0001','P0002','23502','23503','23505','23514','55P03','57014'].includes(result.error?.code);
+        const rejected=['23P01','22023','22P02','42501','40001','P0001','P0002','23502','23503','23505','23514','55P03','57014'].includes(result.error?.code);
         const verified=await check(pending.current,rejected);
         if(verified)p.notify((days/7)+' hafta ileri alındı');
         else p.notify('Shift sonucu henüz doğrulanmadı. Üstteki Yeniden Kontrol Et yalnız kaydı okur; işlemi yeniden göndermeyin.',9000);
@@ -13825,6 +14006,13 @@ export default function App() {
       pop("Aktif şube doğrulanamadı; öğrenci kaydı gönderilmedi.",8000);
       throw new Error("STUDENT_BRANCH_CONTEXT_MISMATCH");
     }
+    const source=students.find(s=>s.id===student.id);
+    const weeklyFields=s=>programJSON([getStudentSlots(s),s.teacher_id,s.teacher_name,s.teacher_history,getLessonDuration(s),s.frozen,s.left_at,s.lesson_start_date]);
+    if(source && !student.frozen && !isStudentLeft(student) && !genderOptions.onlyGender && weeklyFields(source)!==weeklyFields(student)){
+      if(!await booking.review(student,typeof student.record_version==='number'?student.record_version:0)){
+        await loadStudents(undefined,branchId);const refusal=new Error("Ders saatleri doğrulanmadı; kayıt gönderilmedi.");refusal.bookingRejected=true;throw refusal;
+      }
+    }
     return runBranchScopedWrite(async () => {
       const currentVersion = genderChanges ? (genderOptions.expectedRecordVersion ?? student.record_version ?? 0) : (typeof student.record_version === "number" ? student.record_version : 0);
       if (genderChanges && (!Number.isInteger(currentVersion) || currentVersion < 0)) throw new Error("INVALID_STUDENT_RECORD_VERSION");
@@ -13860,11 +14048,12 @@ export default function App() {
 
       if (error || !data?.id || data.branch_id !== branchId || data.last_write_id !== writeId || data.record_version !== nextVersion
         || (genderChanges && (data.id !== student.id || Object.entries(genderChanges).some(([key,value]) => data[key] !== value)))) {
+        bookingAnnounce(error);
         console.error("Kayıt hatası:", error);
         const missingGenderColumn = genderChanges && /student_gender|guardian_gender/.test(String(error?.message || "")) && ["42703","PGRST204"].includes(error?.code);
         pop(missingGenderColumn ? "Cinsiyet alanları için v187 veritabanı kurulumu gerekiyor. Değişiklik kaydedilmedi." : "Kayıt güvenli şekilde doğrulanamadı. Ekran veritabanından yenilendi.", 8000);
         await loadStudents(undefined,branchId);
-        throw new Error("Veritabanı kaydı doğrulanamadı");
+        const failure=new Error("Veritabanı kaydı doğrulanamadı");failure.bookingRejected=bookingKnownRejection(error);throw failure;
       }
 
       preferredPeriodSchemaReadyRef.current = Object.prototype.hasOwnProperty.call(data,"preferred_package_lesson_count");
@@ -13883,6 +14072,7 @@ export default function App() {
           return await saveStudent(student);
         } catch (error) {
           lastError = error;
+          if (error?.bookingRejected) throw error;
           if (attempt < attempts && branchId) {
             await new Promise(resolve => setTimeout(resolve, 450 * attempt));
             const { data } = await supabase.from("students").select("*").eq("id",student.id).eq("branch_id",branchId).single();
@@ -15507,7 +15697,15 @@ export default function App() {
       pop("Yeni dönem tercihi değişmiş. Paket Yükle penceresini yeniden açın; ders eklenmedi.",8000);
       return false;
     }
-    return startPeriodLoadOperation(student,"load",Number(selectedLessonCount));
+    if (!student || !periodLoadOptions(student).includes(Number(selectedLessonCount))) return false;
+    const last=[...(student.schedule||[])].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+    let from=last?new Date(new Date(last.date).getTime()+86400000):new Date();
+    if(student.program_effective_on){if(!isValidLocalDateInput(student.program_effective_on))return false;const effective=new Date(student.program_effective_on+"T00:00:00+03:00");if(from<effective)from=effective;}
+    const lessons=buildScheduleSlots(getStudentSlots(student),Number(selectedLessonCount),from,getLessonDuration(student));
+    const params={p_student_id:student.id,p_branch_id:currentBranch.id,p_expected_record_version:student.record_version,
+      p_total_count:Number(selectedLessonCount),p_period_count:getPreferredPackageLessonCount(student),
+      p_planned_lessons:lessons.map(l=>({date:l.date,day:l.day,time:l.time,durationMinutes:l.durationMinutes}))};
+    return booking.start({kind:'load',student:{...student,frozen:false,left_at:null,schedule:[...student.schedule,...lessons]},lessons,expectedVersion:student.record_version,params});
   };
 
   const handleUndoLastPackage = async (sid) => {
@@ -15533,6 +15731,15 @@ export default function App() {
     return removed>0;
   };
 
+  const booking=useStudentBooking({actor:authSession?.user?.id || '',branch:currentBranch?.id || '',
+    scopeKey:programJSON([authSession?.user?.id,currentBranch?.id,protectedDataLoadGenerationRef.current]),
+    ready:!!authSession?.user?.id && !!currentBranch?.id && browserOnline && !connectionRevalidationRequired,
+    canStart:()=>requireProtectedSources(["students","teachers"],"Ders saatleri") && !periodLoadIssueRef.current && !periodLoadWritingRef.current,
+    notify:pop,runWrite:runBranchScopedWrite,onSaved:(saved,kind)=>{
+      setStudents(prev=>{const exists=prev.some(s=>s.id===saved.id);return exists?prev.map(s=>s.id===saved.id && Number(s.record_version)<=saved.record_version?saved:s):[...prev,saved];});
+      if(kind==='enroll'){setShowAdd(false);setWelcomeStudentId(saved.id);pop("Öğrenci eklendi");}else pop("Paket dersleri yüklendi");
+    }});
+
   const handleAdd = async (f) => {
     if (!requireProtectedSources(["students","teachers"],"Öğrenci ekleme")) return null;
     const genderChanges = { student_gender:f.student_gender, guardian_gender:f.guardian_gender };
@@ -15549,15 +15756,8 @@ export default function App() {
       no_show: 0, frozen: false, left_at:null, status_history:[], odemeler: [], telafi_records: [],
       schedule: buildScheduleSlots(slots, packageLessonCount, from, f.lessonDuration), ek_dersler: [],
     };
-    setStudents(p=>[...p, newStudent]);
-    try {
-      const saved = await saveStudent(newStudent,genderChanges);
-      pop("Öğrenci eklendi");
-      setWelcomeStudentId(saved.id);
-      return saved;
-    } catch (error) {
-      return null;
-    }
+    const payload={...studentPayload(newStudent,1,uid()),...genderChanges};
+    return booking.start({kind:'enroll',student:payload,lessons:payload.schedule,expectedVersion:null});
   };
 
   const handleCommunicationMessage = async (student, text, successText) => {
@@ -16262,6 +16462,9 @@ export default function App() {
         || periodLoadWritingRef.current || periodLoadIssueRef.current || readPeriodLoadIssue(actor)) {pop("Önce devam eden veya sonucu bekleyen öğrenci işlemini sonuçlandırın.",9000);return false;}
       if(actor!==programChangeActorRef.current || generation!==protectedDataLoadGenerationRef.current || preview?.expectedRecordVersion!==student.record_version
         || preview.studentId!==student.id || preview.branchId!==branchId || programJSON(preview.plan.nextSlots)!==programJSON(slots)) return false;
+      const prospective={...student,...profile,schedule:preview.plan.schedule,lesson_slots:slots,day:slots[0].day,time:slots[0].time,
+        _booking_preview_from:preview.plan.effectiveOn,_booking_preview_slots:slots};
+      if(!await booking.review(prospective,student.record_version))return false;
       const operationId=uid();
       const params={p_student_id:student.id,p_branch_id:branchId,p_expected_record_version:student.record_version,p_slots:slots,p_profile_changes:profile,p_preview_signature:preview.signature,p_operation_id:operationId};
       const issue={operationId,actorUserId:actor,branchId,params,state:"writing",createdAt:new Date().toISOString(),label:student.name};
@@ -16270,7 +16473,7 @@ export default function App() {
       try {
         const result=await timedSingleLessonRequest(()=>supabase.rpc("change_student_program",params).single());
         if(actor!==programChangeActorRef.current || generation!==protectedDataLoadGenerationRef.current) return false;
-        const knownRejected=!!result.error && !result.timedOut && ["22023","22007","42501","40001","P0001","P0002","23502","23503","23505","23514","22P02","22001","57014"].includes(result.error.code);
+        const knownRejected=!!result.error && !result.timedOut && ["23P01","22023","22007","42501","40001","P0001","P0002","23502","23503","23505","23514","22P02","22001","57014"].includes(result.error.code);
         const pending={...issue,state:"unknown",knownRejected};rememberProgramChange(pending);
         const verified=await checkProgramChange(pending);
         if(verified && programChangeIssueRef.current?.state==="verified") {pop("Program ve bilgiler güncellendi");return true;}
@@ -17348,6 +17551,7 @@ export default function App() {
             </div>
           </div>
         ) : null}
+        {booking.banner}
         {periodLoadIssue ? (
           <div style={{...CARD,border:"1px solid #f59e0b",background:"#fffbeb",marginBottom:12}}>
             <p style={{margin:"0 0 8px",fontSize:13}}>{periodLoadIssue.kind==="invalid" ? "Bekleyen paket işlem kaydı okunamadı. Yeni yükleme durduruldu; kayıt incelenmeli." : periodLoadIssue.branchId!==currentBranch?.id ? "Bekleyen paket işlemini kontrol etmek için işlemin yapıldığı şubeye geçin." : "Bekleyen paket işleminin sonucunu kontrol edin. Aynı işlem kimliği kullanılır; ikinci paket oluşmaz."}</p>
@@ -17774,6 +17978,7 @@ export default function App() {
 
       {activePaymentReceipt ? <PaymentReceivedSheet key={activePaymentReceipt.scopeKey+activePaymentReceipt.key} receipt={activePaymentReceipt} onOpen={handlePaymentReceiptMessage} onClose={()=>setPaymentReceiptPrompts(previous=>previous.filter(receipt=>receipt!==activePaymentReceipt))} /> : null}
 
+      {booking.dialogs}
       {toast ? (
         <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"#111", color:"#fff", padding:"12px 20px", borderRadius:14, fontSize:14, fontWeight:600, zIndex:100, boxShadow:"0 4px 20px rgba(0,0,0,.3)", maxWidth:"90vw", textAlign:"center" }}>
           {toast}
