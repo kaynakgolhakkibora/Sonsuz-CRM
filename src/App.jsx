@@ -5904,7 +5904,7 @@ function msgTekDersHatirlatma(lesson) {
     const instrumentText = instrument.charAt(0).toLocaleLowerCase("tr-TR")+instrument.slice(1);
     return "Günaydın :) Bugünkü "+mode+instrumentText+" dersinizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
   }
-  return "Günaydın :) Bugünkü "+mode+(lesson?.instrument || "müzik")+(lesson?.participant_kind === "guest" ? " dersinizin saati " : " tek dersimizin saati ")+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
+  return "Günaydın :) Bugünkü "+mode+(lesson?.instrument === "Piyano" ? "piyano" : (lesson?.instrument || "müzik"))+(lesson?.participant_kind === "guest" ? " dersinizin saati " : " tek dersimizin saati ")+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
 }
 // V285: display-only policy mapping; v281 server quota remains authoritative.
 function normalMakeupNoticeLimit(policyVersion=281) {
