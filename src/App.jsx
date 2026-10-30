@@ -8855,6 +8855,7 @@ function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStuden
   });
   todayLessons.sort((a,b) => a.time.localeCompare(b.time) || a.student.name.localeCompare(b.student.name,"tr"));
   if (todayLessons.length === 0) return null;
+  const overdueStudentIds = new Set(paymentNoticeRows(students).filter(row => !row.today).map(row => row.student.id));
   return (
     <AçılırBugünBölümü title={`Bugünün Dersleri (${todayLessons.length})`} color="#0369a1" style={{ background:"#f0f9ff", border:"1.5px solid #bae6fd", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
       {todayLessons.map(({kind, student, lesson, record, time}) => {
@@ -8868,7 +8869,7 @@ function BugünDersleri({ students, onWA, onWATelafi, onReminderToggle, onStuden
         return (
         <div key={kind+"-"+(lesson?.id || record?.id)} style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #e0f2fe" }}>
           <div onClick={() => kind === "telafi" ? onTelafiClick(student) : onStudentClick(student)} style={{ cursor:"pointer", minWidth:0, overflowWrap:"anywhere", textAlign:"left" }}>
-            <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}</p>
+            <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111" }}>{student.name}{overdueStudentIds.has(student.id) ? <span style={{ display:"inline-block", marginLeft:8, verticalAlign:"middle" }}><Pill label="Geciken ödeme" bg="#ffe4e6" color="#be123c" /></span> : null}</p>
             <p style={{ margin:"2px 0 0", fontSize:12, color:kind==="telafi"?"#7e22ce":"#0369a1", fontWeight:kind==="telafi"?700:400 }}>{time} · {student.instrument}{kind === "telafi" ? " · Telafi dersi" : ""}</p>
             <p style={{ margin:"2px 0 0", fontSize:11, color:sent?"#059669":"#64748b", fontWeight:700 }}>{sent ? "Hatırlatma gönderildi" : "Hatırlatma bekliyor"}</p>
             {pendingHomework ? <p style={{ margin:"3px 0 0", fontSize:11, color:"#b45309", fontWeight:800 }}>● Ödev kontrolü var</p> : null}
