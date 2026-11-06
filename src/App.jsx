@@ -5018,12 +5018,46 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
   const [status, setStatus] = useState("planned");
   const [duration, setDuration] = useState(getLessonDuration(student));
   const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [saveError, setSaveError] = useState("");
   const fee = ekDersFee(student);
+  const validDate = isValidLocalDateInput(date);
+  const validTime = TIMES.includes(time);
+  const validDraft = validDate && validTime && [30,45].includes(duration)
+    && ["physical","online"].includes(type) && ["planned","done"].includes(status)
+    && Number.isFinite(fee) && fee>=0;
+  const submit = async () => {
+    if (savingRef.current) return;
+    if (!validDraft) {
+      setSaveError(!validDate ? "Ek Ders için geçerli bir tarih seçin." : "Ek Ders bilgileri doğrulanamadı; kayıt gönderilmedi.");
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const saved = await onEkDersEkle(student.id, {
+        id:uid(), date:date+"T"+time+":00", type, status,
+        durationMinutes:duration, fee, odendi:false, note,
+        createdAt:new Date().toISOString()
+      });
+      if (saved === true) onClose();
+      else setSaveError("Ek Ders sonucu doğrulanamadı. Form kapatılmadı; öğrenci kaydını yenileyip sonucu kontrol edin. İşlemi hemen yeniden göndermeyin.");
+    } catch {
+      setSaveError("Ek Ders sonucu doğrulanamadı. Form kapatılmadı ve işlem otomatik tekrarlanmadı; öğrenci kaydını yenileyip sonucu kontrol edin.");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
   return (
-    <Sheet title="Ek Ders Ekle" subtitle={student.name} onClose={onClose}>
+    <Sheet title="Ek Ders Ekle" subtitle={student.name} onClose={()=>{ if (!saving) onClose(); }}>
+      <fieldset disabled={saving} style={{ border:0, padding:0, margin:0, minWidth:0 }}>
       <p style={{ fontSize:13, color:"#666", marginBottom:12 }}>Bu ders döneme dahil değil, ayrıca ücretlendirilecek.</p>
       <label style={LBL}>Tarih</label>
-      <DatePickerField dateLabel="Ek Ders Tarihi" style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+      <DatePickerField dateLabel="Ek Ders Tarihi" style={INP} type="date" value={date} onChange={e=>{setDate(e.target.value);setSaveError("");}} required aria-invalid={!validDate} />
+      {!validDate ? <p role="alert" style={{ margin:"-4px 0 10px", color:"#b91c1c", fontSize:12 }}>Ek Ders kaydedebilmek için tarih seçin.</p> : null}
       <label style={LBL}>Saat</label>
       <select style={INP} value={time} onChange={e=>setTime(e.target.value)}>
         {TIMES.map(t=><option key={t}>{t}</option>)}
@@ -5055,9 +5089,11 @@ function EkDersSheet({ student, onClose, onEkDersEkle }) {
       <label style={LBL}>Not (opsiyonel)</label>
       <input style={INP} value={note} onChange={e=>setNote(e.target.value)} placeholder="Konu vb." />
       <div style={{ marginTop:16 }}>
-        <Btn bg="#6366f1" onClick={() => { onEkDersEkle(student.id, { id:uid(), date: date+"T"+time+":00", type, status, durationMinutes:duration, fee, odendi:false, note, createdAt: new Date().toISOString() }); onClose(); }}>Ek Ders Kaydet</Btn>
-        <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
+        {saveError ? <p role="alert" style={{ color:"#b91c1c", fontSize:12, lineHeight:1.5 }}>{saveError}</p> : null}
+        <Btn bg="#6366f1" disabled={saving || !validDraft} onClick={submit}>{saving ? "Kaydediliyor..." : "Ek Ders Kaydet"}</Btn>
+        <Btn bg="#111" outline disabled={saving} onClick={onClose}>İptal</Btn>
       </div>
+      </fieldset>
     </Sheet>
   );
 }
@@ -5787,7 +5823,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
           setFreezeSaving(false);
         }
       }} /> : null}
-      {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={(sid, ders) => { onEkDersEkle(sid, ders); setShowEkDers(false); }} /> : null}
+      {showEkDers ? <EkDersSheet student={student} onClose={() => setShowEkDers(false)} onEkDersEkle={onEkDersEkle} /> : null}
       {ekDersOdemeSel ? <EkDersOdemeSheet student={student} extra={ekDersOdemeSel} onClose={()=>setEkDersOdemeSel(null)} onConfirm={onEkDersOdeme} /> : null}
       {showDuzenle ? <DuzenleSheet student={student} teachers={teachers} onClose={() => setShowDuzenle(false)} onDuzenle={onDuzenle} onPreviewProgram={onPreviewProgram} /> : null}
       {showPieceAdd ? <PieceAddSheet student={student} onClose={()=>setShowPieceAdd(false)} onSave={piece=>onPieceAdd(student.id,piece)} /> : null}
@@ -16597,10 +16633,38 @@ export default function App() {
   };
 
   const handleEkDersEkle = async (sid, ders) => {
-    const updated = students.map(s => s.id!==sid ? s : { ...s, ek_dersler: [...(s.ek_dersler||[]), ders] });
-    setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
-    pop("Ek ders eklendi");
+    const student = students.find(s=>s.id===sid);
+    const lessonDate = typeof ders?.date === "string" ? ders.date : "";
+    const dateMatch = lessonDate.match(/^(\d{4}-\d{2}-\d{2})T([0-2]\d:[0-5]\d):00$/);
+    const createdAt = typeof ders?.createdAt === "string" ? ders.createdAt : "";
+    const validCreatedAt = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(createdAt)
+      && Number.isFinite(new Date(createdAt).getTime()) && new Date(createdAt).toISOString()===createdAt;
+    const valid = !!student && SINGLE_LESSON_MOVE_UUID.test(ders?.id || "") && !(student.ek_dersler||[]).some(extra=>extra?.id===ders.id)
+      && !!dateMatch && isValidLocalDateInput(dateMatch[1]) && TIMES.includes(dateMatch[2])
+      && ["physical","online"].includes(ders.type) && ["planned","done"].includes(ders.status)
+      && [30,45].includes(ders.durationMinutes) && Number.isFinite(ders.fee) && ders.fee>=0
+      && ders.odendi===false && typeof ders.note==="string" && validCreatedAt;
+    if (!valid) {
+      pop(!dateMatch || !isValidLocalDateInput(dateMatch?.[1]) ? "Ek Ders için geçerli bir tarih seçin; kayıt gönderilmedi." : "Ek Ders bilgileri doğrulanamadı; kayıt gönderilmedi.",7000);
+      return false;
+    }
+    const updatedStudent = { ...student, ek_dersler:[...(student.ek_dersler||[]),ders] };
+    try {
+      const savedStudent = await saveStudent(updatedStudent);
+      const savedMatches = (savedStudent?.ek_dersler||[]).filter(extra=>extra?.id===ders.id);
+      const savedExtra = savedMatches.length===1 ? savedMatches[0] : null;
+      if (!savedExtra || savedExtra.date!==ders.date || savedExtra.type!==ders.type || savedExtra.status!==ders.status
+        || Number(savedExtra.durationMinutes)!==ders.durationMinutes || Number(savedExtra.fee)!==ders.fee || savedExtra.odendi!==false
+        || savedExtra.note!==ders.note || savedExtra.createdAt!==ders.createdAt) {
+        await loadStudents(undefined,currentBranch?.id);
+        pop("Ek Ders kaydı Supabase dönüşünde doğrulanamadı; kaydedilmiş kabul edilmedi.",8000);
+        return false;
+      }
+      pop("Ek ders eklendi");
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const reconcileExtraLessonPaymentOperation = async (issue=extraLessonPaymentIssueRef.current, options={}) => {
