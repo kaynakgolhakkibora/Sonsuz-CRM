@@ -6992,19 +6992,34 @@ function OdemeAlSheet({ student, onClose, onÖdemeAl, saving=false }) {
 function ZamSheet({ student, onClose, onSave }) {
   const [fee, setFee] = useState(student.ucret || "");
   const [date, setDate] = useState(turkeyDateKey());
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const validDate = isValidLocalDateInput(date);
+  const submit = async () => {
+    if (!validDate || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      if (await onSave(student.id, fee, date)) onClose();
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
   return (
-    <Sheet title="Zam Yap" subtitle={student.name} onClose={onClose}>
+    <Sheet title="Zam Yap" subtitle={student.name} onClose={()=>{ if(!savingRef.current) onClose(); }}>
       <div style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
         <p style={{ margin:0, fontSize:13, color:"#9a3412" }}>Mevcut ücret: <strong>{(student.ucret||0).toLocaleString("tr-TR")} TL</strong></p>
         {student.last_raise_date ? <p style={{ margin:"5px 0 0", fontSize:12, color:"#9a3412" }}>Son zam: {fmtMed(student.last_raise_date)}</p> : null}
       </div>
       <label style={LBL}>Yeni 4 Ders Ücreti (TL)</label>
-      <input style={INP} type="number" value={fee} onChange={e=>setFee(e.target.value)} />
+      <input style={INP} type="number" value={fee} disabled={saving} onChange={e=>setFee(e.target.value)} />
       <label style={LBL}>Zam Tarihi</label>
-      <DatePickerField dateLabel="Zam Tarihi" style={INP} type="date" value={date} onChange={e=>setDate(e.target.value)} />
+      <DatePickerField dateLabel="Zam Tarihi" style={INP} type="date" value={date} required aria-invalid={!validDate} disabled={saving} onChange={e=>setDate(e.target.value)} />
+      {!validDate ? <p role="alert" style={{ margin:"0 0 10px", color:"#b91c1c", fontSize:12, fontWeight:800 }}>Zam tarihini boş bırakmayın; geçerli bir tarih seçin.</p> : null}
       <div style={{ marginTop:16 }}>
-        <Btn bg="#f97316" onClick={() => { onSave(student.id, fee, date); onClose(); }}>Zamı Kaydet</Btn>
-        <Btn bg="#111" outline onClick={onClose}>İptal</Btn>
+        <Btn bg="#f97316" disabled={saving || !validDate} onClick={submit}>{saving ? "Kaydediliyor…" : "Zamı Kaydet"}</Btn>
+        <Btn bg="#111" outline disabled={saving} onClick={()=>{ if(!savingRef.current) onClose(); }}>İptal</Btn>
       </div>
     </Sheet>
   );
@@ -16636,14 +16651,24 @@ export default function App() {
   };
 
   const handleZamYap = async (sid, fee, date) => {
-    const updated = students.map(s => s.id!==sid ? s : {
-      ...s,
-      ucret: parseInt(fee)||s.ucret||0,
-      last_raise_date: date || turkeyDateKey()
-    });
-    setStudents(updated);
-    await saveStudent(updated.find(s=>s.id===sid));
-    pop("Zam kaydedildi");
+    const student = students.find(s=>s.id===sid);
+    if (!student || !isValidLocalDateInput(date)) {
+      pop("Zam için geçerli bir tarih seçin; kayıt gönderilmedi.",7000);
+      return false;
+    }
+    const nextFee = parseInt(fee)||student.ucret||0;
+    try {
+      const savedStudent = await saveStudent({ ...student, ucret:nextFee, last_raise_date:date });
+      if (!savedStudent || savedStudent.id!==sid || Number(savedStudent.ucret)!==Number(nextFee) || savedStudent.last_raise_date!==date) {
+        await loadStudents(undefined,currentBranch?.id);
+        pop("Zam kaydı Supabase dönüşünde doğrulanamadı; kaydedilmiş kabul edilmedi.",8000);
+        return false;
+      }
+      pop("Zam kaydedildi");
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const handleEkDersEkle = async (sid, ders) => {
