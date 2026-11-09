@@ -629,6 +629,60 @@ function expenseAppliesToMonth(expense, targetMonth) {
 }
 function addMonths(iso, n) { const d = iso ? new Date(iso) : new Date(); d.setMonth(d.getMonth() + n); return d.toISOString(); }
 function studentTeacherName(student) { return student?.teacher_name || student?.teacherName || DEFAULT_TEACHER_NAME; }
+function teacherReference(value) {
+  return {
+    id:String(value?.teacher_id || value?.teacherId || value?.id || "").trim(),
+    name:String(value?.teacher_name || value?.teacherName || value?.name || "").trim(),
+  };
+}
+function sameTeacherReference(left,right) {
+  const a=teacherReference(left),b=teacherReference(right);
+  if(a.id && b.id) return a.id===b.id;
+  return !!a.name && !!b.name && a.name===b.name;
+}
+function teacherHistoryDate(entry) {
+  if(!entry?.from) return "";
+  const direct=/^(\d{4}-\d{2}-\d{2})(?:$|T)/.exec(String(entry.from))?.[1] || "";
+  if(direct && isValidLocalDateInput(direct)) return direct;
+  const parsed=new Date(entry.from);
+  if(!Number.isFinite(parsed.getTime())) return "";
+  const key=parsed.toISOString().slice(0,10);
+  return isValidLocalDateInput(key) ? key : "";
+}
+function studentTeacherTimelineConflict(student,reference=null,today=turkeyDateKey()) {
+  if(!student || !isValidLocalDateInput(today)) return false;
+  const current=reference || {teacher_id:student.teacher_id,teacher_name:studentTeacherName(student)};
+  const dated=(Array.isArray(student.teacher_history)?student.teacher_history:[])
+    .map((entry,index)=>({entry,index,key:teacherHistoryDate(entry)}))
+    .filter(item=>item.key && (teacherReference(item.entry).id || teacherReference(item.entry).name))
+    .sort((a,b)=>a.key.localeCompare(b.key) || a.index-b.index);
+  const effective=dated.filter(item=>item.key<=today).at(-1)?.entry || null;
+  if(effective && !sameTeacherReference(effective,current)) return true;
+  return dated.some(item=>item.key>today && !sameTeacherReference(item.entry,current));
+}
+function teacherHistoryAfterAssignment(history,teacher,effectiveOn) {
+  if(!isValidLocalDateInput(effectiveOn)) throw new Error("INVALID_TEACHER_EFFECTIVE_DATE");
+  const current=teacherReference(teacher);
+  if(!current.id || !current.name) throw new Error("INVALID_TEACHER_REFERENCE");
+  const preserved=(Array.isArray(history)?history:[]).filter(entry=>{
+    const key=teacherHistoryDate(entry);
+    return !key || key<effectiveOn;
+  });
+  return [...preserved,{teacherId:current.id,teacherName:current.name,from:effectiveOn}]
+    .sort((a,b)=>{
+      const left=teacherHistoryDate(a),right=teacherHistoryDate(b);
+      if(!left && !right) return 0;
+      if(!left) return -1;
+      if(!right) return 1;
+      return left.localeCompare(right);
+    });
+}
+function teacherProfileEvidenceMatches(student,expected) {
+  if(!student || !expected) return false;
+  return student.teacher_id===expected.teacher_id
+    && student.teacher_name===expected.teacher_name
+    && programJSON(student.teacher_history || [])===programJSON(expected.teacher_history || []);
+}
 function isStudentLeft(student) { return !!(student?.left_at || student?.leftAt); }
 function isStudentDeleted(student) { return (student?.status_history || []).some(event=>event?.type==="deleted"); }
 function teacherForDate(student, iso, item = null) {
@@ -4915,7 +4969,9 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram 
   const previewSequence=useRef(0);
   const slotsChanged=programJSON(programSlots(f.lessonSlots))!==programJSON(programSlots(getStudentSlots(student)));
   const teacherChanged=f.teacher_id!==currentTeacherId;
-  const validTeacherChangeDate=!teacherChanged || isValidLocalDateInput(f.teacher_change_date);
+  const teacherTimelineConflict=studentTeacherTimelineConflict(student,{teacher_id:student.teacher_id || currentTeacherId,teacher_name:studentTeacherName(student)});
+  const teacherAssignmentNeedsDate=teacherChanged || teacherTimelineConflict;
+  const validTeacherChangeDate=!teacherAssignmentNeedsDate || (isValidLocalDateInput(f.teacher_change_date) && f.teacher_change_date<=turkeyDateKey());
   useEffect(()=>{setPreview(null);previewSequence.current+=1;return ()=>{previewSequence.current+=1;};},[formKey]);
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const setSlot = (i,k,v) => setF(p=>({
@@ -4934,10 +4990,13 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram 
         <option value="">Öğretmen seçin</option>
         {teachers.filter(t => t.active || t.id === currentTeacherId).map(t=><option key={t.id} value={t.id}>{t.name}{t.active ? "" : " (pasif)"}</option>)}
       </select>
-      {teacherChanged ? <>
+      {teacherAssignmentNeedsDate ? <>
+        {teacherTimelineConflict ? <p role="alert" style={{ margin:"6px 0 10px", padding:"10px 12px", borderRadius:10, background:"#fff7ed", color:"#9a3412", fontSize:12, lineHeight:1.5 }}>
+          Öğrenci kartındaki öğretmen ile takvimde kullanılan öğretmen geçmişi uyuşmuyor. Doğru öğretmeni seçip geçerli olduğu tarihi kaydederek bu öğrenciyi açıkça düzeltin.
+        </p> : null}
         <label style={LBL}>Öğretmen Değişiklik Tarihi</label>
-        <DatePickerField dateLabel="Öğretmen Değişiklik Tarihi" style={INP} type="date" value={f.teacher_change_date} onChange={e=>{s("teacher_change_date",e.target.value);setSaveError("");}} required aria-invalid={!validTeacherChangeDate} />
-        {!validTeacherChangeDate ? <p role="alert" style={{ margin:"-4px 0 10px", color:"#b91c1c", fontSize:12 }}>Öğretmen değişikliği için tarihi seçin.</p> : null}
+        <DatePickerField dateLabel="Öğretmen Değişiklik Tarihi" style={INP} type="date" max={turkeyDateKey()} value={f.teacher_change_date} onChange={e=>{s("teacher_change_date",e.target.value);setSaveError("");}} required aria-invalid={!validTeacherChangeDate} />
+        {!validTeacherChangeDate ? <p role="alert" style={{ margin:"-4px 0 10px", color:"#b91c1c", fontSize:12 }}>Öğretmen değişikliği için bugünden ileri olmayan geçerli bir tarih seçin.</p> : null}
       </> : null}
       <label style={LBL}>Veli Adı</label>
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
@@ -4998,7 +5057,7 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram 
         </> : null}
         <Btn bg="#111" disabled={saving || previewing || !validTeacherChangeDate || (slotsChanged && preview?.key!==formKey)} onClick={async() => {
           if (!f.name.trim() || !f.teacher_id || savingRef.current) return;
-          if (!validTeacherChangeDate) { setSaveError("Öğretmen değişikliği için geçerli bir tarih seçin."); return; }
+          if (!validTeacherChangeDate) { setSaveError("Öğretmen değişikliği için bugünden ileri olmayan geçerli bir tarih seçin."); return; }
           savingRef.current = true; setSaving(true); setSaveError("");
           try {
             const saved = await onDuzenle(student.id, f, studentGenderEditIntent(f,initialForm,openedRecordVersion),{expectedRecordVersion:openedRecordVersion,programPreview:slotsChanged ? preview?.result : null});
@@ -16500,7 +16559,8 @@ export default function App() {
       const event=evidence.data;
       if(event.operation_id!==issue.operationId || event.actor_user_id!==issue.actorUserId || event.student_id!==fresh.data.id
         || event.branch_id!==issue.branchId || event.resulting_record_version!==issue.params.p_expected_record_version+1
-        || programJSON(event.request_payload)!==programJSON(programChangeRequest(issue.params)) || fresh.data.record_version<event.resulting_record_version) {
+        || programJSON(event.request_payload)!==programJSON(programChangeRequest(issue.params)) || fresh.data.record_version<event.resulting_record_version
+        || !teacherProfileEvidenceMatches(fresh.data,issue.params.p_profile_changes)) {
         rememberProgramChange({...issue,state:"conflict"});return false;
       }
       setStudents(current=>current.map(s=>s.id===fresh.data.id?fresh.data:s));
@@ -16590,13 +16650,18 @@ export default function App() {
     const slots = programSlots(normalizeSlots(f.lessonSlots, f.day, f.time));
     const duration = parseInt(f.lessonDuration)||45;
     const selectedTeacher = teachers.find(t => t.id === f.teacher_id);
-    if (!selectedTeacher) { pop("Geçerli bir öğretmen seçin", 5000); return; }
+    if (!selectedTeacher) { pop("Geçerli bir öğretmen seçin", 5000); return false; }
     const currentTeacherId = sourceStudent.teacher_id || teachers.find(t => t.name === studentTeacherName(sourceStudent))?.id || "";
     const teacherChanged = currentTeacherId !== selectedTeacher.id;
-    if (teacherChanged && !isValidLocalDateInput(f.teacher_change_date)) {
-      pop("Öğretmen değişikliği için geçerli bir tarih seçin; kayıt gönderilmedi.",7000);
+    const teacherTimelineConflict=studentTeacherTimelineConflict(sourceStudent,{teacher_id:sourceStudent.teacher_id || currentTeacherId,teacher_name:studentTeacherName(sourceStudent)});
+    const teacherAssignmentNeedsDate=teacherChanged || teacherTimelineConflict;
+    if (teacherAssignmentNeedsDate && (!isValidLocalDateInput(f.teacher_change_date) || f.teacher_change_date>turkeyDateKey())) {
+      pop("Öğretmen değişikliği için bugünden ileri olmayan geçerli bir tarih seçin; kayıt gönderilmedi.",7000);
       return false;
     }
+    const expectedTeacherHistory=teacherAssignmentNeedsDate
+      ? teacherHistoryAfterAssignment(sourceStudent.teacher_history,selectedTeacher,f.teacher_change_date)
+      : (sourceStudent.teacher_history || []);
     const updated = students.map(s => {
       if (s.id!==sid) return s;
       const schedule = s.schedule || [];
@@ -16609,12 +16674,7 @@ export default function App() {
         name: f.name,
         teacher_id: selectedTeacher.id,
         teacher_name: selectedTeacher.name,
-        teacher_history: !teacherChanged
-          ? (s.teacher_history || [])
-          : [
-              ...(s.teacher_history || []).filter(entry => dateKey(entry.from) !== f.teacher_change_date),
-              { teacherId:selectedTeacher.id, teacherName:selectedTeacher.name, from:f.teacher_change_date }
-            ].sort((a,b)=>dateKey(a.from).localeCompare(dateKey(b.from))),
+        teacher_history: expectedTeacherHistory,
         phone: f.phone,
         veli_adi: f.veli_adi||"",
         dogum_tarihi: f.dogum_tarihi||"",
@@ -16645,7 +16705,12 @@ export default function App() {
     // must not introduce a program change merely by serializing the same slots.
     edited.lessonSlots=getStudentSlots(sourceStudent);edited.lesson_slots=sourceStudent.lesson_slots || getStudentSlots(sourceStudent);
     edited.day=sourceStudent.day;edited.time=sourceStudent.time;
-    await saveStudent(edited,genderIntent?.changes || null,genderIntent || {});
+    const savedStudent=await saveStudent(edited,genderIntent?.changes || null,genderIntent || {});
+    if(!teacherProfileEvidenceMatches(savedStudent,{teacher_id:selectedTeacher.id,teacher_name:selectedTeacher.name,teacher_history:expectedTeacherHistory})) {
+      await loadStudents(undefined,currentBranch?.id);
+      pop("Öğretmen ve takvim kaydı Supabase dönüşünde doğrulanamadı; kaydedilmiş kabul edilmedi.",9000);
+      return false;
+    }
     pop("Bilgiler güncellendi");
     return true;
   };
