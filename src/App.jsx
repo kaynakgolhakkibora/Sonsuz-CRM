@@ -5839,6 +5839,7 @@ function AddSheet({ teachers, onClose, onAdd }) {
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState("");
   const s = (k,v) => setF(p=>({...p,[k]:v}));
+  const validFirstDate = isValidLocalDateInput(f.firstDate);
   const setSlot = (i,k,v) => setF(p=>({
     ...p,
     lessonSlots: p.lessonSlots.map((slot,idx)=>idx===i ? {...slot,[k]:v} : slot),
@@ -5847,7 +5848,7 @@ function AddSheet({ teachers, onClose, onAdd }) {
   const removeSlot = (i) => setF(p=>({...p, lessonSlots:p.lessonSlots.filter((_,idx)=>idx!==i)}));
   const previewDates = () => {
     if (!f.name) return "";
-    if (!f.firstDate || f.firstDate.length < 10) return "";
+    if (!validFirstDate) return "";
     const from = new Date(f.firstDate + "T12:00:00");
     if (isNaN(from.getTime())) return "";
     return buildScheduleSlots(f.lessonSlots, f.count, from, f.lessonDuration).map(l=>fmtShort(l.date)+" "+l.time).join(" - ");
@@ -5897,11 +5898,13 @@ function AddSheet({ teachers, onClose, onAdd }) {
       <label style={LBL}>Paket (ders sayısı)</label>
       <input style={INP} type="number" value={f.count} onChange={e=>s("count",Math.max(1,parseInt(e.target.value)||1))} min={1} max={12} />
       <label style={LBL}>İlk Ders Tarihi</label>
-      <DatePickerField dateLabel="İlk Ders Tarihi" style={INP} type="date" value={f.firstDate} onChange={e=>s("firstDate",e.target.value)} />
+      <DatePickerField dateLabel="İlk Ders Tarihi" style={INP} type="date" value={f.firstDate} onChange={e=>{s("firstDate",e.target.value);setSaveError("");}} required aria-invalid={!validFirstDate} />
+      {!validFirstDate ? <p role="alert" style={{ margin:"-4px 0 10px", color:"#b91c1c", fontSize:12 }}>Öğrenci kaydı için İlk Ders Tarihini seçin.</p> : null}
       {f.name && previewDates() ? <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"10px 12px", marginTop:12, fontSize:12, color:"#166534" }}><strong>Planlanacak dersler:</strong><br />{previewDates()}</div> : null}
       {saveError ? <p role="alert" style={{ color:"#b91c1c", fontSize:12 }}>{saveError}</p> : null}
-      <div style={{ marginTop:16 }}><Btn bg="#111" disabled={saving} onClick={async() => {
+      <div style={{ marginTop:16 }}><Btn bg="#111" disabled={saving || !validFirstDate} onClick={async() => {
         if(!f.name.trim() || !f.teacher_id || !f.lesson_start_date || savingRef.current) return;
+        if(!validFirstDate) { setSaveError("Öğrenci kaydı için geçerli bir İlk Ders Tarihi seçin."); return; }
         if (!validStudentGenderChanges({ student_gender:f.student_gender, guardian_gender:f.guardian_gender })) {
           setSaveError("Öğrenci ve veli için seçim yapın. Bilgi yoksa Belirtilmedi, veli yoksa Veli yok seçebilirsiniz."); return;
         }
@@ -15781,7 +15784,8 @@ export default function App() {
     if (!requireProtectedSources(["students","teachers"],"Öğrenci ekleme")) return null;
     const genderChanges = { student_gender:f.student_gender, guardian_gender:f.guardian_gender };
     if (!validStudentGenderChanges(genderChanges)) { pop("Öğrenci ve veli cinsiyeti için seçim yapın; bilgi yoksa Belirtilmedi seçebilirsiniz.",6000); return null; }
-    const from = new Date((f.firstDate||turkeyDateKey())+"T12:00:00");
+    if (!isValidLocalDateInput(f.firstDate)) { pop("Geçerli bir İlk Ders Tarihi seçin; öğrenci kaydı gönderilmedi.",7000); return null; }
+    const from = new Date(f.firstDate+"T12:00:00");
     const slots = normalizeSlots(f.lessonSlots);
     const packageLessonCount = Math.max(1, parseInt(f.count)||PAYMENT_PACK_SIZE);
     const teacher = teachers.find(t => t.id === f.teacher_id);
