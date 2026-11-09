@@ -4914,6 +4914,8 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram 
   formKeyRef.current=formKey;
   const previewSequence=useRef(0);
   const slotsChanged=programJSON(programSlots(f.lessonSlots))!==programJSON(programSlots(getStudentSlots(student)));
+  const teacherChanged=f.teacher_id!==currentTeacherId;
+  const validTeacherChangeDate=!teacherChanged || isValidLocalDateInput(f.teacher_change_date);
   useEffect(()=>{setPreview(null);previewSequence.current+=1;return ()=>{previewSequence.current+=1;};},[formKey]);
   const s = (k,v) => setF(p=>({...p,[k]:v}));
   const setSlot = (i,k,v) => setF(p=>({
@@ -4932,9 +4934,10 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram 
         <option value="">Öğretmen seçin</option>
         {teachers.filter(t => t.active || t.id === currentTeacherId).map(t=><option key={t.id} value={t.id}>{t.name}{t.active ? "" : " (pasif)"}</option>)}
       </select>
-      {f.teacher_id !== currentTeacherId ? <>
+      {teacherChanged ? <>
         <label style={LBL}>Öğretmen Değişiklik Tarihi</label>
-        <DatePickerField dateLabel="Öğretmen Değişiklik Tarihi" style={INP} type="date" value={f.teacher_change_date} onChange={e=>s("teacher_change_date",e.target.value)} />
+        <DatePickerField dateLabel="Öğretmen Değişiklik Tarihi" style={INP} type="date" value={f.teacher_change_date} onChange={e=>{s("teacher_change_date",e.target.value);setSaveError("");}} required aria-invalid={!validTeacherChangeDate} />
+        {!validTeacherChangeDate ? <p role="alert" style={{ margin:"-4px 0 10px", color:"#b91c1c", fontSize:12 }}>Öğretmen değişikliği için tarihi seçin.</p> : null}
       </> : null}
       <label style={LBL}>Veli Adı</label>
       <input style={INP} value={f.veli_adi} onChange={e=>s("veli_adi",e.target.value)} placeholder="Veli adı soyadı" />
@@ -4993,8 +4996,9 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram 
             {preview.result.plan.changes.map(({before,after})=><p key={before.id}>{fmtShort(before.date)} {timeFromISO(before.date)} → {fmtShort(after.date)} {timeFromISO(after.date)}</p>)}
           </div> : <p style={{fontSize:12,color:"#64748b"}}>Yeni programı ve korunacak randevuları kaydetmeden önce kontrol edin.</p>}
         </> : null}
-        <Btn bg="#111" disabled={saving || previewing || (slotsChanged && preview?.key!==formKey)} onClick={async() => {
+        <Btn bg="#111" disabled={saving || previewing || !validTeacherChangeDate || (slotsChanged && preview?.key!==formKey)} onClick={async() => {
           if (!f.name.trim() || !f.teacher_id || savingRef.current) return;
+          if (!validTeacherChangeDate) { setSaveError("Öğretmen değişikliği için geçerli bir tarih seçin."); return; }
           savingRef.current = true; setSaving(true); setSaveError("");
           try {
             const saved = await onDuzenle(student.id, f, studentGenderEditIntent(f,initialForm,openedRecordVersion),{expectedRecordVersion:openedRecordVersion,programPreview:slotsChanged ? preview?.result : null});
@@ -16572,6 +16576,12 @@ export default function App() {
     const duration = parseInt(f.lessonDuration)||45;
     const selectedTeacher = teachers.find(t => t.id === f.teacher_id);
     if (!selectedTeacher) { pop("Geçerli bir öğretmen seçin", 5000); return; }
+    const currentTeacherId = sourceStudent.teacher_id || teachers.find(t => t.name === studentTeacherName(sourceStudent))?.id || "";
+    const teacherChanged = currentTeacherId !== selectedTeacher.id;
+    if (teacherChanged && !isValidLocalDateInput(f.teacher_change_date)) {
+      pop("Öğretmen değişikliği için geçerli bir tarih seçin; kayıt gönderilmedi.",7000);
+      return false;
+    }
     const updated = students.map(s => {
       if (s.id!==sid) return s;
       const schedule = s.schedule || [];
@@ -16584,11 +16594,11 @@ export default function App() {
         name: f.name,
         teacher_id: selectedTeacher.id,
         teacher_name: selectedTeacher.name,
-        teacher_history: (s.teacher_id || teachers.find(t => t.name === studentTeacherName(s))?.id) === selectedTeacher.id
+        teacher_history: !teacherChanged
           ? (s.teacher_history || [])
           : [
-              ...(s.teacher_history || []).filter(entry => dateKey(entry.from) !== (f.teacher_change_date || turkeyDateKey())),
-              { teacherId:selectedTeacher.id, teacherName:selectedTeacher.name, from:f.teacher_change_date || turkeyDateKey() }
+              ...(s.teacher_history || []).filter(entry => dateKey(entry.from) !== f.teacher_change_date),
+              { teacherId:selectedTeacher.id, teacherName:selectedTeacher.name, from:f.teacher_change_date }
             ].sort((a,b)=>dateKey(a.from).localeCompare(dateKey(b.from))),
         phone: f.phone,
         veli_adi: f.veli_adi||"",
