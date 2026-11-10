@@ -1696,8 +1696,33 @@ function BookingWarningSheet({report,onClose}) {
     <Btn bg="#111" onClick={onClose}>Anladım</Btn>
   </Sheet>;
 }
-function BookingPlanSheet({plan,onCheck,onAvailability,onConfirm,onClose}) {
-  const [overrides,setOverrides]=useState([]),[report,setReport]=useState(plan.initialReport || null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[availability,setAvailability]=useState(null);
+function bookingOfficialCandidates() {
+  return DAYS.map((day,index)=>({day,times:calendarAvailabilityStarts(index)}));
+}
+function bookingApplyProgramChoice(slots,choice) {
+  const current=programSlots(slots);
+  if(!choice || !Number.isInteger(choice.slotIndex) || choice.slotIndex<0 || choice.slotIndex>=current.length
+    || !DAYS.includes(choice.day) || !calendarAvailabilityStarts(DAYS.indexOf(choice.day)).includes(choice.time)) return null;
+  return current.map((slot,index)=>index===choice.slotIndex?{day:choice.day,time:choice.time}:slot);
+}
+function BookingAvailabilityGrid({days,onChoose,busy,dated=false}) {
+  const official=bookingOfficialCandidates();
+  return <div>{official.map((source,index)=>{
+    const result=days[index],available=new Set(Array.isArray(result?.times)?result.times:[]);
+    const label=dated && result?.date
+      ? DAYS[(new Date(result.date+'T12:00:00').getDay()+6)%7]+' · '+calendarDateLabel(result.date,{day:'numeric',month:'long'})
+      : source.day;
+    return <div key={dated?(result?.date || index):source.day} style={{marginTop:12}}>
+      <div style={{fontWeight:800,fontSize:13}}>{label}</div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(56px,1fr))',gap:6,marginTop:7}}>{source.times.map(time=>{
+        const free=available.has(time);
+        return <button type="button" key={time} disabled={busy || !free} onClick={()=>free&&onChoose(result,time)} aria-label={(result?.date || source.day)+' '+time+' '+(free?'Boş':'Dolu veya kapalı')} style={{border:'1px solid '+(free?'#b7e3cf':'#ded8dc'),background:free?'#e4f5ed':'#f3f0f2',color:free?'#217653':'#74656d',borderRadius:8,padding:'9px 2px',fontWeight:800,fontSize:12,cursor:free?'pointer':'not-allowed',textDecoration:free?'none':'line-through',textDecorationThickness:free?undefined:2,opacity:free?1:.75,fontVariantNumeric:'tabular-nums'}}>{time}</button>;
+      })}</div>
+    </div>;
+  })}</div>;
+}
+function BookingPlanSheet({plan,onCheck,onAvailability,onProgramAvailability,onProgramChoice,onConfirm,onClose}) {
+  const [overrides,setOverrides]=useState([]),[report,setReport]=useState(plan.initialReport || null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[availability,setAvailability]=useState(null),[programAvailability,setProgramAvailability]=useState(null);
   const sequence=useRef(0),alive=useRef(true);
   const nextChoices=(current,index,date,time)=>{
     const next={index,date,time};
@@ -1707,7 +1732,7 @@ function BookingPlanSheet({plan,onCheck,onAvailability,onConfirm,onClose}) {
     }).sort((left,right)=>left.index-right.index);
   };
   const change=(index,key,value)=>{
-    sequence.current++;setReport(null);setError('');setAvailability(null);
+    sequence.current++;setReport(null);setError('');setAvailability(null);setProgramAvailability(null);
     setOverrides(prev=>{
       const original=plan.lessons[index],parts=singleLessonMovePosition(original.date),current=prev.find(x=>x.index===index) || {index,date:parts.localDate,time:parts.time};
       const next={...current,[key]:value};return nextChoices(prev,index,next.date,next.time);
@@ -1728,6 +1753,15 @@ function BookingPlanSheet({plan,onCheck,onAvailability,onConfirm,onClose}) {
       if(alive.current && token===sequence.current){setAvailability(null);setError(e.message || 'Bu haftanın uygun saatleri alınamadı.');}
     } finally {if(alive.current && token===sequence.current)setBusy(false);}
   };
+  const showProgramAvailability=async()=>{
+    const token=++sequence.current;setBusy(true);setError('');setAvailability(null);setProgramAvailability({loading:true});
+    try {
+      const result=await onProgramAvailability();
+      if(alive.current && token===sequence.current)setProgramAvailability({loading:false,...result});
+    } catch(e) {
+      if(alive.current && token===sequence.current){setProgramAvailability(null);setError(e.message || 'Kalıcı ders programı alınamadı.');}
+    } finally {if(alive.current && token===sequence.current)setBusy(false);}
+  };
   const chooseAvailability=(index,date,time)=>{
     const choices=nextChoices(overrides,index,date,time);
     setOverrides(choices);setAvailability(null);void check(choices);
@@ -1735,7 +1769,18 @@ function BookingPlanSheet({plan,onCheck,onAvailability,onConfirm,onClose}) {
   useEffect(()=>{alive.current=true;if(!plan.initialReport)void check([]);return()=>{alive.current=false;sequence.current++;};},[]);
   const hard=report?.conflicts || [];
   return <Sheet title="Ders Saatlerini Kontrol Et" subtitle={plan.student.name+' · '+studentTeacherName(plan.student)+' · '+studentScheduleLabel(plan.student)} onClose={()=>{if(!busy)onClose();}}>
-    <p style={{fontSize:13,lineHeight:1.6}}>Haftalık yer korunur. Başka tarih seçmeniz yalnız ilgili dersi değiştirir.</p>
+    <p style={{fontSize:13,lineHeight:1.6}}>Kalıcı program doluysa önce yeni kalıcı yeri seçin. Yalnız belirli bir tarih doluysa o haftadaki tek dersi değiştirin.</p>
+    {plan.kind!=='load' && hard.some(conflict=>conflict.permanent) ? <div style={{margin:'12px 0',padding:14,border:'1px solid #fca5a5',borderRadius:12,background:'#fff7ed'}}>
+      <strong style={{display:'block',color:'#9a3412'}}>Seçilen kalıcı ders saati dolu veya kapalı.</strong>
+      <p style={{fontSize:12,lineHeight:1.6,color:'#7c2d12'}}>Önce kalıcı programdaki boş yeri seçin. Seçim forma geri taşınacak; ders tarihleri yeniden gösterilmeden kayıt yapılmayacak.</p>
+      <Btn bg="#4f46e5" outline disabled={busy} onClick={showProgramAvailability}>Ders Programındaki Boş Saatleri Gör</Btn>
+      {programAvailability ? <div style={{marginTop:12,padding:12,borderRadius:12,background:'#fff'}}>
+        {programAvailability.loading ? <p role="status" style={{margin:0}}>Kalıcı ders programı kontrol ediliyor…</p> : <>
+          <p style={{fontSize:12,lineHeight:1.5,marginTop:0}}>{programAvailability.slotIndex+1}. haftalık ders yeri için boş saatler. Dolu veya kapalı saatler üzeri çizili gösterilir.</p>
+          <BookingAvailabilityGrid days={programAvailability.days} busy={busy} onChoose={(day,time)=>onProgramChoice({slotIndex:programAvailability.slotIndex,day:day.day,time})} />
+        </>}
+      </div>:null}
+    </div>:null}
     {plan.lessons.map((lesson,index)=>{
       const choice=overrides.find(x=>x.index===index),parts=singleLessonMovePosition(lesson.date),date=choice?.date || parts.localDate,time=choice?.time || parts.time;
       const conflicts=hard.filter(x=>x.lessonId===lesson.id);
@@ -1749,11 +1794,7 @@ function BookingPlanSheet({plan,onCheck,onAvailability,onConfirm,onClose}) {
           {availability.loading ? <p role="status" style={{margin:0}}>Uygun saatler kontrol ediliyor…</p> : <>
             <strong>{calendarDateLabel(availability.weekStart,{day:'numeric',month:'long'})} – {calendarDateLabel(availability.weekEnd,{day:'numeric',month:'long',year:'numeric'})}</strong>
             <p style={{fontSize:12,lineHeight:1.5}}>Yalnız bu ders için {availability.duration} dakikalık uygun saatler. Seçimden sonra doluluk yeniden kontrol edilir.</p>
-            {availability.days.map(day=><div key={day.date} style={{marginTop:10}}>
-              <div style={{fontWeight:800,fontSize:13}}>{DAYS[(new Date(day.date+'T12:00:00').getDay()+6)%7]} · {calendarDateLabel(day.date,{day:'numeric',month:'long'})}</div>
-              {day.times.length ? <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:7}}>{day.times.map(slot=><button type="button" key={slot} disabled={busy} onClick={()=>chooseAvailability(index,day.date,slot)} style={{border:'1px solid #a5b4fc',background:'#fff',color:'#3730a3',borderRadius:999,padding:'7px 10px',fontWeight:800,cursor:'pointer'}}>{slot}</button>)}</div>
-                : <div style={{fontSize:12,color:'#6b7280',marginTop:5}}>Uygun saat yok</div>}
-            </div>)}
+            <BookingAvailabilityGrid dated days={availability.days} busy={busy} onChoose={(day,time)=>chooseAvailability(index,day.date,time)} />
           </>}
         </div>:null}
       </fieldset>;
@@ -1817,9 +1858,11 @@ function useStudentBooking(options) {
     try {
     let initialReport;try{initialReport=await previewDraft(draft,[],scope);}catch(e){p.notify(e.message,9000);return false;}
     if(!current(scope))return false;
+    if(draft.kind==='load' && initialReport.conflicts.some(conflict=>conflict.permanent)) {setWarning(initialReport);return false;}
     const choices=initialReport.conflicts.length || initialReport.warnings.length
       ? await new Promise(resolve=>{resolver.current=resolve;setPlan({...draft,scope,initialReport});}) : [];
     if(!choices || !current(scope))return false;
+    if(choices.programChoice)return choices;
     const operationId=uid(),params=draft.kind==='enroll'?{p_student:draft.student,p_overrides:choices,p_operation_id:operationId}:{...draft.params,p_overrides:choices,p_operation_id:operationId};
     const request=draft.kind==='enroll'?{student:draft.student,overrides:choices}:{studentId:params.p_student_id,branchId:params.p_branch_id,expectedRecordVersion:params.p_expected_record_version,totalCount:params.p_total_count,periodCount:params.p_period_count,plannedLessons:params.p_planned_lessons,overrides:choices};
     const x={actor:p.actor,branch:p.branch,studentId:draft.student.id,operationId,kind:draft.kind,params,request,state:'writing',createdAt:new Date().toISOString()};
@@ -1845,14 +1888,30 @@ function useStudentBooking(options) {
     if(!plan || !plan.lessons[index])throw Error('Ders seçimi güncelliğini yitirdi.');
     const p=latest.current,scope=plan.scope,student=bookingApplyOverrides(plan,choices);
     if(!current(scope))throw Error('Çalışma alanı değişti.');
-    const result=await timedSingleLessonRequest(()=>supabase.rpc('preview_student_booking_week',{p_branch_id:p.branch,p_student:student,p_expected_record_version:plan.expectedVersion,p_lesson_id:plan.lessons[index].id,p_times:TIMES}));
+    const official=bookingOfficialCandidates(),officialTimes=[...new Set(official.flatMap(day=>day.times))];
+    const result=await timedSingleLessonRequest(()=>supabase.rpc('preview_student_booking_week',{p_branch_id:p.branch,p_student:student,p_expected_record_version:plan.expectedVersion,p_lesson_id:plan.lessons[index].id,p_times:officialTimes}));
     const data=result.data,dates=Array.isArray(data?.days)?data.days:[];
     if(!current(scope) || result.error || data?.actorUserId!==p.actor || data.branchId!==p.branch || data.studentId!==student.id
       || data.lessonId!==plan.lessons[index].id || data.expectedRecordVersion!==plan.expectedVersion || !isValidLocalDateInput(data.weekStart)
       || !isValidLocalDateInput(data.weekEnd) || !Number.isInteger(data.duration) || data.duration<1 || data.duration>240 || dates.length!==7
       || dates.some((day,dayIndex)=>{const expected=new Date(data.weekStart+'T12:00:00');expected.setDate(expected.getDate()+dayIndex);return !isValidLocalDateInput(day?.date) || day.date!==expected.toISOString().slice(0,10)
-        || !Array.isArray(day.times) || day.times.some(time=>!TIMES.includes(time)) || new Set(day.times).size!==day.times.length;})) {
+        || !Array.isArray(day.times) || day.times.some(time=>!official[dayIndex].times.includes(time)) || new Set(day.times).size!==day.times.length;})) {
       throw Error(result.error?.code==='PGRST202'?'V299 veritabanı kurulumu gerekli. Uygun saatler alınamadı.':'Bu haftanın uygun saatleri doğrulanamadı. Güncel kayıtları ve bağlantıyı kontrol edin.');
+    }
+    return data;
+  };
+  const programAvailabilityPlan=async()=>{
+    if(!plan || plan.kind==='load')throw Error('Paket yüklerken kalıcı program değiştirilemez.');
+    const p=latest.current,scope=plan.scope,candidates=bookingOfficialCandidates();
+    if(!current(scope))throw Error('Çalışma alanı değişti.');
+    const result=await timedSingleLessonRequest(()=>supabase.rpc('preview_student_booking_program',{p_branch_id:p.branch,p_student:plan.student,p_expected_record_version:plan.expectedVersion,p_candidates:candidates}));
+    const data=result.data,slots=programSlots(getStudentSlots(plan.student));
+    if(!current(scope) || result.error || data?.actorUserId!==p.actor || data.branchId!==p.branch || data.studentId!==plan.student.id
+      || data.expectedRecordVersion!==plan.expectedVersion || !Number.isInteger(data.slotIndex) || data.slotIndex<0 || data.slotIndex>=slots.length
+      || programJSON(data.currentSlot)!==programJSON(slots[data.slotIndex]) || !Array.isArray(data.days) || data.days.length!==DAYS.length
+      || data.days.some((day,index)=>day?.day!==DAYS[index] || !Array.isArray(day.times)
+        || day.times.some(time=>!candidates[index].times.includes(time)) || new Set(day.times).size!==day.times.length)) {
+      throw Error(result.error?.code==='PGRST202'?'V300 veritabanı kurulumu gerekli. Kalıcı boş saatler alınamadı.':'Kalıcı boş saatler doğrulanamadı. Güncel kayıtları ve bağlantıyı kontrol edin.');
     }
     return data;
   };
@@ -1862,7 +1921,7 @@ function useStudentBooking(options) {
     try {
     const draft={kind:'review',student,lessons,expectedVersion};
     let report;try{report=await previewDraft(draft,[],scope);}catch(e){p.notify(e.message,9000);return false;}
-    if(report.conflicts.length && !report.conflicts.some(c=>!c.permanent && lessons.some(lesson=>lesson.id===c.lessonId))){setWarning(report);return false;}
+    if(report.conflicts.length && !report.conflicts.every(c=>c.permanent || lessons.some(lesson=>lesson.id===c.lessonId))){setWarning(report);return false;}
     if(!report.conflicts.length && !report.warnings.length)return [];
     const choice=await new Promise(resolve=>{resolver.current=resolve;setPlan({...draft,scope,initialReport:report});});
     return choice && current(scope) ? choice : false;
@@ -1881,7 +1940,7 @@ function useStudentBooking(options) {
     <Btn bg="#92400e" disabled={busy || issue.invalid || issue.branch!==options.branch} onClick={check}>Kayıt Sonucunu Kontrol Et</Btn>
     {issue.state==='not_found'?<Btn bg="#111" disabled={busy || issue.branch!==options.branch} onClick={retry}>Aynı İşlemi Yeniden Dene</Btn>:null}
   </div>:null;
-  return {start,review,issue,busy,banner,dialogs:<>{plan?<BookingPlanSheet key={plan.student.id} plan={plan} onCheck={checkPlan} onAvailability={availabilityPlan} onConfirm={closePlan} onClose={()=>closePlan(null)} />:null}{warning?<BookingWarningSheet report={warning} onClose={()=>setWarning(null)} />:null}</>};
+  return {start,review,issue,busy,banner,dialogs:<>{plan?<BookingPlanSheet key={plan.student.id} plan={plan} onCheck={checkPlan} onAvailability={availabilityPlan} onProgramAvailability={programAvailabilityPlan} onProgramChoice={choice=>closePlan({programChoice:choice})} onConfirm={closePlan} onClose={()=>closePlan(null)} />:null}{warning?<BookingWarningSheet report={warning} onClose={()=>setWarning(null)} />:null}</>};
 }
 
 async function timedSingleLessonRequest(buildRequest, timeoutMs = SINGLE_LESSON_REQUEST_TIMEOUT_MS) {
@@ -5141,7 +5200,13 @@ function DuzenleSheet({ student, teachers, onClose, onDuzenle, onPreviewProgram 
           savingRef.current = true; setSaving(true); setSaveError("");
           try {
             const saved = await onDuzenle(student.id, f, studentGenderEditIntent(f,initialForm,openedRecordVersion),{expectedRecordVersion:openedRecordVersion,programPreview:slotsChanged ? preview?.result : null});
-            if (saved) onClose();
+            if (saved?.programChoice) {
+              const nextSlots=bookingApplyProgramChoice(f.lessonSlots,saved.programChoice);
+              if(!nextSlots) {setSaveError("Seçilen kalıcı saat doğrulanamadı. Güncel kayıttan yeniden deneyin.");return;}
+              setF(current=>({...current,lessonSlots:nextSlots,day:nextSlots[0].day,time:nextSlots[0].time}));
+              setPreview(null);previewSequence.current+=1;
+              setSaveError("Kalıcı boş saat forma taşındı. Yeni ders tarihlerini görmek için Programı Kontrol Et'e basın; henüz kayıt yapılmadı.");
+            } else if (saved) onClose();
             else setSaveError("Kayıt doğrulanamadı. Bilgiler kaydedilmiş kabul edilmedi; güncel kaydı kontrol edin.");
           } catch {
             setSaveError("Kayıt doğrulanamadı. Güncel kaydı kontrol edin; işlem otomatik tekrarlanmadı.");
@@ -6052,7 +6117,16 @@ function AddSheet({ teachers, onClose, onAdd }) {
           setSaveError("Öğrenci ve veli için seçim yapın. Bilgi yoksa Belirtilmedi, veli yoksa Veli yok seçebilirsiniz."); return;
         }
         savingRef.current = true; setSaving(true); setSaveError("");
-        try { const saved=await onAdd(f); if(saved) onClose(); else setSaveError("Öğrenci kaydı doğrulanamadı. Güncel kayıtları kontrol edin."); }
+        try {
+          const saved=await onAdd(f);
+          if(saved?.programChoice) {
+            const nextSlots=bookingApplyProgramChoice(f.lessonSlots,saved.programChoice);
+            if(!nextSlots) {setSaveError("Seçilen kalıcı saat doğrulanamadı. Güncel kayıttan yeniden deneyin.");return;}
+            setF(current=>({...current,lessonSlots:nextSlots}));
+            setSaveError("Kalıcı boş saat forma taşındı. Planlanacak dersleri kontrol edip Kaydet'e yeniden basın; henüz kayıt yapılmadı.");
+          } else if(saved) onClose();
+          else setSaveError("Öğrenci kaydı doğrulanamadı. Güncel kayıtları kontrol edin.");
+        }
         catch { setSaveError("Öğrenci kaydı doğrulanamadı. İşlem otomatik tekrarlanmadı."); }
         finally { savingRef.current = false; setSaving(false); }
       }}>{saving?"Kaydediliyor...":"Kaydet"}</Btn></div>
@@ -16681,6 +16755,7 @@ export default function App() {
       const programLessons=preview.plan.changes.map(change=>change.after);
       const overrides=await booking.review(prospective,student.record_version,programLessons);
       if(overrides===false)return false;
+      if(overrides?.programChoice)return overrides;
       const operationId=uid();
       const bookingMode=overrides.length>0;
       const params={p_student_id:student.id,p_branch_id:branchId,p_expected_record_version:student.record_version,p_slots:slots,p_profile_changes:profile,p_preview_signature:preview.signature,
