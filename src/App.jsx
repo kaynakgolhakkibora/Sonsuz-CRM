@@ -1699,6 +1699,21 @@ function BookingWarningSheet({report,onClose}) {
 function bookingOfficialCandidates() {
   return DAYS.map((day,index)=>({day,times:calendarAvailabilityStarts(index)}));
 }
+function bookingSanitizeOfficialWeekDays(days,weekStart,official) {
+  if(!Array.isArray(days) || days.length!==7 || !isValidLocalDateInput(weekStart) || !Array.isArray(official) || official.length!==7)return null;
+  const permitted=new Set(official.flatMap(day=>Array.isArray(day?.times)?day.times:[])),sanitized=[];
+  for(let dayIndex=0;dayIndex<7;dayIndex++){
+    const day=days[dayIndex],expected=new Date(weekStart+'T12:00:00');expected.setDate(expected.getDate()+dayIndex);
+    if(!isValidLocalDateInput(day?.date) || day.date!==expected.toISOString().slice(0,10) || !Array.isArray(day.times))return null;
+    const seen=new Set();
+    for(const time of day.times){
+      if(typeof time!=='string' || !permitted.has(time) || seen.has(time))return null;
+      seen.add(time);
+    }
+    sanitized.push({...day,times:official[dayIndex].times.filter(time=>seen.has(time))});
+  }
+  return sanitized;
+}
 function bookingApplyProgramChoice(slots,choice) {
   const current=programSlots(slots);
   if(!choice || !Number.isInteger(choice.slotIndex) || choice.slotIndex<0 || choice.slotIndex>=current.length
@@ -1890,15 +1905,13 @@ function useStudentBooking(options) {
     if(!current(scope))throw Error('Çalışma alanı değişti.');
     const official=bookingOfficialCandidates(),officialTimes=[...new Set(official.flatMap(day=>day.times))];
     const result=await timedSingleLessonRequest(()=>supabase.rpc('preview_student_booking_week',{p_branch_id:p.branch,p_student:student,p_expected_record_version:plan.expectedVersion,p_lesson_id:plan.lessons[index].id,p_times:officialTimes}));
-    const data=result.data,dates=Array.isArray(data?.days)?data.days:[];
+    const data=result.data,dates=bookingSanitizeOfficialWeekDays(data?.days,data?.weekStart,official);
     if(!current(scope) || result.error || data?.actorUserId!==p.actor || data.branchId!==p.branch || data.studentId!==student.id
       || data.lessonId!==plan.lessons[index].id || data.expectedRecordVersion!==plan.expectedVersion || !isValidLocalDateInput(data.weekStart)
-      || !isValidLocalDateInput(data.weekEnd) || !Number.isInteger(data.duration) || data.duration<1 || data.duration>240 || dates.length!==7
-      || dates.some((day,dayIndex)=>{const expected=new Date(data.weekStart+'T12:00:00');expected.setDate(expected.getDate()+dayIndex);return !isValidLocalDateInput(day?.date) || day.date!==expected.toISOString().slice(0,10)
-        || !Array.isArray(day.times) || day.times.some(time=>!official[dayIndex].times.includes(time)) || new Set(day.times).size!==day.times.length;})) {
+      || !isValidLocalDateInput(data.weekEnd) || !Number.isInteger(data.duration) || data.duration<1 || data.duration>240 || !dates) {
       throw Error(result.error?.code==='PGRST202'?'V299 veritabanı kurulumu gerekli. Uygun saatler alınamadı.':'Bu haftanın uygun saatleri doğrulanamadı. Güncel kayıtları ve bağlantıyı kontrol edin.');
     }
-    return data;
+    return {...data,days:dates};
   };
   const programAvailabilityPlan=async()=>{
     if(!plan || plan.kind==='load')throw Error('Paket yüklerken kalıcı program değiştirilemez.');
