@@ -15807,11 +15807,22 @@ export default function App() {
       return false;
     }
     const intent = normalLessonInformedCancellationIntent(sourceStudent,lid,actionKind,note);
-    const hasEvaluation = !!intent.lesson && [
-      "lessonScore","lesson_score","lessonScoreBreakdown","lesson_score_breakdown","activeMinutes","active_minutes",
-      "taskFocusMinutes","task_focus_minutes","focusMinutes","focus_minutes","redirectionCount","redirection_count",
+    const strictEvaluationKeys = [
+      "lessonScore","lesson_score","lessonScoreBreakdown","lesson_score_breakdown",
       "lessonFocus","lesson_focus","homework",
-    ].some(key=>intent.lesson[key] !== undefined && intent.lesson[key] !== null && String(intent.lesson[key]).trim() !== "");
+    ];
+    const zeroPlaceholderKeys = [
+      "activeMinutes","active_minutes","taskFocusMinutes","task_focus_minutes",
+      "focusMinutes","focus_minutes","redirectionCount","redirection_count",
+    ];
+    const hasEvaluation = !!intent.lesson && (
+      strictEvaluationKeys.some(key=>intent.lesson[key] !== undefined && intent.lesson[key] !== null && String(intent.lesson[key]).trim() !== "")
+      || zeroPlaceholderKeys.some(key=>{
+        const value = intent.lesson[key];
+        if (value === undefined || value === null || String(value).trim() === "") return false;
+        return !/^0+([.]0+)?$/.test(String(value).trim());
+      })
+    );
     const hasMakeup = (sourceStudent.telafi_records || []).some(record=>String(record?.lessonId || "") === String(lid));
     if (intent.matchingLessonCount !== 1 || !intent.lesson || intent.lesson.status !== intent.sourceStatus) {
       pop("Dersin güncel durumu bu işleme uygun değil. Kayıt gönderilmedi; listeyi yenileyin.",8000);
