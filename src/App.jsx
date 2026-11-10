@@ -1696,14 +1696,21 @@ function BookingWarningSheet({report,onClose}) {
     <Btn bg="#111" onClick={onClose}>Anladım</Btn>
   </Sheet>;
 }
-function BookingPlanSheet({plan,onCheck,onConfirm,onClose}) {
-  const [overrides,setOverrides]=useState([]),[report,setReport]=useState(plan.initialReport || null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+function BookingPlanSheet({plan,onCheck,onAvailability,onConfirm,onClose}) {
+  const [overrides,setOverrides]=useState([]),[report,setReport]=useState(plan.initialReport || null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[availability,setAvailability]=useState(null);
   const sequence=useRef(0),alive=useRef(true);
+  const nextChoices=(current,index,date,time)=>{
+    const next={index,date,time};
+    return [...current.filter(x=>x.index!==index),next].filter(x=>{
+      const original=singleLessonMovePosition(plan.lessons[x.index]?.date);
+      return original && (x.date!==original.localDate || x.time!==original.time);
+    }).sort((left,right)=>left.index-right.index);
+  };
   const change=(index,key,value)=>{
-    sequence.current++;setReport(null);setError('');
+    sequence.current++;setReport(null);setError('');setAvailability(null);
     setOverrides(prev=>{
       const original=plan.lessons[index],parts=singleLessonMovePosition(original.date),current=prev.find(x=>x.index===index) || {index,date:parts.localDate,time:parts.time};
-      const next={...current,[key]:value};return [...prev.filter(x=>x.index!==index),next].filter(x=>x.date!==singleLessonMovePosition(plan.lessons[x.index].date).localDate || x.time!==singleLessonMovePosition(plan.lessons[x.index].date).time);
+      const next={...current,[key]:value};return nextChoices(prev,index,next.date,next.time);
     });
   };
   const check=async choices=>{
@@ -1711,6 +1718,19 @@ function BookingPlanSheet({plan,onCheck,onConfirm,onClose}) {
     try {const result=await onCheck(choices);if(alive.current && token===sequence.current)setReport(result);}
     catch(e){if(alive.current && token===sequence.current)setError(e.message || 'Doluluk kontrol edilemedi.');}
     finally {if(alive.current && token===sequence.current)setBusy(false);}
+  };
+  const showAvailability=async index=>{
+    const token=++sequence.current;setBusy(true);setError('');setAvailability({index,loading:true});
+    try {
+      const result=await onAvailability(overrides,index);
+      if(alive.current && token===sequence.current)setAvailability({index,loading:false,...result});
+    } catch(e) {
+      if(alive.current && token===sequence.current){setAvailability(null);setError(e.message || 'Bu haftanın uygun saatleri alınamadı.');}
+    } finally {if(alive.current && token===sequence.current)setBusy(false);}
+  };
+  const chooseAvailability=(index,date,time)=>{
+    const choices=nextChoices(overrides,index,date,time);
+    setOverrides(choices);setAvailability(null);void check(choices);
   };
   useEffect(()=>{alive.current=true;if(!plan.initialReport)void check([]);return()=>{alive.current=false;sequence.current++;};},[]);
   const hard=report?.conflicts || [];
@@ -1724,6 +1744,18 @@ function BookingPlanSheet({plan,onCheck,onConfirm,onClose}) {
         <label style={LBL}>Tarih</label><DatePickerField dateLabel={(index+1)+'. ders tarihi'} style={INP} value={date} onChange={e=>change(index,'date',e.target.value)} />
         <label style={LBL}>Saat</label><select aria-label={(index+1)+'. ders saati'} style={INP} value={time} onChange={e=>change(index,'time',e.target.value)}>{[...new Set([...TIMES,time])].map(t=><option key={t}>{t}</option>)}</select>
         {conflicts.map((c,i)=><p key={i} role="alert" style={{fontSize:12,color:'#b91c1c'}}>{bookingConflictText(c)}</p>)}
+        {conflicts.some(c=>!c.permanent && c.lessonId===lesson.id) ? <Btn bg="#4f46e5" outline disabled={busy} onClick={()=>showAvailability(index)}>Bu Haftanın Uygun Saatlerini Gör</Btn>:null}
+        {availability?.index===index ? <div style={{marginTop:12,padding:12,borderRadius:12,background:'#eef2ff'}}>
+          {availability.loading ? <p role="status" style={{margin:0}}>Uygun saatler kontrol ediliyor…</p> : <>
+            <strong>{calendarDateLabel(availability.weekStart,{day:'numeric',month:'long'})} – {calendarDateLabel(availability.weekEnd,{day:'numeric',month:'long',year:'numeric'})}</strong>
+            <p style={{fontSize:12,lineHeight:1.5}}>Yalnız bu ders için {availability.duration} dakikalık uygun saatler. Seçimden sonra doluluk yeniden kontrol edilir.</p>
+            {availability.days.map(day=><div key={day.date} style={{marginTop:10}}>
+              <div style={{fontWeight:800,fontSize:13}}>{DAYS[(new Date(day.date+'T12:00:00').getDay()+6)%7]} · {calendarDateLabel(day.date,{day:'numeric',month:'long'})}</div>
+              {day.times.length ? <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:7}}>{day.times.map(slot=><button type="button" key={slot} disabled={busy} onClick={()=>chooseAvailability(index,day.date,slot)} style={{border:'1px solid #a5b4fc',background:'#fff',color:'#3730a3',borderRadius:999,padding:'7px 10px',fontWeight:800,cursor:'pointer'}}>{slot}</button>)}</div>
+                : <div style={{fontSize:12,color:'#6b7280',marginTop:5}}>Uygun saat yok</div>}
+            </div>)}
+          </>}
+        </div>:null}
       </fieldset>;
     })}
     {hard.filter(x=>!x.lessonId || !plan.lessons.some(l=>l.id===x.lessonId)).map((c,i)=><p key={i} role="alert" style={{color:'#b91c1c'}}>{bookingConflictText(c)}</p>)}
@@ -1809,16 +1841,31 @@ function useStudentBooking(options) {
     return result.data;
   };
   const checkPlan=choices=>plan?previewDraft(plan,choices,plan.scope):Promise.reject(Error('Form kapandı.'));
-  const review=async(student,expectedVersion)=>{
+  const availabilityPlan=async(choices,index)=>{
+    if(!plan || !plan.lessons[index])throw Error('Ders seçimi güncelliğini yitirdi.');
+    const p=latest.current,scope=plan.scope,student=bookingApplyOverrides(plan,choices);
+    if(!current(scope))throw Error('Çalışma alanı değişti.');
+    const result=await timedSingleLessonRequest(()=>supabase.rpc('preview_student_booking_week',{p_branch_id:p.branch,p_student:student,p_expected_record_version:plan.expectedVersion,p_lesson_id:plan.lessons[index].id,p_times:TIMES}));
+    const data=result.data,dates=Array.isArray(data?.days)?data.days:[];
+    if(!current(scope) || result.error || data?.actorUserId!==p.actor || data.branchId!==p.branch || data.studentId!==student.id
+      || data.lessonId!==plan.lessons[index].id || data.expectedRecordVersion!==plan.expectedVersion || !isValidLocalDateInput(data.weekStart)
+      || !isValidLocalDateInput(data.weekEnd) || !Number.isInteger(data.duration) || data.duration<1 || data.duration>240 || dates.length!==7
+      || dates.some((day,dayIndex)=>{const expected=new Date(data.weekStart+'T12:00:00');expected.setDate(expected.getDate()+dayIndex);return !isValidLocalDateInput(day?.date) || day.date!==expected.toISOString().slice(0,10)
+        || !Array.isArray(day.times) || day.times.some(time=>!TIMES.includes(time)) || new Set(day.times).size!==day.times.length;})) {
+      throw Error(result.error?.code==='PGRST202'?'V299 veritabanı kurulumu gerekli. Uygun saatler alınamadı.':'Bu haftanın uygun saatleri doğrulanamadı. Güncel kayıtları ve bağlantıyı kontrol edin.');
+    }
+    return data;
+  };
+  const review=async(student,expectedVersion,lessons=[])=>{
     const p=latest.current,scope=p.scopeKey;if(!p.ready || resolver.current || working.current || preparing.current)return false;
     const preparation=uid();preparing.current=preparation;
     try {
-    const draft={kind:'review',student,lessons:[],expectedVersion};
+    const draft={kind:'review',student,lessons,expectedVersion};
     let report;try{report=await previewDraft(draft,[],scope);}catch(e){p.notify(e.message,9000);return false;}
-    if(report.conflicts.length){setWarning(report);return false;}
-    if(!report.warnings.length)return true;
+    if(report.conflicts.length && !report.conflicts.some(c=>!c.permanent && lessons.some(lesson=>lesson.id===c.lessonId))){setWarning(report);return false;}
+    if(!report.conflicts.length && !report.warnings.length)return [];
     const choice=await new Promise(resolve=>{resolver.current=resolve;setPlan({...draft,scope,initialReport:report});});
-    return !!choice && current(scope);
+    return choice && current(scope) ? choice : false;
     } finally {if(preparing.current===preparation)preparing.current=null;}
   };
   const closePlan=choices=>{const resolve=resolver.current;resolver.current=null;setPlan(null);resolve?.(choices);};
@@ -1834,7 +1881,7 @@ function useStudentBooking(options) {
     <Btn bg="#92400e" disabled={busy || issue.invalid || issue.branch!==options.branch} onClick={check}>Kayıt Sonucunu Kontrol Et</Btn>
     {issue.state==='not_found'?<Btn bg="#111" disabled={busy || issue.branch!==options.branch} onClick={retry}>Aynı İşlemi Yeniden Dene</Btn>:null}
   </div>:null;
-  return {start,review,issue,busy,banner,dialogs:<>{plan?<BookingPlanSheet key={plan.student.id} plan={plan} onCheck={checkPlan} onConfirm={closePlan} onClose={()=>closePlan(null)} />:null}{warning?<BookingWarningSheet report={warning} onClose={()=>setWarning(null)} />:null}</>};
+  return {start,review,issue,busy,banner,dialogs:<>{plan?<BookingPlanSheet key={plan.student.id} plan={plan} onCheck={checkPlan} onAvailability={availabilityPlan} onConfirm={closePlan} onClose={()=>closePlan(null)} />:null}{warning?<BookingWarningSheet report={warning} onClose={()=>setWarning(null)} />:null}</>};
 }
 
 async function timedSingleLessonRequest(buildRequest, timeoutMs = SINGLE_LESSON_REQUEST_TIMEOUT_MS) {
@@ -4881,12 +4928,45 @@ function readProgramChangeIssue(actor) {
   if (!raw) return null;
   const issue=JSON.parse(raw);
   if (issue.actorUserId!==actor || !SINGLE_LESSON_MOVE_UUID.test(issue.operationId || "") || !issue.params || issue.params.p_operation_id!==issue.operationId) throw new Error("PROGRAM_LOCAL_EVIDENCE_INVALID");
+  if (issue.bookingMode===true && !Array.isArray(issue.params.p_overrides)) throw new Error("PROGRAM_LOCAL_EVIDENCE_INVALID");
   return issue;
 }
 
 function programChangeRequest(params) {
   return {studentId:params.p_student_id,branchId:params.p_branch_id,expectedRecordVersion:params.p_expected_record_version,
     slots:params.p_slots,profileChanges:params.p_profile_changes,previewSignature:params.p_preview_signature};
+}
+
+function programBookingChangeRequest(params) {
+  return {...programChangeRequest(params),overrides:params.p_overrides};
+}
+
+function programBookingEvidenceMatches(evidence,issue) {
+  const params=issue?.params,receipt=evidence?.receipt,event=evidence?.programChange,moves=evidence?.moves,student=evidence?.student;
+  const overrides=Array.isArray(params?.p_overrides)?[...params.p_overrides].sort((left,right)=>left.index-right.index):params?.p_overrides;
+  if (!params || !receipt || !event || !student || !Array.isArray(moves) || !Array.isArray(overrides)
+    || evidence.operationId!==issue.operationId || receipt.operation_id!==issue.operationId || event.operation_id!==issue.operationId
+    || receipt.student_id!==params.p_student_id || event.student_id!==params.p_student_id || student.id!==params.p_student_id
+    || receipt.branch_id!==issue.branchId || event.branch_id!==issue.branchId || student.branch_id!==issue.branchId
+    || receipt.actor_user_id!==issue.actorUserId || event.actor_user_id!==issue.actorUserId
+    || programJSON(receipt.request_payload)!==programJSON(programBookingChangeRequest(params))
+    || programJSON(event.request_payload)!==programJSON(programChangeRequest(params))
+    || receipt.program_resulting_record_version!==params.p_expected_record_version+1
+    || receipt.resulting_record_version!==params.p_expected_record_version+1+overrides.length
+    || student.record_version<receipt.resulting_record_version || moves.length!==overrides.length
+    || !Array.isArray(event.changed_lessons)) return false;
+  for (let i=0;i<overrides.length;i+=1) {
+    const choice=overrides[i],base=event.changed_lessons[choice.index]?.after,move=moves[i],before=singleLessonMovePosition(base?.date);
+    if (!base?.id || !before || move?.operation_id!==receipt.move_operation_ids?.[i] || move.student_id!==student.id
+      || move.branch_id!==student.branch_id || move.actor_user_id!==issue.actorUserId || move.lesson_id!==base.id
+      || move.expected_record_version!==params.p_expected_record_version+1+i || move.resulting_record_version!==params.p_expected_record_version+2+i
+      || move.request_payload?.expectedDate!==base.date || move.request_payload?.expectedTime!==before.time
+      || move.request_payload?.targetDate!==choice.date || move.request_payload?.targetTime!==choice.time
+      || move.target_after?.date!==calendarWallDate(choice.date,choice.time).toISOString()
+      || move.target_after?.time!==choice.time
+      || !student.schedule?.some(lesson=>lesson.id===base.id && programJSON(lesson)===programJSON(move.target_after))) return false;
+  }
+  return teacherProfileEvidenceMatches(student,params.p_profile_changes);
 }
 
 function programTimeline(student,record) {
@@ -16548,6 +16628,20 @@ export default function App() {
     const isCurrent=()=>issue.actorUserId===programChangeActorRef.current && generation===protectedDataLoadGenerationRef.current && programChangeIssueRef.current?.operationId===issue.operationId;
     programChangeCheckingRef.current=true;setProgramChangeChecking(true);
     try {
+      if(issue.bookingMode===true) {
+        const evidence=await timedSingleLessonRequest(()=>supabase.rpc("read_program_change_booking_operation",{p_branch_id:issue.branchId,p_operation_id:issue.operationId}));
+        if(!isCurrent() || evidence.error)return false;
+        if(!evidence.data) {
+          const fresh=await timedSingleLessonRequest(()=>supabase.from("students").select("*").eq("id",issue.params.p_student_id).eq("branch_id",issue.branchId).single());
+          if(!isCurrent() || fresh.error || fresh.data?.id!==issue.params.p_student_id || fresh.data.branch_id!==issue.branchId)return false;
+          if(issue.knownRejected){setStudents(current=>current.map(s=>s.id===fresh.data.id?fresh.data:s));return clearProgramChange(issue);}
+          rememberProgramChange({...issue,state:"unknown"});return false;
+        }
+        if(!programBookingEvidenceMatches(evidence.data,issue)){rememberProgramChange({...issue,state:"conflict"});return false;}
+        setStudents(current=>current.map(s=>s.id===evidence.data.student.id?evidence.data.student:s));
+        if(programChangeWritingRef.current){rememberProgramChange({...issue,state:"verified"});return true;}
+        const cleared=clearProgramChange(issue);if(cleared)pop("Program ve bu haftaya özel ders saati veritabanından doğrulandı");return cleared;
+      }
       const evidence=await timedSingleLessonRequest(()=>supabase.from("student_program_changes").select("*").eq("operation_id",issue.operationId).eq("branch_id",issue.branchId).maybeSingle());
       if(!isCurrent() || evidence.error) return false;
       const fresh=await timedSingleLessonRequest(()=>supabase.from("students").select("*").eq("id",issue.params.p_student_id).eq("branch_id",issue.branchId).single());
@@ -16584,14 +16678,18 @@ export default function App() {
         || preview.studentId!==student.id || preview.branchId!==branchId || programJSON(preview.plan.nextSlots)!==programJSON(slots)) return false;
       const prospective={...student,...profile,schedule:preview.plan.schedule,lesson_slots:slots,day:slots[0].day,time:slots[0].time,
         _booking_preview_from:preview.plan.effectiveOn,_booking_preview_slots:slots};
-      if(!await booking.review(prospective,student.record_version))return false;
+      const programLessons=preview.plan.changes.map(change=>change.after);
+      const overrides=await booking.review(prospective,student.record_version,programLessons);
+      if(overrides===false)return false;
       const operationId=uid();
-      const params={p_student_id:student.id,p_branch_id:branchId,p_expected_record_version:student.record_version,p_slots:slots,p_profile_changes:profile,p_preview_signature:preview.signature,p_operation_id:operationId};
-      const issue={operationId,actorUserId:actor,branchId,params,state:"writing",createdAt:new Date().toISOString(),label:student.name};
+      const bookingMode=overrides.length>0;
+      const params={p_student_id:student.id,p_branch_id:branchId,p_expected_record_version:student.record_version,p_slots:slots,p_profile_changes:profile,p_preview_signature:preview.signature,
+        ...(bookingMode?{p_overrides:overrides}:{}),p_operation_id:operationId};
+      const issue={operationId,actorUserId:actor,branchId,params,bookingMode,state:"writing",createdAt:new Date().toISOString(),label:student.name};
       if(!rememberProgramChange(issue)){pop("İşlem niyeti güvenli saklanamadı; kayıt gönderilmedi.",9000);return false;}
       programChangeWritingRef.current=true;branchScopedWriteCountRef.current+=1;
       try {
-        const result=await timedSingleLessonRequest(()=>supabase.rpc("change_student_program",params).single());
+        const result=await timedSingleLessonRequest(()=>bookingMode?supabase.rpc("change_student_program_booking",params):supabase.rpc("change_student_program",params).single());
         if(actor!==programChangeActorRef.current || generation!==protectedDataLoadGenerationRef.current) return false;
         const knownRejected=!!result.error && !result.timedOut && ["23P01","22023","22007","42501","40001","P0001","P0002","23502","23503","23505","23514","22P02","22001","57014"].includes(result.error.code);
         const pending={...issue,state:"unknown",knownRejected};rememberProgramChange(pending);
