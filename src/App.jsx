@@ -3823,6 +3823,16 @@ function Pill({ label, bg, color }) {
   return <span style={{ fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:20, background:bg, color, whiteSpace:"nowrap" }}>{label}</span>;
 }
 
+function CorrectedPill() {
+  return <Pill label="Düzenlendi" bg="#ede9fe" color="#5b21b6" />;
+}
+
+const CORRECTION_REASON_REQUIRED_MESSAGE = "Değişiklik kaydedilmedi; düzeltme gerekçesini yazın.";
+
+function emptyNormalLessonCorrectionMarkers(branchId="") {
+  return { branchId:branchId || "", lessonsByStudent:{} };
+}
+
 function StatusPill({ status }) {
   const M = { upcoming:{label:"Planlandı",bg:"#f3f4f6",color:"#6b7280"}, completed:{label:"Katıldı",bg:"#d1fae5",color:"#065f46"}, noshow:{label:"No-Show",bg:"#fee2e2",color:"#991b1b"}, lastminute:{label:"Son Dakika",bg:"#ffedd5",color:"#9a3412"}, telafi:{label:"Telafi",bg:"#dbeafe",color:"#1e40af"}, [INFORMED_CANCELLATION_STATUS]:{label:"Haberli İptal · Telafi Yok",bg:"#fef3c7",color:"#92400e"} };
   const s = M[status] || M.upcoming;
@@ -3931,12 +3941,12 @@ function Btn({ children, onClick, bg="#111", color="#fff", outline=false, mb=8, 
   );
 }
 
-function NoteArea({ value, onChange, placeholder="Açıklama ekle...", label="Açıklama (opsiyonel)" }) {
+function NoteArea({ value, onChange, placeholder="Açıklama ekle...", label="Açıklama (opsiyonel)", inputRef=null, invalid=false }) {
   return (
     <div style={{ marginBottom:12 }}>
       <label style={{ display:"block", fontSize:11, fontWeight:700, color:"#888", letterSpacing:1, marginBottom:6 }}>{label}</label>
-      <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={3}
-        style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa", color:"#111" }} />
+      <textarea ref={inputRef} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={3} aria-invalid={invalid || undefined}
+        style={{ width:"100%", border:invalid?"1.5px solid #dc2626":"1.5px solid #e5e7eb", borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", outline:"none", resize:"none", background:"#fafafa", color:"#111", boxShadow:invalid?"0 0 0 3px rgba(220,38,38,.12)":"none" }} />
     </div>
   );
 }
@@ -4336,7 +4346,7 @@ function MakeupCancellationReasonOptions({ value, onChange, disabled=false }) {
   </fieldset>;
 }
 
-function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluationMessage, saving=false }) {
+function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluationMessage, saving=false, corrected=false }) {
   const lesson = lessonId ? student.schedule.find(l=>l.id===lessonId) : student.schedule.find(l=>l.status==="upcoming");
   const previousHomework = homeworkForLessonCheck(student, lesson);
   const lessonCheckRef = homeworkCheckRef("lesson", lesson?.id);
@@ -4352,6 +4362,7 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
   const [homeworkStatus, setHomeworkStatus] = useState(homeworkToEvaluate?.homeworkCheckedInRef === lessonCheckRef ? (homeworkToEvaluate.homeworkStatus || "") : "");
   const [correctionReason, setCorrectionReason] = useState("");
   const [formError, setFormError] = useState("");
+  const correctionReasonRef = useRef(null);
   const [evaluationContext]=useState(()=>({
     scoringVersion:lessonEvaluationScoringVersion(lesson),
     instrument:isVersionedLessonScoring(lesson?.lessonScoreBreakdown?.scoringVersion) ? lesson.lessonScoreBreakdown.instrument : student.instrument,
@@ -4390,6 +4401,15 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
   const needsException = quotaApplies && telafiQuota.count !== null && telafiQuota.count >= 6;
   const storedScoreValue = lesson?.lessonScore ?? lesson?.lesson_score;
   const correctionRequired = !!lesson && ((lesson.status || "upcoming") !== "upcoming" || (storedScoreValue !== null && storedScoreValue !== undefined && String(storedScoreValue).trim() !== ""));
+  const requestCorrectionReason = () => {
+    setFormError(CORRECTION_REASON_REQUIRED_MESSAGE);
+    requestAnimationFrame(() => {
+      const field = correctionReasonRef.current;
+      if (!field) return;
+      field.scrollIntoView({ behavior:"smooth", block:"center" });
+      field.focus({ preventScroll:true });
+    });
+  };
   const isInformedCancellation = lesson?.status === INFORMED_CANCELLATION_STATUS;
   const reset = (s) => { setNote(s === "attended" ? (lesson?.note || "") : s === "informed-cancellation" ? "" : ""); setPendingExceptionAction(""); setCancellationReason(""); setStep(s); };
   const act = (a,options={}) => {
@@ -4412,6 +4432,7 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
 
   return (
     <Sheet title={student.name} subtitle={lesson ? fmtDate(lesson.date)+" - "+lessonTime(student, lesson) : ""} onClose={onClose} onBack={onBack}>
+      {corrected ? <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:12 }}><CorrectedPill /></div> : null}
       {step === "main" && <>
         {lesson && lesson.status !== "upcoming" ? (
           <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:12, padding:"10px 12px", marginBottom:12 }}>
@@ -4551,7 +4572,7 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
             <p style={{ margin:0, fontSize:12, color:"#9a3412", fontWeight:800, lineHeight:1.5 }}>Bu ders daha önce işlendiği için yapılacak değişiklik geçmişte gerekçesiyle korunacak.</p>
           </div>
           <label style={LBL}>Düzeltme Nedeni</label>
-          <NoteArea value={correctionReason} onChange={value=>{ setCorrectionReason(value); setFormError(""); }} label="Düzeltme gerekçesi" placeholder="Örn. Aktif ders süresi yanlış girilmişti." />
+          <NoteArea value={correctionReason} onChange={value=>{ setCorrectionReason(value); setFormError(""); }} label="Düzeltme gerekçesi" placeholder="Örn. Aktif ders süresi yanlış girilmişti." inputRef={correctionReasonRef} invalid={formError===CORRECTION_REASON_REQUIRED_MESSAGE && !correctionReason.trim()} />
         </> : null}
         {scorePreview ? <p style={{fontSize:16,fontWeight:800,color:"#065f46"}}>Ders puanı: {fmtNumber(scorePreview.total)}/100</p> : null}
         {formError ? <p style={{ margin:"8px 0 0", fontSize:12, color:"#dc2626", fontWeight:800 }}>{formError}</p> : null}
@@ -4565,7 +4586,7 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
           if (scoringVersion === null) { setFormError("Bu değerlendirme modeli bu sürümde desteklenmiyor."); return; }
                   if (isNewEvaluation && (!scorePreview || (usesCognitive && Number(cognitiveMinutes) > duration))) { setFormError(usesCognitive ? "Bilişsel süreyi ve bütün teknik değerlendirme cevaplarını kontrol edin." : "Bütün teknik değerlendirme cevaplarını kontrol edin."); return; }
                   if (!lessonFocus) { setFormError("Dersin temel odağını seçin."); return; }
-          if (correctionRequired && !correctionReason.trim()) { setFormError("Daha önce kaydedilmiş ders verilerini değiştirmek için düzeltme nedenini yazın."); return; }
+          if (correctionRequired && !correctionReason.trim()) { requestCorrectionReason(); return; }
           const scoreBreakdown = isNewEvaluation ? scorePreview : calculateLessonScore({
             homeworkStatus,
             homeworkApplicable:!!homeworkToEvaluate,
@@ -5868,7 +5889,7 @@ function StudentTelafiList({ student, records, groups, currentQuota, onSelect })
   </div>;
 }
 
-function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onTelafiReversal, onPieceAdd, onPieceEdit, pieceEditScope, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onPreviewProgram, onToggleFreeze, onPaymentEdit, onPaymentDelete }) {
+function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading=false, initialTab="takvim", onClose, onRecharge, onUndoLastPackage, onLessonClick, onShift, onMoveOne, onTelafiDone, onTelafiPlanMessage, onTelafiEvaluationMessage, onTelafiReversal, onPieceAdd, onPieceEdit, pieceEditScope, onMesaj, onÖdemeAl, paymentSavingId="", onZamYap, onDelete, onStudentLeft, onEkDersEkle, onEkDersOdeme, onEkDersSil, onEkDersDurum, onSingleLessonOpen=()=>{}, onDuzenle, onPreviewProgram, onToggleFreeze, onPaymentEdit, onPaymentDelete, correctedLessonIds={} }) {
   const [tab, setTab] = useState(initialTab);
   const [telafiSel, setTelafiSel] = useState(null);
   const [shiftSel, setShiftSel] = useState(null);
@@ -6008,6 +6029,7 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
                   </div>
                   <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                     <StatusPill status={l.status} />
+                    {correctedLessonIds[l.id] === true ? <CorrectedPill /> : null}
                     {clickable ? <button onClick={() => setShiftSel(l)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"4px 8px", cursor:"pointer", fontSize:14, color:"#6366f1" }}>shift</button> : null}
                   </div>
                 </div>
@@ -11172,6 +11194,7 @@ export default function App() {
   });
   const [authNotice, setAuthNotice] = useState("");
   const [students, setStudents] = useState([]);
+  const [normalLessonCorrectionMarkers, setNormalLessonCorrectionMarkers] = useState(() => emptyNormalLessonCorrectionMarkers());
   const [teachers, setTeachers] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [singleLessons, setSingleLessons] = useState([]);
@@ -11273,7 +11296,7 @@ export default function App() {
   const newRegistrationReportAutoCheckRef = useRef("");
   const connectionAutoRetryRef = useRef(false);
   const protectedDataLoadGenerationRef = useRef(0);
-  const calendarSourceLoadSequenceRef = useRef({ students:0, teachers:0 });
+  const calendarSourceLoadSequenceRef = useRef({ students:0, teachers:0, normalLessonCorrections:0 });
   const accessContextLoadSequenceRef = useRef(0);
   const monthlyReportLoadSequenceRef = useRef(0);
   const branchScopedWriteCountRef = useRef(0);
@@ -12024,6 +12047,62 @@ export default function App() {
       setProtectedDataLoadIssues(current=>({ ...current, students:true }));
       console.error("Veri yükleme hatası:", error);
       pop("Veriler yüklenemedi. Bağlantı veya Supabase yetkisini kontrol et.", 6000);
+    }
+    return { ok:!error && Array.isArray(data), data:data || [], error:error || null };
+  };
+
+  const markNormalLessonCorrected = (studentId, lessonId, branchId=currentBranch?.id) => {
+    if (!studentId || !lessonId || !branchId) return;
+    setNormalLessonCorrectionMarkers(current => {
+      if (current.branchId !== branchId) return { branchId, lessonsByStudent:{ [studentId]:{ [lessonId]:true } } };
+      if (current.lessonsByStudent?.[studentId]?.[lessonId] === true) return current;
+      return {
+        branchId,
+        lessonsByStudent:{
+          ...current.lessonsByStudent,
+          [studentId]:{ ...(current.lessonsByStudent?.[studentId] || {}), [lessonId]:true },
+        },
+      };
+    });
+  };
+
+  const loadNormalLessonCorrectionMarkers = async (expectedGeneration=protectedDataLoadGenerationRef.current, branchId=currentBranch?.id) => {
+    const sequence = ++calendarSourceLoadSequenceRef.current.normalLessonCorrections;
+    const actorUserId = authSession?.user?.id || "";
+    const isCurrent = () => expectedGeneration === protectedDataLoadGenerationRef.current && sequence === calendarSourceLoadSequenceRef.current.normalLessonCorrections && actorUserId === programChangeActorRef.current;
+    let data = null;
+    let error = null;
+    try {
+      if (!branchId) throw new Error("ACTIVE_BRANCH_REQUIRED");
+      const result = await readCompleteCalendarSource((from,to) => supabase
+        .from("normal_lesson_evaluation_operations")
+        .select("id:operation_id,branch_id,student_id,lesson_id,created_at",{ count:"exact" })
+        .eq("branch_id",branchId)
+        .eq("operation_kind","corrected")
+        .order("created_at")
+        .order("operation_id")
+        .range(from,to),"branch_id",branchId,isCurrent);
+      data = result.data;
+      error = result.error;
+    } catch (caught) {
+      error = caught;
+    }
+    if (!isCurrent()) return { ok:false, superseded:true };
+    if (!error && Array.isArray(data)) {
+      const lessonsByStudent = {};
+      for (const row of data) {
+        if (typeof row.student_id !== "string" || typeof row.lesson_id !== "string" || !row.student_id || !row.lesson_id) continue;
+        lessonsByStudent[row.student_id] = { ...(lessonsByStudent[row.student_id] || {}), [row.lesson_id]:true };
+      }
+      setNormalLessonCorrectionMarkers(current => {
+        if (current.branchId !== branchId) return { branchId, lessonsByStudent };
+        const merged = { ...lessonsByStudent };
+        for (const [studentId, lessonIds] of Object.entries(current.lessonsByStudent || {})) merged[studentId] = { ...(merged[studentId] || {}), ...lessonIds };
+        return { branchId, lessonsByStudent:merged };
+      });
+    } else {
+      setNormalLessonCorrectionMarkers(emptyNormalLessonCorrectionMarkers(branchId));
+      console.error("Ders düzeltme etiketleri yüklenemedi:", error);
     }
     return { ok:!error && Array.isArray(data), data:data || [], error:error || null };
   };
@@ -14240,6 +14319,15 @@ export default function App() {
     });
   }, [giris,activeOrganization?.id,currentBranch?.id]);
 
+  useEffect(() => {
+    if (!giris || !browserOnline || !currentBranch?.id) {
+      calendarSourceLoadSequenceRef.current.normalLessonCorrections += 1;
+      setNormalLessonCorrectionMarkers(emptyNormalLessonCorrectionMarkers(currentBranch?.id || ""));
+      return;
+    }
+    void loadNormalLessonCorrectionMarkers(protectedDataLoadGenerationRef.current,currentBranch.id);
+  }, [giris,browserOnline,currentBranch?.id]);
+
   const reconcileSingleLessonOperation = async (operation, attempts=1) => {
     const receiptScopeKey=paymentReceiptScopeRef.current?.key;
     if (!operation?.operationId) return { state:"unknown", data:null };
@@ -15112,6 +15200,7 @@ export default function App() {
         if (options.notify !== false) pop("Ders değerlendirmesi kaydedildi. Güncel kaydı görmek için işlemin ait olduğu şubeyi açın.",9000);
         return { ok:false, applied:true, wrongBranch:true };
       }
+      if (row.operation_kind === "corrected") markNormalLessonCorrected(savedStudent.id,issue.lessonId,issue.branchId);
       setStudents(previous=>previous.map(student=>student.id === savedStudent.id ? savedStudent : student));
       setDetailSt(previous=>previous?.id === savedStudent.id ? savedStudent : previous);
       setActionModal(null);
@@ -15217,6 +15306,7 @@ export default function App() {
           && evaluatedLesson?.status === "completed"
           && lessonEvaluationTargetMatches(evaluatedLesson,intent.evaluation);
         if (exactResult) {
+          if (intent.expectedOperationKind === "corrected") markNormalLessonCorrected(savedStudent.id,lid,branchId);
           setStudents(previous=>previous.map(student=>student.id === savedStudent.id ? savedStudent : student));
           setDetailSt(previous=>previous?.id === savedStudent.id ? savedStudent : previous);
           setActionModal(null);
@@ -19132,9 +19222,9 @@ export default function App() {
         if (!student || records.length !== 1) return <Sheet title="Telafi Dersi" onClose={()=>setActionModal(null)}><p>Telafi kaydı güncellendi. Lütfen pencereyi kapatıp dersi yeniden açın.</p></Sheet>;
         return <TelafiSheet key={student.id+"|"+records[0].id} student={student} record={records[0]} onClose={()=>setActionModal(null)} onSave={(id,payload)=>handleTelafiDone(student.id,id,payload)} onPlanMessage={record=>{ setActionModal(null); setTelafiPlanMessagePrompt({student,record}); }} onEvaluationMessage={record=>{ setActionModal(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} />;
       })() : null}
-      {actionModal && actionModal.kind !== "telafi" ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} saving={normalLessonEvaluationBusyId===actionModal.lessonId || normalLessonMakeupBusyId===actionModal.lessonId || normalLessonInformedCancellationBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonInformedCancellationWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current || normalLessonMakeupWritingRef.current || normalLessonInformedCancellationWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
+      {actionModal && actionModal.kind !== "telafi" ? <ActionSheet student={students.find(s=>s.id===actionModal.student.id)} lessonId={actionModal.lessonId} corrected={normalLessonCorrectionMarkers.branchId===currentBranch?.id && normalLessonCorrectionMarkers.lessonsByStudent?.[actionModal.student.id]?.[actionModal.lessonId]===true} saving={normalLessonEvaluationBusyId===actionModal.lessonId || normalLessonMakeupBusyId===actionModal.lessonId || normalLessonInformedCancellationBusyId===actionModal.lessonId} onClose={()=>{ if (!normalLessonEvaluationWritingRef.current && !normalLessonMakeupWritingRef.current && !normalLessonInformedCancellationWritingRef.current) setActionModal(null); }} onBack={actionModal.returnTo ? ()=>{ if (normalLessonEvaluationWritingRef.current || normalLessonMakeupWritingRef.current || normalLessonInformedCancellationWritingRef.current) return; const student=students.find(s=>s.id===actionModal.returnTo.studentId); setActionModal(null); setDetailInitialTab(actionModal.returnTo.tab || "takvim"); if(student) setDetailSt(student); } : null} onAction={(a,n,l,options)=>handleAction(actionModal.student.id,a,n,l,options)} onEvaluationMessage={(record)=>{ const student=students.find(s=>s.id===actionModal.student.id); setActionModal(null); setLessonEvaluationPrompt({ student, record, type:"normal" }); }} /> : null}
       {telafiMessagePrompt ? <TelafiHakkiMesajSheet student={telafiMessagePrompt.student} record={telafiMessagePrompt.record} onClose={()=>setTelafiMessagePrompt(null)} onSent={async(result)=>{ setTelafiMessagePrompt(null); pop(result === "copied" ? "Telafi hakkı mesajı kopyalandı" : "Telafi hakkı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
-      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiReversal={handleMakeupReversal} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onPieceEdit={handlePieceHistoryUpdate} pieceEditScope={pieceEditScope} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onPreviewProgram={previewProgramChange} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
+      {detailSt ? <DetailSheet student={students.find(s=>s.id===detailSt.id)} teachers={teachers} singleLessons={singleLessons} singleLessonsLoading={singleLessonsLoading} initialTab={detailInitialTab} correctedLessonIds={normalLessonCorrectionMarkers.branchId===currentBranch?.id ? (normalLessonCorrectionMarkers.lessonsByStudent?.[detailSt.id] || {}) : {}} onClose={()=>{ setDetailSt(null); setDetailInitialTab("takvim"); }} onRecharge={handleRecharge} onUndoLastPackage={handleUndoLastPackage} onLessonClick={(st,lid,tab)=>{ const returnTab=tab || "takvim"; setDetailSt(null); setDetailInitialTab(returnTab); setTimeout(()=>setActionModal({student:st,lessonId:lid,returnTo:{studentId:st.id,tab:returnTab}}),100); }} onShift={handleShift} onMoveOne={handleMoveOneLesson} onTelafiDone={handleTelafiDone} onTelafiReversal={handleMakeupReversal} onTelafiPlanMessage={(student,record)=>setTelafiPlanMessagePrompt({student,record})} onTelafiEvaluationMessage={(student,record)=>{ setDetailSt(null); setLessonEvaluationPrompt({student,record,type:"telafi"}); }} onPieceAdd={handlePieceAdd} onPieceEdit={handlePieceHistoryUpdate} pieceEditScope={pieceEditScope} onMesaj={(st)=>setMesajSt(st)} onÖdemeAl={handleÖdemeKaydet} paymentSavingId={paymentSavingId} onZamYap={handleZamYap} onDelete={handleDelete} onStudentLeft={handleStudentLeft} onEkDersEkle={handleEkDersEkle} onEkDersOdeme={handleEkDersOdeme} onEkDersSil={handleEkDersSil} onEkDersDurum={handleEkDersDurum} onSingleLessonOpen={lesson=>{ setDetailSt(null); setDetailInitialTab("takvim"); setSingleLessonSheet({mode:"edit",lesson}); }} onDuzenle={handleDuzenle} onPreviewProgram={previewProgramChange} onToggleFreeze={handleToggleFreeze} onPaymentEdit={handleÖdemeDuzenle} onPaymentDelete={handleÖdemeSil} /> : null}
       {makeupReversalPrompt && makeupReversalPrompt.scopeKey===programJSON([authSession?.user?.id || "",currentBranch?.id || "",protectedDataLoadGenerationRef.current]) ? <MakeupReversalSheet key={makeupReversalPrompt.action+"|"+makeupReversalPrompt.record.id} prompt={makeupReversalPrompt} onClose={()=>setMakeupReversalPrompt(null)} onConfirm={async reason=>{const saved=await makeupReversal.reverse(makeupReversalPrompt,reason);if(saved || makeupReversal.isPending())setMakeupReversalPrompt(null);return saved;}} /> : null}
       {lessonEvaluationPrompt ? <WhatsAppPreviewSheet title={lessonEvaluationPrompt.type === "telafi" ? "Telafi Dersi Değerlendirmesi" : "Ders Değerlendirmesi"} subtitle={lessonEvaluationPrompt.student} text={msgDersDegerlendirmesi(lessonEvaluationPrompt.student, lessonEvaluationPrompt.record, lessonEvaluationPrompt.type)} onClose={()=>setLessonEvaluationPrompt(null)} onSent={async(result)=>{ setLessonEvaluationPrompt(null); pop(result === "copied" ? "Ders değerlendirmesi kopyalandı" : "Ders değerlendirmesi WhatsApp'ta hazırlandı"); }} /> : null}
       {telafiPlanMessagePrompt ? <TelafiPlanMesajSheet onVerify={()=>verifyMakeupPlanMessage(telafiPlanMessagePrompt.student,telafiPlanMessagePrompt.record)} student={telafiPlanMessagePrompt.student} record={telafiPlanMessagePrompt.record} onClose={()=>setTelafiPlanMessagePrompt(null)} onSent={async(result)=>{ setTelafiPlanMessagePrompt(null); pop(result === "copied" ? "Telafi planı mesajı kopyalandı" : "Telafi planı mesajı WhatsApp'ta hazırlandı"); }} /> : null}
