@@ -6635,6 +6635,10 @@ function msgPaketOzeti(student) {
 }
 
 
+function lessonEvaluationTeacherNote(record, type="normal") {
+  return type === "telafi" ? record?.doneNote : record?.note;
+}
+
 function msgDersDegerlendirmesiV200(student, record, type="normal") {
   const b=record.lessonScoreBreakdown, isTelafi=type === "telafi";
   const date=isTelafi ? (telafiDoneAt(record)||telafiPlannedAt(record)) : record.date;
@@ -6654,7 +6658,8 @@ function msgDersDegerlendirmesiV200(student, record, type="normal") {
   }
   lines.push(b.homeworkApplicable ? "Önceki ödev: "+homeworkStatusLabel(record.evaluatedHomeworkStatus)+" ("+b.homework+"/20)" : "Önceki ödev: Bu ders için değerlendirilecek ödev yoktu");
   lines.push("","Ders Verim Puanı: "+fmtNumber(storedLessonScore(record) ?? 0)+"/100");
-  if (record.note || record.doneNote) lines.push("","Öğretmen notu: "+(record.note || record.doneNote));
+  const teacherNote=lessonEvaluationTeacherNote(record,type);
+  if (teacherNote) lines.push("","Öğretmen notu: "+teacherNote);
   lines.push("","Gelecek ders ödevi: "+(record.homework || "Ödev verilmedi"));
   return lines.join("\n");
 }
@@ -6677,7 +6682,8 @@ function msgDersDegerlendirmesiV213(student, record, type="normal") {
   }
   lines.push(b.homeworkApplicable ? "Önceki ödev: "+homeworkStatusLabel(record.evaluatedHomeworkStatus)+" ("+b.homework+"/30)" : "Önceki ödev: Bu ders için değerlendirilecek ödev yoktu");
   lines.push("","Ders Verim Puanı: "+fmtNumber(storedLessonScore(record) ?? 0)+"/100");
-  if (record.note || record.doneNote) lines.push("","Öğretmen notu: "+(record.note || record.doneNote));
+  const teacherNote=lessonEvaluationTeacherNote(record,type);
+  if (teacherNote) lines.push("","Öğretmen notu: "+teacherNote);
   lines.push("","Gelecek ders ödevi: "+(record.homework || "Ödev verilmedi"));
   return lines.join("\n");
 }
@@ -6700,7 +6706,8 @@ function msgDersDegerlendirmesi(student, record, type="normal") {
   if (breakdown.homeworkApplicable === false) lines.push("Önceki ödev: Bu ders için değerlendirilecek ödev yoktu");
   else lines.push("Önceki ödev: "+homeworkStatusLabel(record?.evaluatedHomeworkStatus)+" ("+(breakdown.homework ?? 0)+"/40)");
   lines.push("", "Ders Verim Puanı: "+fmtNumber(storedLessonScore(record) ?? 0)+"/100");
-  if (record?.note || record?.doneNote) lines.push("", "Öğretmen notu: "+(record.note || record.doneNote));
+  const teacherNote = lessonEvaluationTeacherNote(record,type);
+  if (teacherNote) lines.push("", "Öğretmen notu: "+teacherNote);
   lines.push("", "Gelecek ders ödevi: "+(record?.homework || "Ödev verilmedi"));
   return lines.join("\n");
 }
