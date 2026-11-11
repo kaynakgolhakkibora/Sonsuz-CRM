@@ -129,6 +129,7 @@ const NORMAL_LESSON_MAKEUP_ISSUE_KEY = "sonsuz_crm_normal_lesson_makeup_issue_v1
 const NORMAL_LESSON_MAKEUP_PLAN_ISSUE_KEY = "sonsuz_crm_normal_lesson_makeup_plan_issue_v1";
 const NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_KEY = "sonsuz_crm_normal_lesson_makeup_completion_issue_v1";
 const NORMAL_LESSON_INFORMED_CANCELLATION_ISSUE_KEY = "sonsuz_crm_normal_lesson_informed_cancellation_issue_v1";
+const NEW_REGISTRATION_REPORT_ISSUE_KEY = "sonsuz_crm_new_registration_report_issue_v1";
 const STAFF_ISSUE_STORE_VERSION = 2;
 const STAFF_ISSUE_LEGACY_ACTOR_KEY = "__legacy__";
 const NORMAL_LESSON_EVALUATION_ISSUE_STORE_VERSION = 1;
@@ -141,6 +142,8 @@ const NORMAL_LESSON_MAKEUP_COMPLETION_ISSUE_STORE_VERSION = 1;
 const NORMAL_LESSON_MAKEUP_COMPLETION_ABSENCE_SETTLE_MS = 20000;
 const NORMAL_LESSON_INFORMED_CANCELLATION_ISSUE_STORE_VERSION = 1;
 const NORMAL_LESSON_INFORMED_CANCELLATION_ABSENCE_SETTLE_MS = 20000;
+const NEW_REGISTRATION_REPORT_ISSUE_STORE_VERSION = 1;
+const NEW_REGISTRATION_REPORT_ABSENCE_SETTLE_MS = 20000;
 const SINGLE_LESSON_REQUEST_TIMEOUT_MS = 15000;
 const CALENDAR_SOURCE_PAGE_SIZE = 250;
 const CALENDAR_SOURCE_MAX_PAGES = 10000;
@@ -1327,6 +1330,43 @@ function writeNormalLessonInformedCancellationIssue(actorUserId, issue, expected
   }
 }
 
+function readNewRegistrationReportIssueStore() {
+  try {
+    const raw = localStorage.getItem(NEW_REGISTRATION_REPORT_ISSUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed?.version !== NEW_REGISTRATION_REPORT_ISSUE_STORE_VERSION || !parsed.issues || typeof parsed.issues !== "object") return {};
+    return Object.fromEntries(Object.entries(parsed.issues).filter(([,issue])=>issue && typeof issue === "object" && issue.operationId));
+  } catch {
+    return {};
+  }
+}
+
+function readNewRegistrationReportIssue(actorUserId="") {
+  const actorKey = String(actorUserId || "");
+  if (!actorKey) return null;
+  return readNewRegistrationReportIssueStore()[actorKey] || null;
+}
+
+function writeNewRegistrationReportIssue(actorUserId, issue, expectedOperationId="") {
+  if (typeof window === "undefined" || !actorUserId) return false;
+  try {
+    const issues = readNewRegistrationReportIssueStore();
+    const actorKey = String(actorUserId);
+    const current = issues[actorKey];
+    if (expectedOperationId && current?.operationId !== expectedOperationId) return false;
+    if (issue) issues[actorKey] = issue;
+    else delete issues[actorKey];
+    if (Object.keys(issues).length) {
+      localStorage.setItem(NEW_REGISTRATION_REPORT_ISSUE_KEY,JSON.stringify({ version:NEW_REGISTRATION_REPORT_ISSUE_STORE_VERSION, issues }));
+    } else {
+      localStorage.removeItem(NEW_REGISTRATION_REPORT_ISSUE_KEY);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return value.map(canonicalJson);
   if (value && typeof value === "object") {
@@ -1388,6 +1428,14 @@ function normalLessonInformedCancellationIssueMessage(issue) {
   if (issue.state === "applied_pending_refresh") return "Haberli iptal Supabase'e kaydedildi; güncel öğrenci kaydı henüz yüklenemedi. İşlemi yeniden göndermeyin.";
   if (issue.state === "conflict") return "Haberli iptal kanıtı beklenen öğrenci, ders veya işlemle eşleşmedi. İşlemi yeniden göndermeyin.";
   return "Haberli iptal işleminin sonucu henüz kesinleştirilemedi. Sistem işlemi tekrar göndermeden yalnızca Supabase kaydını kontrol edecek.";
+}
+
+function newRegistrationReportIssueMessage(issue) {
+  if (!issue) return "";
+  if (issue.state === "not_applied") return "Yeni kayıt raporu tercihi Supabase'de bulunamadı. Rapor değişmedi; uyarıyı kapattıktan sonra işlemi yeniden yapabilirsiniz.";
+  if (issue.state === "applied_pending_refresh") return "Yeni kayıt raporu tercihi Supabase'e kaydedildi; güncel rapor durumu henüz yüklenemedi. İşlemi yeniden göndermeyin.";
+  if (issue.state === "conflict") return "Yeni kayıt raporu kanıtı beklenen öğrenci veya içerikle eşleşmedi. İşlemi yeniden göndermeyin.";
+  return "Yeni kayıt raporu işleminin sonucu henüz kesinleştirilemedi. Sistem işlemi tekrar göndermeden yalnızca Supabase kanıtını kontrol edecek.";
 }
 
 // v173: evidence belongs to one occurrence, never to an entire week/program.
@@ -9851,7 +9899,7 @@ function studentWasActiveAt(student,cutoff) {
   return !student.frozen && !isStudentDeleted(student);
 }
 
-function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth, branch, singleLessons=[]) {
+function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth, branch, singleLessons=[], withdrawnNewRegistrationIds=new Set()) {
   const payments = [];
   const normalLessons = [];
   const noShows = [];
@@ -9938,7 +9986,7 @@ function buildMonthlyInstitutionReport(students, teachers, expenses, targetMonth
   const expenseTotal = monthExpenses.reduce((sum,expense)=>sum+(Number(expense.amount)||0),0);
   const operational = (students || []).filter(student=>!isStudentDeleted(student));
   const activeStudents = operational.filter(student=>studentWasActiveAt(student,monthEnd));
-  const newStudents = operational.filter(student=>inMonth(student.lesson_start_date || student.lessonStartDate,targetMonth));
+  const newStudents = operational.filter(student=>inMonth(student.lesson_start_date || student.lessonStartDate,targetMonth) && !withdrawnNewRegistrationIds.has(student.id));
   const lessonAverage = lessonScores.length ? roundedScore(lessonScores.reduce((sum,score)=>sum+score,0)/lessonScores.length) : null;
   const periodAverage = periodEvaluations.length ? roundedScore(periodEvaluations.reduce((sum,evaluation)=>sum+(Number(evaluation.periodScore)||0),0)/periodEvaluations.length) : null;
 
@@ -10191,7 +10239,7 @@ function MonthlyReportsArchive({ reports, onDownload, downloadingId }) {
   </div>;
 }
 
-function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMonthlyReportDownload, downloadingReportId, onTeacherAdd, onTeacherToggle }) {
+function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMonthlyReportDownload, downloadingReportId, onTeacherAdd, onTeacherToggle, newRegistrationReportStates={}, newRegistrationReportStateReady=false, newRegistrationReportStateError="", newRegistrationReportBusyId="", onNewRegistrationReportToggle, onNewRegistrationReportRetry }) {
   const [ayOffset, setAyOffset] = useState(0);
   const [yeniOgretmen, setYeniOgretmen] = useState("");
   const simdi = new Date();
@@ -10235,6 +10283,7 @@ function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMon
   const singleCount = singleTeacherCounts.reduce((sum,item)=>sum+item.count,0);
   const totalLessonCount = yapilanDersler.length + singleCount;
   const yeniKayitlar = students.filter(student => inMonth(student.lesson_start_date || student.lessonStartDate, hedefAy));
+  const raporaDahilYeniKayitlar = yeniKayitlar.filter(student=>newRegistrationReportStates[student.id]?.withdrawn !== true);
   ayOdemeleri.push(...singleLessonPaymentsForMonth(singleLessons,hedefAy));
   const toplamGelir = ayOdemeleri.reduce((sum,payment)=>sum+(payment.tutar||0),0);
   const normalCount = yapilanDersler.filter(x=>x.type==="Normal").length;
@@ -10273,7 +10322,7 @@ function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMon
       <div className="crm-monthly-summary-metrics" tabIndex={0} aria-label="Aylık özet göstergeleri" style={{ display:"grid", gridTemplateColumns:"repeat(5,minmax(130px,1fr))", gap:8, marginBottom:14, overflowX:"auto", overflowWrap:"anywhere" }}>
         <MiniMetric label="Yapılan Ders" value={totalLessonCount} tone="info" />
         <MiniMetric label="Ciro" value={toplamGelir.toLocaleString("tr-TR")+" TL"} tone="good" />
-        <MiniMetric label="Yeni Kayıt" value={yeniKayitlar.length} tone="special" />
+        <MiniMetric label="Yeni Kayıt" value={newRegistrationReportStateReady ? raporaDahilYeniKayitlar.length : "—"} tone="special" />
         <MiniMetric label="Donduran" value={lifecycleKnown ? donduranIds.size : "—"} tone="warn" />
         <MiniMetric label="Ayrılan" value={lifecycleKnown ? ayrilanIds.size : "—"} tone="danger" />
         <style>{`
@@ -10303,7 +10352,16 @@ function AylikOzet({ students, teachers, singleLessons=[], monthlyReports, onMon
 
       <div style={{ ...SECTION, padding:"15px 16px" }}>
         <AçılırBugünBölümü title="Yeni Kayıtlar" color="#111">
-        {yeniKayitlar.length === 0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Bu ay yeni kayıt yok.</p> : yeniKayitlar.map(student=><div key={student.id} style={{ display:"flex", justifyContent:"space-between", gap:10, padding:"7px 0", borderBottom:"1px solid #f1f5f9" }}><strong style={{ fontSize:13 }}>{student.name}</strong><span style={{ fontSize:12, color:"#64748b" }}>{fmtMed(student.lesson_start_date || student.lessonStartDate)} · {studentTeacherName(student)}</span></div>)}
+        {!newRegistrationReportStateReady ? <div role="alert" style={{ marginBottom:10, padding:"9px 10px", borderRadius:10, background:"#fff7ed", border:"1px solid #fdba74" }}><p style={{ margin:"0 0 7px", color:"#9a3412", fontSize:12, fontWeight:700 }}>{newRegistrationReportStateError || "Yeni kayıt raporu durumu doğrulanıyor. Eksik sayı gösterilmedi."}</p><button type="button" onClick={onNewRegistrationReportRetry} style={{ border:0, borderRadius:8, padding:"6px 9px", background:"#ea580c", color:"#fff", fontSize:11, fontWeight:800, cursor:"pointer" }}>Yeniden Kontrol Et</button></div> : null}
+        {yeniKayitlar.length === 0 ? <p style={{ margin:0, color:"#aaa", fontSize:13 }}>Bu ay yeni kayıt yok.</p> : yeniKayitlar.map(student=>{
+          const reportState = newRegistrationReportStates[student.id];
+          const withdrawn = reportState?.withdrawn === true;
+          const busy = newRegistrationReportBusyId === student.id;
+          return <div key={student.id} style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) auto", gap:10, alignItems:"center", padding:"7px 0", borderBottom:"1px solid #f1f5f9", opacity:withdrawn?0.58:1 }}>
+            <div style={{ minWidth:0 }}><strong style={{ display:"block", fontSize:13, textDecoration:withdrawn?"line-through":"none" }}>{student.name}</strong><span style={{ fontSize:12, color:"#64748b" }}>{fmtMed(student.lesson_start_date || student.lessonStartDate)} · {studentTeacherName(student)}{withdrawn?" · Rapor dışında":""}</span></div>
+            <button type="button" disabled={!newRegistrationReportStateReady || busy || !onNewRegistrationReportToggle} onClick={()=>onNewRegistrationReportToggle(student)} style={{ border:"none", borderRadius:8, padding:"6px 9px", background:withdrawn?"#dcfce7":"#fff7ed", color:withdrawn?"#166534":"#9a3412", fontSize:11, fontWeight:850, cursor:(!newRegistrationReportStateReady || busy)?"wait":"pointer", opacity:(!newRegistrationReportStateReady || busy)?0.65:1 }}>{busy?"Kaydediliyor...":withdrawn?"Geri Al":"Vazgeçti"}</button>
+          </div>;
+        })}
         </AçılırBugünBölümü>
       </div>
 
@@ -11143,6 +11201,12 @@ export default function App() {
   const [normalLessonInformedCancellationIssue, setNormalLessonInformedCancellationIssue] = useState(null);
   const [normalLessonInformedCancellationIssueChecking, setNormalLessonInformedCancellationIssueChecking] = useState(false);
   const [normalLessonInformedCancellationBusyId, setNormalLessonInformedCancellationBusyId] = useState("");
+  const [newRegistrationReportStates, setNewRegistrationReportStates] = useState({});
+  const [newRegistrationReportStateReady, setNewRegistrationReportStateReady] = useState(false);
+  const [newRegistrationReportStateError, setNewRegistrationReportStateError] = useState("");
+  const [newRegistrationReportBusyId, setNewRegistrationReportBusyId] = useState("");
+  const [newRegistrationReportIssue, setNewRegistrationReportIssue] = useState(null);
+  const [newRegistrationReportIssueChecking, setNewRegistrationReportIssueChecking] = useState(false);
   const [programChangeIssue,setProgramChangeIssue]=useState(null);
   const [programChangeChecking,setProgramChangeChecking]=useState(false);
   const programChangeIssueRef=useRef(null);
@@ -11194,6 +11258,12 @@ export default function App() {
   const normalLessonInformedCancellationWritingRef = useRef(false);
   const normalLessonInformedCancellationCheckingRef = useRef(false);
   const normalLessonInformedCancellationAutoCheckRef = useRef("");
+  const newRegistrationReportStatesRef = useRef({});
+  const newRegistrationReportLoadSequenceRef = useRef(0);
+  const newRegistrationReportIssueRef = useRef(null);
+  const newRegistrationReportWritingRef = useRef(false);
+  const newRegistrationReportCheckingRef = useRef(false);
+  const newRegistrationReportAutoCheckRef = useRef("");
   const connectionAutoRetryRef = useRef(false);
   const protectedDataLoadGenerationRef = useRef(0);
   const calendarSourceLoadSequenceRef = useRef({ students:0, teachers:0 });
@@ -11367,6 +11437,7 @@ export default function App() {
   const weeklyCurrentWeek=weeklyWeekStart(weeklyReportClock);
   const weeklyReportReady=!!(giris && authSession?.user?.id && activeOrganization?.id && currentBranch?.id
     && loadedSources.students && loadedSources.teachers && loadedSources.expenses && singleLessonsLoaded
+    && newRegistrationReportStateReady
     && browserOnline && !connectionRevalidationRequired && !accessContextLoading && !loading);
   const weeklyReportScopeKey=JSON.stringify([authSession?.user?.id || "",activeOrganization?.id || "",currentBranch?.id || "",protectedDataLoadGenerationRef.current,weeklyCurrentWeek]);
   const weeklyReportScopeRef=useRef(null);
@@ -12323,6 +12394,42 @@ export default function App() {
     return true;
   };
 
+  const persistNewRegistrationReportIssue = issue => {
+    const actorUserId = String(issue?.actorUserId || authSession?.user?.id || "");
+    if (!actorUserId) return false;
+    const current = newRegistrationReportIssueRef.current;
+    if (issue?.operationId && current?.operationId && current.operationId !== issue.operationId) return false;
+    const expectedRecordVersion = Number(issue?.expectedRecordVersion);
+    const stored = issue ? {
+      operationId:String(issue.operationId || ""),
+      actorUserId,
+      branchId:String(issue.branchId || currentBranch?.id || ""),
+      studentId:String(issue.studentId || ""),
+      studentName:String(issue.studentName || "Öğrenci"),
+      expectedRecordVersion:Number.isInteger(expectedRecordVersion) ? expectedRecordVersion : -1,
+      withdrawn:issue.withdrawn === true,
+      requestSignature:String(issue.requestSignature || ""),
+      state:String(issue.state || "unknown"),
+      createdAt:issue.createdAt || new Date().toISOString(),
+      ...(issue.notFoundSince ? { notFoundSince:issue.notFoundSince } : {}),
+    } : null;
+    if (!writeNewRegistrationReportIssue(actorUserId,stored,current?.operationId || "")) return false;
+    newRegistrationReportIssueRef.current = stored;
+    setNewRegistrationReportIssue(stored);
+    return true;
+  };
+
+  const clearNewRegistrationReportIssue = operationId => {
+    const current = newRegistrationReportIssueRef.current;
+    if (operationId && current?.operationId !== operationId) return false;
+    const actorUserId = String(authSession?.user?.id || current?.actorUserId || "");
+    if (!actorUserId || !writeNewRegistrationReportIssue(actorUserId,null,operationId || current?.operationId || "")) return false;
+    newRegistrationReportIssueRef.current = null;
+    setNewRegistrationReportIssue(null);
+    newRegistrationReportAutoCheckRef.current = "";
+    return true;
+  };
+
   const setSingleLessonRecordBusy = (lessonId, busy) => {
     if (!lessonId) return;
     const next = { ...singleLessonBusyIdsRef.current };
@@ -12375,6 +12482,184 @@ export default function App() {
     return { ok:true, data:lessonResult.data || [] };
   };
 
+  const loadNewRegistrationReportStates = async (options={}) => {
+    const branch = options.branch || currentBranch;
+    const sequence = newRegistrationReportLoadSequenceRef.current + 1;
+    newRegistrationReportLoadSequenceRef.current = sequence;
+    const isCurrent = () => sequence === newRegistrationReportLoadSequenceRef.current && branch?.id === currentBranch?.id;
+    if (!branch?.id || !giris) {
+      if (isCurrent()) {
+        newRegistrationReportStatesRef.current = {};
+        setNewRegistrationReportStates({});
+        setNewRegistrationReportStateReady(false);
+        setNewRegistrationReportStateError("");
+      }
+      return { ok:false };
+    }
+    if (!options.preserveReady && isCurrent()) {
+      setNewRegistrationReportStateReady(false);
+      setNewRegistrationReportStateError("");
+    }
+    const result = await timedSingleLessonRequest(()=>supabase.rpc("get_new_registration_report_states",{ p_branch_id:branch.id }));
+    if (!isCurrent()) return { ok:false, stale:true };
+    if (result.error || !Array.isArray(result.data)) {
+      console.error("Yeni kayıt raporu durumu yüklenemedi:",result.error);
+      setNewRegistrationReportStateReady(false);
+      setNewRegistrationReportStateError("Yeni kayıt raporu durumu doğrulanamadı. Eksik sayı gösterilmedi; V307 Supabase kurulumunu ve bağlantıyı kontrol edin.");
+      return { ok:false, error:result.error };
+    }
+    const next = {};
+    for (const row of result.data) {
+      const studentId = String(row?.student_id || "");
+      const recordVersion = Number(row?.record_version);
+      if (!studentId || String(row?.branch_id || "") !== branch.id || typeof row?.withdrawn !== "boolean" || !Number.isInteger(recordVersion) || recordVersion < 0 || next[studentId]) {
+        setNewRegistrationReportStateReady(false);
+        setNewRegistrationReportStateError("Yeni kayıt raporu yanıtı eksik, tekrarlı veya seçili şubeyle uyumsuz. Tahmin yapılmadı.");
+        return { ok:false, error:new Error("NEW_REGISTRATION_REPORT_INVALID_RESPONSE") };
+      }
+      next[studentId] = {
+        studentId,
+        branchId:branch.id,
+        withdrawn:row.withdrawn,
+        recordVersion,
+        operationId:String(row.operation_id || ""),
+        createdAt:String(row.created_at || ""),
+      };
+    }
+    newRegistrationReportStatesRef.current = next;
+    setNewRegistrationReportStates(next);
+    setNewRegistrationReportStateReady(true);
+    setNewRegistrationReportStateError("");
+    return { ok:true, data:next };
+  };
+
+  const checkNewRegistrationReportOperation = async (issue=newRegistrationReportIssueRef.current, options={}) => {
+    if (!issue?.operationId || newRegistrationReportCheckingRef.current) return false;
+    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return false;
+    if (!issue.branchId || issue.branchId !== currentBranch?.id) {
+      if (options.notify !== false) pop("Yeni kayıt raporu işleminin ait olduğu şubeye geçip yeniden kontrol edin.",8000);
+      return false;
+    }
+    newRegistrationReportCheckingRef.current = true;
+    setNewRegistrationReportIssueChecking(true);
+    try {
+      const result = await timedSingleLessonRequest(()=>supabase.from("new_registration_report_operations").select("operation_id,student_id,branch_id,expected_record_version,resulting_record_version,withdrawn,request_payload,actor_user_id,created_at").eq("operation_id",issue.operationId).maybeSingle());
+      if (result.error) {
+        if (options.notify !== false) pop("Yeni kayıt raporu kanıtı henüz okunamadı. İşlem tekrar gönderilmedi.",8000);
+        return false;
+      }
+      if (!result.data) {
+        const now = Date.now();
+        const notFoundSince = issue.notFoundSince || new Date(now).toISOString();
+        const settled = options.forceAbsent === true || now - new Date(notFoundSince).getTime() >= NEW_REGISTRATION_REPORT_ABSENCE_SETTLE_MS;
+        persistNewRegistrationReportIssue({ ...issue, state:settled?"not_applied":"unknown", notFoundSince });
+        if (options.notify !== false) pop(settled?"Yeni kayıt raporu işlemi kaydedilmedi; rapor değişmedi.":"İşlem kanıtı henüz görünmüyor. Biraz sonra yeniden kontrol edin.",8000);
+        return false;
+      }
+      const row = result.data;
+      const request = row.request_payload || {};
+      const expectedVersion = Number(issue.expectedRecordVersion);
+      const exact = String(row.operation_id || "")===issue.operationId
+        && String(row.student_id || "")===issue.studentId
+        && String(row.branch_id || "")===issue.branchId
+        && String(row.actor_user_id || "")===String(issue.actorUserId || "")
+        && Number(row.expected_record_version)===expectedVersion
+        && Number(row.resulting_record_version)===expectedVersion+1
+        && row.withdrawn===issue.withdrawn
+        && request.studentId===issue.studentId
+        && request.branchId===issue.branchId
+        && request.expectedRecordVersion===expectedVersion
+        && request.withdrawn===issue.withdrawn
+        && normalLessonEvaluationIntentSignature(request)===issue.requestSignature;
+      if (!exact) {
+        persistNewRegistrationReportIssue({ ...issue, state:"conflict" });
+        if (options.notify !== false) pop("Yeni kayıt raporu kanıtı beklenen işlemle eşleşmedi. İşlem tekrar gönderilmedi.",9000);
+        return false;
+      }
+      const refreshed = await loadNewRegistrationReportStates({ preserveReady:true });
+      if (!refreshed.ok) {
+        persistNewRegistrationReportIssue({ ...issue, state:"applied_pending_refresh" });
+        if (options.notify !== false) pop("Rapor tercihi kaydedildi; güncel liste yüklenemedi. İşlemi tekrar göndermeyin.",9000);
+        return false;
+      }
+      clearNewRegistrationReportIssue(issue.operationId);
+      void loadWeeklyReports();
+      if (options.notify !== false) pop(issue.withdrawn ? issue.studentName+" yeni kayıt raporundan çıkarıldı" : issue.studentName+" yeniden yeni kayıt raporuna alındı");
+      return true;
+    } finally {
+      newRegistrationReportCheckingRef.current = false;
+      setNewRegistrationReportIssueChecking(false);
+    }
+  };
+
+  const handleNewRegistrationReportToggle = async student => {
+    if (!student?.id || !currentBranch?.id || !authSession?.user?.id) return;
+    if (!newRegistrationReportStateReady || newRegistrationReportWritingRef.current || newRegistrationReportIssueRef.current) {
+      pop(newRegistrationReportIssueRef.current ? "Önce bekleyen yeni kayıt raporu işlemini sonuçlandırın." : "Yeni kayıt raporu durumu doğrulanmadan işlem yapılamaz.",8000);
+      return;
+    }
+    const current = newRegistrationReportStatesRef.current[student.id] || { withdrawn:false, recordVersion:-1 };
+    const expectedRecordVersion = Number(current.recordVersion);
+    const withdrawn = current.withdrawn !== true;
+    const operationId = crypto.randomUUID();
+    const request = { studentId:String(student.id), branchId:String(currentBranch.id), expectedRecordVersion, withdrawn };
+    const issue = {
+      operationId,
+      actorUserId:authSession.user.id,
+      branchId:currentBranch.id,
+      studentId:String(student.id),
+      studentName:String(student.name || "Öğrenci"),
+      expectedRecordVersion,
+      withdrawn,
+      requestSignature:normalLessonEvaluationIntentSignature(request),
+      state:"writing",
+      createdAt:new Date().toISOString(),
+    };
+    if (!persistNewRegistrationReportIssue(issue)) {
+      pop("İşlem kimliği tarayıcıda korunamadı; yeni kayıt raporu değiştirilmedi.",8000);
+      return;
+    }
+    newRegistrationReportWritingRef.current = true;
+    setNewRegistrationReportBusyId(student.id);
+    try {
+      const result = await runBranchScopedWrite(()=>timedSingleLessonRequest(()=>supabase.rpc("set_new_registration_report_state",{
+        p_student_id:student.id,
+        p_branch_id:currentBranch.id,
+        p_expected_record_version:expectedRecordVersion,
+        p_withdrawn:withdrawn,
+        p_operation_id:operationId,
+      }).single()));
+      if (result.error) {
+        const definite = ["22023","42501","40001","P0001","P0002","23505","PGRST202","42883"].includes(String(result.error.code || ""));
+        await checkNewRegistrationReportOperation(issue,{ forceAbsent:definite });
+        return;
+      }
+      const receipt = result.data || {};
+      const exact = String(receipt.operation_id || "")===operationId
+        && String(receipt.student_id || "")===String(student.id)
+        && String(receipt.branch_id || "")===currentBranch.id
+        && Number(receipt.record_version)===expectedRecordVersion+1
+        && receipt.withdrawn===withdrawn;
+      if (!exact) {
+        persistNewRegistrationReportIssue({ ...issue, state:"conflict" });
+        pop("Yeni kayıt raporu yanıtı beklenen işlemle eşleşmedi. İşlem tekrar gönderilmedi.",9000);
+        return;
+      }
+      const refreshed = await loadNewRegistrationReportStates({ preserveReady:true });
+      if (!refreshed.ok) {
+        persistNewRegistrationReportIssue({ ...issue, state:"applied_pending_refresh" });
+        pop("Rapor tercihi kaydedildi; güncel liste yüklenemedi. İşlemi tekrar göndermeyin.",9000);
+        return;
+      }
+      clearNewRegistrationReportIssue(operationId);
+      void loadWeeklyReports();
+      pop(withdrawn ? student.name+" yeni kayıt raporundan çıkarıldı" : student.name+" yeniden yeni kayıt raporuna alındı");
+    } finally {
+      newRegistrationReportWritingRef.current = false;
+      setNewRegistrationReportBusyId("");
+    }
+  };
+
   const pendingBranchIds = () => [...new Set([
     programChangeIssueRef.current?.branchId,
     singleLessonMoveIssueRef.current?.branchId,
@@ -12385,6 +12670,7 @@ export default function App() {
     normalLessonMakeupPlanIssueRef.current?.branchId,
     normalLessonMakeupCompletionIssueRef.current?.branchId,
     normalLessonInformedCancellationIssueRef.current?.branchId,
+    newRegistrationReportIssueRef.current?.branchId,
     singleLessonIssueRef.current?.kind === "operation" ? singleLessonIssueRef.current?.branchId : "",
     ...failedOps.map(operation=>operation.branchId || ""),
   ].filter(Boolean))];
@@ -12411,6 +12697,7 @@ export default function App() {
       || normalLessonMakeupPlanWritingRef.current
       || normalLessonMakeupCompletionWritingRef.current
       || normalLessonInformedCancellationWritingRef.current
+      || newRegistrationReportWritingRef.current
       || singleLessonSavingRef.current
       || Object.keys(singleLessonBusyIdsRef.current).length > 0
       || branchScopedWriteCountRef.current > 0
@@ -12440,12 +12727,17 @@ export default function App() {
     protectedDataLoadGenerationRef.current += 1;
     singleLessonLoadSequenceRef.current += 1;
     monthlyReportLoadSequenceRef.current += 1;
+    newRegistrationReportLoadSequenceRef.current += 1;
     reportInitializationRef.current = false;
     setStudents([]);
     setTeachers([]);
     setExpenses([]);
     setSingleLessons([]);
     setMonthlyReports([]);
+    newRegistrationReportStatesRef.current = {};
+    setNewRegistrationReportStates({});
+    setNewRegistrationReportStateReady(false);
+    setNewRegistrationReportStateError("");
     setLoadedSources({ students:false, teachers:false, expenses:false });
     setProtectedDataLoadIssues({ students:false, teachers:false, expenses:false });
     setSingleLessonsLoaded(false);
@@ -13709,6 +14001,7 @@ export default function App() {
     normalLessonMakeupPlanAutoCheckRef.current = "";
     normalLessonMakeupCompletionAutoCheckRef.current = "";
     normalLessonInformedCancellationAutoCheckRef.current = "";
+    newRegistrationReportAutoCheckRef.current = "";
     const savedNormalLessonEvaluationIssue = actorUserId ? readNormalLessonEvaluationIssue(actorUserId) : null;
     normalLessonEvaluationIssueRef.current = savedNormalLessonEvaluationIssue;
     setNormalLessonEvaluationIssue(savedNormalLessonEvaluationIssue);
@@ -13724,6 +14017,9 @@ export default function App() {
     const savedNormalLessonInformedCancellationIssue = actorUserId ? readNormalLessonInformedCancellationIssue(actorUserId) : null;
     normalLessonInformedCancellationIssueRef.current = savedNormalLessonInformedCancellationIssue;
     setNormalLessonInformedCancellationIssue(savedNormalLessonInformedCancellationIssue);
+    const savedNewRegistrationReportIssue = actorUserId ? readNewRegistrationReportIssue(actorUserId) : null;
+    newRegistrationReportIssueRef.current = savedNewRegistrationReportIssue;
+    setNewRegistrationReportIssue(savedNewRegistrationReportIssue);
     setStaffInvitationIssue(actorUserId ? readStaffIssue(STAFF_INVITATION_ISSUE_KEY,actorUserId) : null);
     setStaffActivationIssue(actorUserId ? readStaffIssue(STAFF_ACTIVATION_ISSUE_KEY,actorUserId) : null);
     setStaffAssignmentIssue(actorUserId ? readStaffIssue(STAFF_ASSIGNMENT_ISSUE_KEY,actorUserId) : null);
@@ -13888,6 +14184,7 @@ export default function App() {
     if (!giris || !activeOrganization?.id || !currentBranch?.id) {
       singleLessonLoadSequenceRef.current += 1;
       monthlyReportLoadSequenceRef.current += 1;
+      newRegistrationReportLoadSequenceRef.current += 1;
       reportInitializationRef.current = false;
       setStudents([]);
       setTeachers([]);
@@ -13897,6 +14194,10 @@ export default function App() {
       setSingleLessonsLoading(false);
       setSingleLessonSecurityReady(false);
       setMonthlyReports([]);
+      newRegistrationReportStatesRef.current = {};
+      setNewRegistrationReportStates({});
+      setNewRegistrationReportStateReady(false);
+      setNewRegistrationReportStateError("");
       setLoadedSources({ students:false, teachers:false, expenses:false });
       setProtectedDataLoadIssues({ students:false, teachers:false, expenses:false });
       setProtectedDataRetrying(false);
@@ -14247,7 +14548,19 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!giris || !currentBranch?.id || !activeOrganization?.id || !loadedSources.students || !loadedSources.teachers || !loadedSources.expenses || !singleLessonsLoaded || reportInitializationRef.current) return;
+    if (!giris || !currentBranch?.id || !authSession?.user?.id || !browserOnline || connectionRevalidationRequired || accessContextLoading) {
+      newRegistrationReportLoadSequenceRef.current += 1;
+      newRegistrationReportStatesRef.current = {};
+      setNewRegistrationReportStates({});
+      setNewRegistrationReportStateReady(false);
+      setNewRegistrationReportStateError("");
+      return;
+    }
+    void loadNewRegistrationReportStates();
+  },[giris,currentBranch?.id,authSession?.user?.id,browserOnline,connectionRevalidationRequired,accessContextLoading]);
+
+  useEffect(() => {
+    if (!giris || !currentBranch?.id || !activeOrganization?.id || !loadedSources.students || !loadedSources.teachers || !loadedSources.expenses || !singleLessonsLoaded || !newRegistrationReportStateReady || reportInitializationRef.current) return;
     reportInitializationRef.current = true;
     const reportSequence = monthlyReportLoadSequenceRef.current + 1;
     monthlyReportLoadSequenceRef.current = reportSequence;
@@ -14263,7 +14576,25 @@ export default function App() {
       let rows = reportResult.data || [];
       const missingMonths = reportMonthsToEnsure(rows);
       for (const targetMonth of missingMonths) {
-        const snapshot = buildMonthlyInstitutionReport(students,teachers,expenses,targetMonth,branch,singleLessons);
+        const cutoff = new Date(targetMonth.getFullYear(),targetMonth.getMonth()+1,1).toISOString();
+        const withdrawnResult = await timedSingleLessonRequest(()=>supabase.rpc("get_new_registration_report_withdrawn_ids",{ p_branch_id:branch.id,p_until:cutoff }));
+        if (withdrawnResult.error || !Array.isArray(withdrawnResult.data)) {
+          console.error("Ay sonu yeni kayıt raporu durumu doğrulanamadı:",withdrawnResult.error);
+          pop(monthReportLabel(targetMonth)+" raporu için yeni kayıt durumu doğrulanamadı; rapor oluşturulmadı.",9000);
+          continue;
+        }
+        const withdrawnIds = new Set();
+        let invalidWithdrawnResponse = false;
+        for (const item of withdrawnResult.data) {
+          const studentId = String(item?.student_id || "");
+          if (!studentId || withdrawnIds.has(studentId)) { invalidWithdrawnResponse = true; break; }
+          withdrawnIds.add(studentId);
+        }
+        if (invalidWithdrawnResponse) {
+          pop(monthReportLabel(targetMonth)+" raporunun yeni kayıt yanıtı eksik veya tekrarlı; rapor oluşturulmadı.",9000);
+          continue;
+        }
+        const snapshot = buildMonthlyInstitutionReport(students,teachers,expenses,targetMonth,branch,singleLessons,withdrawnIds);
         const insertResult = await supabase.from("monthly_reports").insert({ branch_id:branch.id, report_month:monthReportDate(targetMonth), report_data:snapshot }).select("*").single();
         if (insertResult.error) {
           const duplicate = String(insertResult.error.code || "") === "23505";
@@ -14288,7 +14619,7 @@ export default function App() {
     }).finally(()=>{
       branchScopedWriteCountRef.current = Math.max(0,branchScopedWriteCountRef.current - 1);
     });
-  },[giris,currentBranch?.id,activeOrganization?.id,loadedSources.students,loadedSources.teachers,loadedSources.expenses,singleLessonsLoaded,students,teachers,expenses,singleLessons]);
+  },[giris,currentBranch?.id,activeOrganization?.id,loadedSources.students,loadedSources.teachers,loadedSources.expenses,singleLessonsLoaded,newRegistrationReportStateReady,students,teachers,expenses,singleLessons]);
 
   const handleMonthlyReportDownload = async report => {
     if (!report?.id || downloadingReportId) return;
@@ -16035,6 +16366,17 @@ export default function App() {
     normalLessonInformedCancellationAutoCheckRef.current = issue.operationId;
     void checkNormalLessonInformedCancellationOperation(issue,{ notify:false });
   },[giris,browserOnline,accessContext,currentBranch?.id,normalLessonInformedCancellationIssue?.operationId,normalLessonInformedCancellationIssue?.state,authSession?.user?.id]);
+
+  useEffect(() => {
+    const issue = newRegistrationReportIssue;
+    if (!giris || !browserOnline || !accessContext || !currentBranch?.id || !issue?.operationId) return;
+    if (issue.actorUserId && issue.actorUserId !== authSession?.user?.id) return;
+    if (issue.branchId !== currentBranch.id || ["not_applied","conflict"].includes(issue.state)) return;
+    if (newRegistrationReportWritingRef.current || newRegistrationReportCheckingRef.current) return;
+    if (newRegistrationReportAutoCheckRef.current === issue.operationId) return;
+    newRegistrationReportAutoCheckRef.current = issue.operationId;
+    void checkNewRegistrationReportOperation(issue,{ notify:false });
+  },[giris,browserOnline,accessContext,currentBranch?.id,newRegistrationReportIssue?.operationId,newRegistrationReportIssue?.state,authSession?.user?.id]);
 
   const handleToggleFreeze = async (sid, frozen, resumeDate=null) => {
     const resumeStart = resumeDate ? new Date(resumeDate+"T12:00:00") : null;
@@ -17879,6 +18221,7 @@ export default function App() {
   const visibleNormalLessonMakeupPlanIssue = normalLessonMakeupPlanIssue && (!normalLessonMakeupPlanIssue.actorUserId || normalLessonMakeupPlanIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupPlanIssue : null;
   const visibleNormalLessonMakeupCompletionIssue = normalLessonMakeupCompletionIssue && (!normalLessonMakeupCompletionIssue.actorUserId || normalLessonMakeupCompletionIssue.actorUserId === authSession?.user?.id) ? normalLessonMakeupCompletionIssue : null;
   const visibleNormalLessonInformedCancellationIssue = normalLessonInformedCancellationIssue && (!normalLessonInformedCancellationIssue.actorUserId || normalLessonInformedCancellationIssue.actorUserId === authSession?.user?.id) ? normalLessonInformedCancellationIssue : null;
+  const visibleNewRegistrationReportIssue = newRegistrationReportIssue && (!newRegistrationReportIssue.actorUserId || newRegistrationReportIssue.actorUserId === authSession?.user?.id) ? newRegistrationReportIssue : null;
   const visibleBranchLifecycleIssue = branchLifecycleIssue && (!branchLifecycleIssue.actorUserId || branchLifecycleIssue.actorUserId === authSession?.user?.id) ? branchLifecycleIssue : null;
   const visibleStaffInvitationIssue = staffInvitationIssue && (!staffInvitationIssue.actorUserId || staffInvitationIssue.actorUserId === authSession?.user?.id) ? staffInvitationIssue : null;
   const visibleStaffActivationIssue = staffActivationIssue && (!staffActivationIssue.actorUserId || staffActivationIssue.actorUserId === authSession?.user?.id) ? staffActivationIssue : null;
@@ -18290,6 +18633,18 @@ export default function App() {
             <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Yeniden kontrol yalnızca Supabase'den okur; haberli iptal işlemini kendiliğinden tekrar göndermez.</p>
           </div>
         ) : null}
+        {visibleNewRegistrationReportIssue ? (
+          <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
+            <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Yeni kayıt raporu kontrolü gerekli</p>
+            <p style={{ margin:"0 0 4px", fontSize:12, color:"#9a3412", fontWeight:650, lineHeight:1.5 }}>{newRegistrationReportIssueMessage(visibleNewRegistrationReportIssue)}</p>
+            <p style={{ margin:"0 0 10px", fontSize:11, color:"#9a3412", fontWeight:800 }}>Öğrenci: {visibleNewRegistrationReportIssue.studentName}</p>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              <button type="button" onClick={()=>checkNewRegistrationReportOperation(visibleNewRegistrationReportIssue)} disabled={!browserOnline || newRegistrationReportIssueChecking || newRegistrationReportWritingRef.current} style={{ border:"none", borderRadius:9, padding:"8px 11px", background:"#ea580c", color:"#fff", fontSize:12, fontWeight:850, cursor:(!browserOnline || newRegistrationReportIssueChecking || newRegistrationReportWritingRef.current)?"wait":"pointer", opacity:(!browserOnline || newRegistrationReportIssueChecking || newRegistrationReportWritingRef.current)?0.65:1 }}>{newRegistrationReportIssueChecking?"Kontrol Ediliyor...":"Yeniden Kontrol Et"}</button>
+              {visibleNewRegistrationReportIssue.state === "not_applied" ? <button type="button" onClick={()=>clearNewRegistrationReportIssue(visibleNewRegistrationReportIssue.operationId)} style={{ border:"1px solid #fdba74", borderRadius:9, padding:"8px 11px", background:"#fff", color:"#9a3412", fontSize:12, fontWeight:850, cursor:"pointer" }}>Uyarıyı Gördüm</button> : null}
+            </div>
+            <p style={{ margin:"9px 0 0", fontSize:10, color:"#9a3412", fontWeight:650 }}>Yeniden kontrol yalnızca Supabase işlem kanıtını okur; rapor tercihini kendiliğinden tekrar göndermez.</p>
+          </div>
+        ) : null}
         {visibleBranchLifecycleIssue ? (
           <div role="alert" style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:"12px 14px", marginBottom:14 }}>
             <p style={{ margin:"0 0 5px", fontSize:13, fontWeight:850, color:"#9a3412" }}>Şube işlemi kontrolü gerekli</p>
@@ -18611,7 +18966,7 @@ export default function App() {
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} onTrialAppointment={lesson=>openTrialAppointment(lesson)} trialAppointmentOpeningId={trialAppointmentOpeningId} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
-        {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} singleLessons={singleLessons} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} /></> : null}
+        {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} singleLessons={singleLessons} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} newRegistrationReportStates={newRegistrationReportStates} newRegistrationReportStateReady={newRegistrationReportStateReady} newRegistrationReportStateError={newRegistrationReportStateError} newRegistrationReportBusyId={newRegistrationReportBusyId} onNewRegistrationReportToggle={handleNewRegistrationReportToggle} onNewRegistrationReportRetry={()=>loadNewRegistrationReportStates()} /></> : null}
         {mainTab === "liste" ? (
           <div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8, marginBottom:14 }}>
