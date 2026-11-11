@@ -3327,6 +3327,7 @@ function normalLessonInformedCancellationKnownRejection(error) {
 
 function normalLessonInformedCancellationErrorText(error) {
   const message = String(error?.message || error || "");
+  if (message.includes("BOOKING_CAPACITY_CONFLICT")) return "Bu saat başka bir kayıtla kullanıldığı için ders Planlandı durumuna geri alınamadı. Yeni kayıt korundu.";
   if (message.includes("STALE_STUDENT")) return "Öğrenci kaydı başka bir işlemle değişti. Eski ders bilgisi gönderilmedi; liste Supabase'den yenilendi.";
   if (message.includes("NOT_AUTHORIZED")) return "Bu öğrencinin şubesinde haberli iptal kaydetme yetkisi doğrulanamadı. Kayıt yapılmadı.";
   if (message.includes("MAKEUP_EXISTS")) return "Bu ders için telafi hakkı zaten bulunuyor. Haberli iptal kaydedilmedi; güncel kaydı kontrol edin.";
@@ -7984,7 +7985,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
   if(programReadState && programReadState!=="ready") availabilityInvalid=true;
   if(weeklyShiftCalendar.state && weeklyShiftCalendar.state!=="ready") availabilityInvalid=true;
   const observeAvailability = (date,time,duration,kind) => {
-    if (!availabilityOpen || kind==="telafi-slot") return;
+    if (!availabilityOpen || kind==="telafi-slot" || kind==="informed-cancellation") return;
     const interval = calendarAvailabilityInterval(date,time,duration);
     if (interval) availabilityIntervals.push(interval);
     else availabilityInvalid = true;
@@ -8054,7 +8055,12 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       const recordedDayIndex=dayKeyToIndex.get(calendarDayKey(lesson.date));
       if(recordedDayIndex!==undefined)actualKeys.add(recordedDayIndex+"|"+calendarLessonTime(student,lesson));
       if (!matchesTeacher(student,lesson.date,lesson,calendarLessonTime(student,lesson),getLessonDuration(student,lesson))) return;
-      if (!historyOnly) observeAvailability(lesson.date,calendarLessonTime(student,lesson),getLessonDuration(student,lesson),lesson.status==="telafi"?"telafi-slot":"normal");
+      if (!historyOnly) observeAvailability(
+        lesson.date,
+        calendarLessonTime(student,lesson),
+        getLessonDuration(student,lesson),
+        lesson.status === INFORMED_CANCELLATION_STATUS ? "informed-cancellation" : lesson.status === "telafi" ? "telafi-slot" : "normal"
+      );
       const dayIndex = dayKeyToIndex.get(calendarDayKey(lesson.date));
       if (dayIndex === undefined) return;
       const time = calendarLessonTime(student, lesson);
@@ -8170,7 +8176,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
     "package-ended":{ background:"#43a66c", border:"#267849", opacity:1 },
     "telafi-slot":{ background:"#526fd4", border:"#344fae", opacity:.28 },
     "planned-telafi":{ background:"#df8a37", border:"#a85c19", opacity:1 },
-    "informed-cancellation":{ background:"#b45309", border:"#78350f", opacity:1 },
+    "informed-cancellation":{ background:"#b45309", border:"#78350f", opacity:.32 },
     "extra-lesson":{ background:"#db2777", border:"#9d174d", opacity:1 },
     "single-lesson":{ background:"#7c3aed", border:"#5b21b6", opacity:1 },
   };
