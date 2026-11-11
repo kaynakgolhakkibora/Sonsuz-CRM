@@ -5939,6 +5939,42 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
     freezeMessageStudentId === student.id && student.frozen && !left ? <DondurmaMesajSheet student={student} onClose={()=>setFreezeMessageStudentId("")} onSent={()=>setFreezeMessageStudentId("")} /> :
     resumeMessageStudentId === student.id && !student.frozen && !left && !isStudentDeleted(student) ? <ProgramaDonusMesajSheet student={student} onClose={()=>setResumeMessageStudentId("")} onSent={()=>setResumeMessageStudentId("")} /> :
     <>
+      <style>{`
+        .crm-normal-lesson-row-main-v310 {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+          align-items: center;
+          gap: 8px;
+        }
+        .crm-normal-lesson-row-info-v310 {
+          grid-column: 2;
+          min-width: 0;
+          text-align: center;
+        }
+        .crm-normal-lesson-row-actions-v310 {
+          grid-column: 3;
+          justify-self: end;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        @media (max-width: 560px) {
+          .crm-normal-lesson-row-main-v310 {
+            grid-template-columns: minmax(0, 1fr);
+            justify-items: center;
+          }
+          .crm-normal-lesson-row-info-v310,
+          .crm-normal-lesson-row-actions-v310 {
+            grid-column: 1;
+          }
+          .crm-normal-lesson-row-actions-v310 {
+            justify-self: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 6px;
+          }
+        }
+      `}</style>
       <Sheet title={student.name} onClose={onClose}>
         <div style={SECTION}>
           <div className="crm-student-info-grid">
@@ -6022,14 +6058,14 @@ function DetailSheet({ student, teachers, singleLessons=[], singleLessonsLoading
             const clickable = true;
             return (
               <div key={l.id} style={{ background:clickable?"#f9fafb":"#fff", border:clickable?"1.5px solid #d1d5db":"1px solid #f3f4f6", borderRadius:10, padding:"10px 12px", marginBottom:6 }}>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                  <div style={{ cursor:"pointer", flex:1 }} onClick={() => onLessonClick(student, l.id, tab)}>
+                <div className="crm-normal-lesson-row-main-v310">
+                  <div className="crm-normal-lesson-row-info-v310" style={{ cursor:"pointer" }} onClick={() => onLessonClick(student, l.id, tab)}>
                     <p style={{ margin:0, fontWeight:600, fontSize:14, color:"#111" }}>{fmtDate(l.date)}</p>
                     <p style={{ margin:"2px 0 0", fontSize:12, color:"#888" }}>{lessonTime(student, l)} · düzenle</p>
                   </div>
-                  <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                    <StatusPill status={l.status} />
+                  <div className="crm-normal-lesson-row-actions-v310">
                     {correctedLessonIds[l.id] === true ? <CorrectedPill /> : null}
+                    <StatusPill status={l.status} />
                     {clickable ? <button onClick={() => setShiftSel(l)} style={{ background:"#f3f4f6", border:"none", borderRadius:8, padding:"4px 8px", cursor:"pointer", fontSize:14, color:"#6366f1" }}>shift</button> : null}
                   </div>
                 </div>
