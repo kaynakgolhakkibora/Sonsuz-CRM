@@ -6385,32 +6385,37 @@ function AddSheet({ teachers, onClose, onAdd }) {
   );
 }
 
-function msgDersHatirlatma(student) {
+function dersHatirlatmaSelami() {
+  const hour = new Intl.DateTimeFormat("en-GB", { timeZone:"Europe/Istanbul", hour:"2-digit", hourCycle:"h23" }).format(new Date());
+  return Number(hour) >= 12 ? "Merhaba" : "Günaydın";
+}
+
+function msgDersHatirlatma(student, selectedLesson) {
   const todayLesson = student.schedule.find(l => isToday(l.date) && l.status === "upcoming");
   const nextLesson = todayLesson || student.schedule.find(l => l.status === "upcoming");
   const info = currentPackageInfoForLesson(student, nextLesson);
   const status = packageStatusText(student, info);
-  let msg = "Günaydın :) Ders saatimiz "+lessonTime(student, nextLesson)+". Lütfen 5 dakika önce hazır olun.";
+  let msg = dersHatirlatmaSelami()+" :) Ders saatimiz "+lessonTime(student, selectedLesson || nextLesson)+". Lütfen 5 dakika önce hazır olun.";
   if (status) msg += "\n\nMevcut dönem durumu:\n"+status;
   return msg;
 }
 function msgTelafiDersHatirlatma(student, record) {
   const plannedAt = telafiPlannedAt(record);
-  return "Günaydın :) Bugünkü telafi dersimizin saati "+timeFromISO(plannedAt)+". Lütfen 5 dakika önce hazır olun.";
+  return dersHatirlatmaSelami()+" :) Bugünkü telafi dersimizin saati "+timeFromISO(plannedAt)+". Lütfen 5 dakika önce hazır olun.";
 }
 function msgEkDersHatirlatma(extra) {
   const mode = extra?.type === "online" ? "online " : "";
-  return "Günaydın :) Bugünkü "+mode+"ek dersimizin saati "+timeFromISO(extra?.date)+". Lütfen 5 dakika önce hazır olun.";
+  return dersHatirlatmaSelami()+" :) Bugünkü "+mode+"ek dersimizin saati "+timeFromISO(extra?.date)+". Lütfen 5 dakika önce hazır olun.";
 }
 function msgTekDersHatirlatma(lesson) {
   const mode = lesson?.lesson_mode === "online" ? "online " : "";
-  if (isTrialSingleLesson(lesson)) return "Günaydın :) Bugünkü "+mode+"deneme dersinizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
+  if (isTrialSingleLesson(lesson)) return dersHatirlatmaSelami()+" :) Bugünkü "+mode+"deneme dersinizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
   if (lesson?.participant_kind === "student") {
     const instrument = String(lesson?.instrument || "müzik").trim().replace(/\s+/g," ") || "müzik";
     const instrumentText = instrument.charAt(0).toLocaleLowerCase("tr-TR")+instrument.slice(1);
-    return "Günaydın :) Bugünkü "+mode+instrumentText+" dersinizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
+    return dersHatirlatmaSelami()+" :) Bugünkü "+mode+instrumentText+" dersinizin saati "+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
   }
-  return "Günaydın :) Bugünkü "+mode+(lesson?.instrument === "Piyano" ? "piyano" : (lesson?.instrument || "müzik"))+(lesson?.participant_kind === "guest" ? " dersinizin saati " : " tek dersimizin saati ")+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
+  return dersHatirlatmaSelami()+" :) Bugünkü "+mode+(lesson?.instrument === "Piyano" ? "piyano" : (lesson?.instrument || "müzik"))+(lesson?.participant_kind === "guest" ? " dersinizin saati " : " tek dersimizin saati ")+timeFromISO(lesson?.starts_at)+". Lütfen 5 dakika önce hazır olun.";
 }
 // V285: display-only policy mapping; v281 server quota remains authoritative.
 function normalMakeupNoticeLimit(policyVersion=281) {
@@ -7239,7 +7244,8 @@ function MesajSheet({ student, onClose, initialKey = "" }) {
     { key:"dondur", label:"Dondurma Uyarısı", text:msgDondurmaUyarisi(student) },
   ];
   const visibleMsgs = initialKey ? msgs.filter(m => m.key === initialKey) : msgs;
-  const send = (text) => {
+  const send = (message) => {
+    const text = message.key === "ders" ? message.text.replace(/^\S+/, dersHatirlatmaSelami()) : message.text;
     const phone = calendarAvailabilityPhone(student.phone);
     const encoded = encodeURIComponent(text);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encoded, "_blank");
@@ -7252,7 +7258,7 @@ function MesajSheet({ student, onClose, initialKey = "" }) {
           <div key={m.key} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:12, overflow:"hidden" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #f0f0f0" }}>
               <span style={{ fontWeight:700, fontSize:14, color:"#111" }}>{m.label}</span>
-              <button onClick={() => send(m.text)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"5px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+              <button onClick={() => send(m)} style={{ background:"#111", color:"#fff", border:"none", borderRadius:8, padding:"5px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
                 {calendarAvailabilityPhone(student.phone) ? "WhatsApp" : "Kopyala"}
               </button>
             </div>
@@ -18194,7 +18200,7 @@ export default function App() {
   };
 
   const handleWADers = async (student, lesson) => {
-    const text = msgDersHatirlatma(student);
+    const text = msgDersHatirlatma(student, lesson);
     const phone = calendarAvailabilityPhone(student.phone);
     if (phone) window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(text), "_blank");
     else { navigator.clipboard.writeText(text); pop("Mesaj kopyalandı"); }
