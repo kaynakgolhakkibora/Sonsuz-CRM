@@ -7990,6 +7990,10 @@ function useWeeklyScheduleShift(options) {
 async function readWeeklyShiftCalendar(client, students, scope, week, isCurrent=()=>true) {
   if(!scope?.actorUserId || !scope.branchId) throw new Error('WEEKLY_SHIFT_READ_SCOPE_REQUIRED');
   const records=[];
+  const weekStart=week+"T00:00";
+  const nextWeekStart=calendarDayKey(calendarAddDays(week,7))+"T00:00";
+  const pauseBoundary=/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/;
+  const validBoundary=value=>typeof value==="string" && pauseBoundary.test(value) && isValidLocalDateInput(value.slice(0,10));
   for(let i=0;i<students.length;i+=40){
     const batch=students.slice(i,i+40);
     if(!isCurrent() || batch.some(s=>s.branch_id!==scope.branchId)) throw new Error('WEEKLY_SHIFT_SCOPE_CHANGED');
@@ -8005,6 +8009,10 @@ async function readWeeklyShiftCalendar(client, students, scope, week, isCurrent=
         || !Array.isArray(row.vacancies) || row.vacancies.length>1000) throw new Error('WEEKLY_SHIFT_UNVERIFIED_CALENDAR');
       const keys=row.vacancies.map(v=>v?.date+'|'+v?.time);
       if(new Set(keys).size!==keys.length || row.vacancies.some(v=>!isValidLocalDateInput(v?.date) || v.date<week || v.date>=turkeyDateKey(calendarAddDays(week,7)) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(v?.time || ''))) throw new Error('WEEKLY_SHIFT_UNVERIFIED_CALENDAR');
+      if (!Array.isArray(row.pauses) || row.pauses.length>1000 || row.pauses.some((pause,index) =>
+        !validBoundary(pause?.from) || !validBoundary(pause?.until) || pause.from<weekStart || pause.until>nextWeekStart
+        || pause.from>=pause.until || (index>0 && row.pauses[index-1].until>=pause.from)
+      )) throw new Error('WEEKLY_SHIFT_UNVERIFIED_CALENDAR');
       records.push(row);
     }
   }
@@ -8026,8 +8034,12 @@ function useWeeklyShiftCalendar(students, scope, offset) {
     return()=>{cancelled=true;};
   },[key,retry]);
   const state=selected.length?(result?.key===key?result.state:'loading'):'';
-  const keys=new Map(state==='ready'?result.records.map(r=>[r.studentId,new Set(r.vacancies.map(v=>v.date+'|'+v.time))]):[]);
-  return {state,keys,retry:()=>setRetry(value=>value+1)};
+  const shifts=new Map(state==='ready'?result.records.map(row=>[row.studentId,{
+    vacancies:new Set(row.vacancies.map(v=>v.date+'|'+v.time)),
+    pauses:row.pauses,
+  }]):[]);
+  const pendingStudents=new Set(state && state!=='ready' ? selected.map(student=>student.id) : []);
+  return {state,shifts,pendingStudents,retry:()=>setRetry(value=>value+1)};
 }
 
 function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick, onSingleLessonClick=()=>{}, onExtraLessonClick=()=>{}, teacherName = "", calendarTeacher=null, calendarTeachers=[], calendarMoveReadScope=null, availabilityOpen=false, onAvailabilityClose=()=>{} }) {
@@ -8194,7 +8206,9 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       });
     });
 
-    const visibleProgramSlots=!historyOnly && timeline ? days.flatMap((day,index)=>programSlotsOnDate(student,timeline,day)
+    const shift=weeklyShiftCalendar.shifts.get(student.id);
+    const visibleProgramSlots=!historyOnly && timeline && !weeklyShiftCalendar.pendingStudents.has(student.id)
+      ? days.flatMap((day,index)=>programSlotsOnDate(student,timeline,day)
       .filter(slot=>slotDayIndex(slot.day)===(index+1)%7).map(slot=>({...slot,date:day}))) : [];
     visibleProgramSlots.forEach((slot,slotIndex) => {
       const targetDay = slotDayIndex(slot.day);
@@ -8204,9 +8218,12 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       if (slotDate < calendarDayStart(programStart) || slotDate < todayMid) return;
       if (!matchesTeacher(student,slotDate,null,slot.time,getLessonDuration(student),true)) return;
       if (actualKeys.has(dayIndex+"|"+slot.time)) return;
-      if (movedSourceKeys.has(turkeyDateKey(slotDate)+"|"+slot.time)) return;
-      if (timeline.sourceKeys.includes(turkeyDateKey(slotDate)+"|"+slot.time)) return;
-      if (weeklyShiftCalendar.keys.get(student.id)?.has(turkeyDateKey(slotDate)+"|"+slot.time)) return;
+      const slotDay=calendarDayKey(slotDate);
+      const slotKey=slotDay+"|"+slot.time;
+      if (movedSourceKeys.has(slotKey)) return;
+      if (timeline.sourceKeys.includes(slotKey)) return;
+      const startsAt=slotDay+"T"+slot.time;
+      if (shift?.vacancies.has(slotKey) || shift?.pauses.some(pause=>startsAt>=pause.from && startsAt<pause.until)) return;
       observeAvailability(slotDate,slot.time,getLessonDuration(student),packageEnded?"package-ended":"normal");
       addItem({
         key:"slot-"+student.id+"-"+slotIndex+"-"+calendarDayKey(slotDate),
