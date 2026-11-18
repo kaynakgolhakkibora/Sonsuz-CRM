@@ -4637,7 +4637,7 @@ function ActionSheet({ student, lessonId, onClose, onBack, onAction, onEvaluatio
 }
 
 function ResumeProgramSheet({ student, onClose, onResume, error="" }) {
-  const today = localDateKey();
+  const today = turkeyDateKey();
   const [startDate, setStartDate] = useState(today);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -8216,6 +8216,7 @@ function WeekCal({ students, singleLessons=[], offset, setOffset, onStudentClick
       if (dayIndex < 0) return;
       const slotDate = calendarDayStart(days[dayIndex]);
       if (slotDate < calendarDayStart(programStart) || slotDate < todayMid) return;
+      if (student.program_resume_on && (!isValidLocalDateInput(student.program_resume_on) || calendarDayKey(slotDate) < student.program_resume_on)) return;
       if (!matchesTeacher(student,slotDate,null,slot.time,getLessonDuration(student),true)) return;
       if (actualKeys.has(dayIndex+"|"+slot.time)) return;
       const slotDay=calendarDayKey(slotDate);
@@ -14927,6 +14928,7 @@ export default function App() {
       veli_adi: student.veli_adi || "",
       dogum_tarihi: student.dogum_tarihi || "",
       lesson_start_date: student.lesson_start_date || student.lessonStartDate || null,
+      ...(Object.prototype.hasOwnProperty.call(student,"program_resume_on") ? { program_resume_on:student.program_resume_on || null } : {}),
       teacher_id: student.teacher_id || null,
       teacher_name: studentTeacherName(student),
       teacher_history: student.teacher_history || [],
@@ -14967,7 +14969,7 @@ export default function App() {
       throw new Error("STUDENT_BRANCH_CONTEXT_MISMATCH");
     }
     const source=students.find(s=>s.id===student.id);
-    const weeklyFields=s=>programJSON([getStudentSlots(s),s.teacher_id,s.teacher_name,s.teacher_history,getLessonDuration(s),s.frozen,s.left_at,s.lesson_start_date]);
+    const weeklyFields=s=>programJSON([getStudentSlots(s),s.teacher_id,s.teacher_name,s.teacher_history,getLessonDuration(s),s.frozen,s.left_at,s.lesson_start_date,s.program_resume_on]);
     if(source && !student.frozen && !isStudentLeft(student) && !genderOptions.onlyGender && weeklyFields(source)!==weeklyFields(student)){
       if(!await booking.review(student,typeof student.record_version==='number'?student.record_version:0)){
         await loadStudents(undefined,branchId);const refusal=new Error("Ders saatleri doğrulanmadı; kayıt gönderilmedi.");refusal.bookingRejected=true;throw refusal;
@@ -15007,6 +15009,7 @@ export default function App() {
       }
 
       if (error || !data?.id || data.branch_id !== branchId || data.last_write_id !== writeId || data.record_version !== nextVersion
+        || (Object.prototype.hasOwnProperty.call(payload,"program_resume_on") && data.program_resume_on !== payload.program_resume_on)
         || (genderChanges && (data.id !== student.id || Object.entries(genderChanges).some(([key,value]) => data[key] !== value)))) {
         bookingAnnounce(error);
         console.error("Kayıt hatası:", error);
@@ -16536,8 +16539,12 @@ export default function App() {
 
   const handleToggleFreeze = async (sid, frozen, resumeDate=null) => {
     const resumeStart = resumeDate ? new Date(resumeDate+"T12:00:00") : null;
-    if (!frozen && resumeDate && (!/^\d{4}-\d{2}-\d{2}$/.test(resumeDate) || isNaN(resumeStart.getTime()) || midday(resumeStart) < midday())) {
+    if (!frozen && resumeDate && (!isValidLocalDateInput(resumeDate) || resumeDate < turkeyDateKey())) {
       pop("Geçerli bir başlangıç tarihi seçin", 5000);
+      return false;
+    }
+    if (!frozen && resumeDate && !Object.prototype.hasOwnProperty.call(students.find(s=>s.id===sid) || {},"program_resume_on")) {
+      pop("Dönüş tarihini kaydetmek için V313 veritabanı kurulumu ve güncel öğrenci kaydı gerekiyor.", 8000);
       return false;
     }
     const updated = students.map(s => {
@@ -16553,7 +16560,8 @@ export default function App() {
         });
         nextSchedule = [...fixedLessons, ...movedUpcoming].sort((a,b)=>new Date(a.date)-new Date(b.date));
       }
-      const next = { ...s, frozen, left_at:frozen ? (s.left_at || null) : null, schedule:nextSchedule };
+      const next = { ...s, frozen, left_at:frozen ? (s.left_at || null) : null, schedule:nextSchedule,
+        ...(!frozen && Object.prototype.hasOwnProperty.call(s,"program_resume_on") ? { program_resume_on:resumeDate || null } : {}) };
       return withStatusEvent(next, frozen ? "frozen" : "active");
     });
     setStudents(updated);
