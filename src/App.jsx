@@ -6528,8 +6528,9 @@ function msgNewsletter(student) {
   return greeting+"\n\nBodrum Sonsuz Sanat bültenine abone olarak sanat, eğitim ve etkinlik içeriklerimizi takip edebilirsiniz:\n\n"+NEWSLETTER_URL+"\n\nBodrum Sonsuz Sanat";
 }
 function msgDogumGunu(student) {
-  const firstName = (student.name || "").trim().split(/\s+/)[0];
-  const greeting = firstName ? `İyi ki doğdun, ${firstName}! 🎉` : "İyi ki doğdun! 🎉";
+  const firstName = (student.name || "").trim().split(/\s+/)[0]
+    .replace(/^./u, initial => initial.toLocaleUpperCase("tr-TR"));
+  const greeting = firstName ? `İyi ki doğdun, ${firstName}!` : "İyi ki doğdun!";
   return greeting+"\n\nYeni yaşın neşeyle, sanatla ve güzel anılarla dolsun.\n\nSevgiler,\nBodrum Sonsuz Sanat";
 }
 function msgGoogleReview(student) {
