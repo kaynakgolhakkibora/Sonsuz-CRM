@@ -6527,6 +6527,11 @@ function msgNewsletter(student) {
   const greeting = "Merhaba,";
   return greeting+"\n\nBodrum Sonsuz Sanat bültenine abone olarak sanat, eğitim ve etkinlik içeriklerimizi takip edebilirsiniz:\n\n"+NEWSLETTER_URL+"\n\nBodrum Sonsuz Sanat";
 }
+function msgDogumGunu(student) {
+  const firstName = (student.name || "").trim().split(/\s+/)[0];
+  const greeting = firstName ? `İyi ki doğdun, ${firstName}! 🎉` : "İyi ki doğdun! 🎉";
+  return greeting+"\n\nYeni yaşın neşeyle, sanatla ve güzel anılarla dolsun.\n\nSevgiler,\nBodrum Sonsuz Sanat";
+}
 function msgGoogleReview(student) {
   const lessonPhrase = instrumentLessonPhrase(student);
   return "Merhaba,\n\nDers sürecimizle ilgili deneyiminizi Google’da paylaşmanız bizi çok mutlu eder. Yorumunuz hem bize hem de bizi araştıran ailelere çok yardımcı oluyor.\n\nYorumunuzda “"+lessonPhrase+"” ifadesine yer vermeniz, Bodrum’da "+lessonPhrase+" arayan ailelerin bizi bulmasına da yardımcı olur.\n\nYorum bırakmak için: "+GOOGLE_REVIEW_URL+"\n\nTeşekkür ederiz.\nBodrum Sonsuz Sanat";
@@ -19082,10 +19087,17 @@ export default function App() {
                 <AçılırBugünBölümü title={`Bugün Doğum Günü (${dogumGünleri.length})`} color="#86198f" style={{ background:"#fdf4ff", border:"1.5px solid #e879f9", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                   {dogumGünleri.map(s => {
                     const yaş = new Date().getFullYear() - new Date(s.dogum_tarihi).getFullYear();
+                    const hasWhatsAppPhone = !!calendarAvailabilityPhone(s.phone);
                     return (
-                      <div key={s.id} onClick={() => setDetailSt(s)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", cursor:"pointer" }}>
-                        <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111", textAlign:"left" }}>{s.name}</p>
-                        <span style={{ fontSize:13, color:"#86198f", fontWeight:600 }}>{yaş} yaş</span>
+                      <div key={s.id} onClick={() => setDetailSt(s)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"6px 0", cursor:"pointer" }}>
+                        <p style={{ margin:0, minWidth:0, overflowWrap:"anywhere", fontWeight:700, fontSize:14, color:"#111", textAlign:"left" }}>{s.name}</p>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                          <span style={{ fontSize:13, color:"#86198f", fontWeight:600 }}>{yaş} yaş</span>
+                          <button type="button" onClick={event=>{
+                            event.stopPropagation();
+                            handleCommunicationMessage(s,msgDogumGunu(s));
+                          }} style={{ background:"#15803d", color:"#fff", border:"none", borderRadius:10, padding:"9px 10px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>{hasWhatsAppPhone ? "WhatsApp" : "Kopyala"}</button>
+                        </div>
                       </div>
                     );
                   })}
