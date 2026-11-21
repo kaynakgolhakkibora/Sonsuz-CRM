@@ -7137,7 +7137,7 @@ function sentPeriodSummaryArchiveView(rows, search="", year="", studentPage=0) {
   return { years, studentCount:groups.length, summaryCount:matchingRows.length, page:sentPeriodSummaryPage(groups, studentPage, 20) };
 }
 
-function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, busyStudentId, onCorrect }) {
+function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, busyStudentId, onCorrect, embedded=false }) {
   const [search, setSearch] = useState("");
   const [year, setYear] = useState("");
   const [studentPage, setStudentPage] = useState(0);
@@ -7153,7 +7153,10 @@ function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, bu
   },[studentPage,view.page.index,openStudentId,openGroup?.student.id,periodPage,periods.index]);
   const resetPages = () => { setStudentPage(0); setOpenStudentId(null); setPeriodPage(0); };
   const pageButton = { border:"1px solid #d8b4fe", borderRadius:8, padding:"8px 10px", background:"#fff", color:"#7e22ce", fontWeight:700, fontSize:12, fontFamily:"inherit" };
-  return <Sheet title="Gönderilmiş Özetler" subtitle={(search.trim() || year ? "Bulunan: " : "")+view.studentCount+" öğrenci · "+view.summaryCount+" dönem özeti"} onClose={onClose}>
+  const subtitle = (search.trim() || year ? "Bulunan: " : "")+view.studentCount+" öğrenci · "+view.summaryCount+" dönem özeti";
+  const Container = embedded ? "div" : Sheet;
+  return <Container {...(embedded ? {} : { title:"Gönderilmiş Özetler", subtitle, onClose })}>
+    {embedded ? <p style={{ margin:"0 0 14px", fontSize:12, color:"#64748b", fontWeight:700 }}>{subtitle}</p> : null}
     <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:14 }}>
       <label style={{ flex:"1 1 220px", minWidth:0, fontSize:12, color:"#7e22ce", fontWeight:700 }}>
         Öğrenci ara
@@ -7206,13 +7209,12 @@ function SentPeriodSummariesSheet({ rows, onClose, onSummary, onStudentClick, bu
       <span aria-live="polite" style={{ fontSize:12, color:"#64748b" }}>{view.page.index*20+1}–{Math.min((view.page.index+1)*20,view.page.total)} / {view.page.total} öğrenci</span>
       <button type="button" aria-label="Sonraki öğrenci sayfası" disabled={view.page.index===view.page.pageCount-1} onClick={()=>{ setStudentPage(view.page.index+1); setOpenStudentId(null); setPeriodPage(0); }} style={{ ...pageButton, opacity:view.page.index===view.page.pageCount-1 ? .5 : 1 }}>Sonraki →</button>
     </nav> : null}
-    <Btn bg="#111" outline onClick={onClose}>Kapat</Btn>
-  </Sheet>;
+    {!embedded ? <Btn bg="#111" outline onClick={onClose}>Kapat</Btn> : null}
+  </Container>;
 }
 
-function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEvaluate, onSummary, busyStudentId, onCorrect }) {
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  if (!rows.length && !sentRows.length) return null;
+function BekleyenDonemDegerlendirmeleri({ rows, onStudentClick, onEvaluate, onSummary, busyStudentId, onCorrect }) {
+  if (!rows.length) return null;
   const renderRow = ({ student, info }) => {
       const key = packageSummaryKey(info);
       const log = periodEvaluationInfo(student, info);
@@ -7231,12 +7233,9 @@ function BekleyenDonemDegerlendirmeleri({ rows, sentRows, onStudentClick, onEval
         </div>
       </div>;
   };
-  return <><AçılırBugünBölümü title={`Dönem Değerlendirmeleri (${rows.length} bekleyen)`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
+  return <AçılırBugünBölümü title={`Dönem Değerlendirmeleri (${rows.length} bekleyen)`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
     {rows.map(renderRow)}
-    {sentRows.length ? <button type="button" onClick={()=>setArchiveOpen(true)} style={{ marginTop:10, padding:"8px 10px", border:"1px solid #d8b4fe", borderRadius:8, background:"#fff", color:"#7e22ce", fontWeight:700, fontSize:12, fontFamily:"inherit", cursor:"pointer" }}>Gönderilmiş Özetler ({sentRows.length})</button> : null}
-  </AçılırBugünBölümü>
-    {archiveOpen && sentRows.length ? <SentPeriodSummariesSheet rows={sentRows} busyStudentId={busyStudentId} onClose={()=>setArchiveOpen(false)} onStudentClick={student=>{ setArchiveOpen(false); onStudentClick(student); }} onSummary={(sid,key)=>{ setArchiveOpen(false); onSummary(sid,key); }} onCorrect={onCorrect ? (sid,key)=>{setArchiveOpen(false);onCorrect(sid,key);} : undefined} /> : null}
-  </>;
+  </AçılırBugünBölümü>;
 }
 
 function MesajSheet({ student, onClose, initialKey = "" }) {
@@ -18343,7 +18342,7 @@ export default function App() {
   const operationalStudents = students.filter(student=>!isStudentDeleted(student));
   const pendingGoogleReviews = googleReviewReady ? pendingGoogleReviewStudents(operationalStudents.filter(student=>student.branch_id===currentBranch.id),singleLessonResultClock) : [];
   const pendingPeriodEvaluations = mainTab === "bugün" ? pendingPeriodEvaluationRows(operationalStudents) : [];
-  const sentPeriodSummaries = mainTab === "bugün" ? sentPeriodSummaryRows(operationalStudents) : [];
+  const sentPeriodSummaries = mainTab === "ozet" ? sentPeriodSummaryRows(operationalStudents) : [];
   const todayPayments = operationalStudents.filter(isÖdemeBekleyen);
   const filtered = operationalStudents.filter(s => {
     if (search.trim() && !s.name.toLowerCase().includes(search.toLowerCase().trim())) return false;
@@ -19111,7 +19110,7 @@ export default function App() {
             <SonuçBekleyenTekDersler lessons={pendingSingleResults} busyIds={singleLessonBusyIds} onStatus={handleSingleLessonStatus} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onManage={()=>setMainTab("tekders")} />
             <GecikenTekDersÖdemeleri lessons={overdueSinglePayments} now={singleLessonResultClock} busyIds={singleLessonBusyIds} onPayment={handleSingleLessonPayment} onOpen={lesson=>setSingleLessonSheet({mode:"edit",lesson})} />
             <BekleyenTelafiler students={operationalStudents} onStudentClick={(s) => { setDetailInitialTab("telafi"); setDetailSt(s); }} />
-            <BekleyenDonemDegerlendirmeleri rows={pendingPeriodEvaluations} sentRows={sentPeriodSummaries} onStudentClick={setDetailSt} onEvaluate={handleDonemDegerlendirmeAc} onSummary={handlePaketOzetiAc} busyStudentId={summaryOpeningId} onCorrect={openPeriodCorrection} />
+            <BekleyenDonemDegerlendirmeleri rows={pendingPeriodEvaluations} onStudentClick={setDetailSt} onEvaluate={handleDonemDegerlendirmeAc} onSummary={handlePaketOzetiAc} busyStudentId={summaryOpeningId} onCorrect={openPeriodCorrection} />
             {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length > 0 ? (
               <AçılırBugünBölümü title={`Paketi Biten Öğrenciler (${operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).length})`} color="#7e22ce" style={{ background:"#faf5ff", border:"1.5px solid #d8b4fe", borderRadius:14, padding:"12px 16px", marginBottom:14 }}>
                 {operationalStudents.filter(s => calcBalance(s.schedule) === 0 && !s.frozen).map(s => {
@@ -19143,7 +19142,13 @@ export default function App() {
         {mainTab === "ogretmenler" ? <ÖğretmenlerPaneli students={students} teachers={teachers} singleLessons={singleLessons} onStudentClick={setDetailSt} onSingleLessonClick={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onExtraLessonClick={(student) => { setDetailInitialTab("ekders"); setDetailSt(student); }} calendarMoveReadScope={{ actorUserId:authSession?.user?.id, branchId:currentBranch?.id, generation:protectedDataLoadGenerationRef.current }} /> : null}
         {mainTab === "tekders" ? <SingleLessonsPanel lessons={singleLessons} loading={singleLessonsLoading} onEdit={lesson=>setSingleLessonSheet({mode:"edit",lesson})} onStatus={handleSingleLessonStatus} onPayment={handleSingleLessonPayment} onDelete={handleSingleLessonDelete} busyIds={singleLessonBusyIds} onTrialAppointment={lesson=>openTrialAppointment(lesson)} trialAppointmentOpeningId={trialAppointmentOpeningId} /> : null}
         {mainTab === "gelir" ? <FinansRaporu students={students} expenses={expenses} singleLessons={singleLessons} onExpenseAdd={handleExpenseAdd} onExpenseRemove={handleExpenseRemove} /> : null}
-        {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} singleLessons={singleLessons} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} newRegistrationReportStates={newRegistrationReportStates} newRegistrationReportStateReady={newRegistrationReportStateReady} newRegistrationReportStateError={newRegistrationReportStateError} newRegistrationReportBusyId={newRegistrationReportBusyId} onNewRegistrationReportToggle={handleNewRegistrationReportToggle} onNewRegistrationReportRetry={()=>loadNewRegistrationReportStates()} /></> : null}
+        {mainTab === "ozet" ? <>{weeklyReportReady?<WeeklyReportsSection key={weeklyReportScopeKey+":"+weeklyReportReady} current={weeklyVisibleState.current} reports={weeklyVisibleState.reports} onDownload={handleWeeklyReportDownload} busyId={weeklyDownloadingId} error={weeklyVisibleState.error} loading={weeklyVisibleState.loading} onCheck={()=>loadWeeklyReports()} />:null}<AylikOzet students={students} teachers={teachers} singleLessons={singleLessons} monthlyReports={monthlyReports} onMonthlyReportDownload={handleMonthlyReportDownload} downloadingReportId={downloadingReportId} onTeacherAdd={handleTeacherAdd} onTeacherToggle={handleTeacherToggle} newRegistrationReportStates={newRegistrationReportStates} newRegistrationReportStateReady={newRegistrationReportStateReady} newRegistrationReportStateError={newRegistrationReportStateError} newRegistrationReportBusyId={newRegistrationReportBusyId} onNewRegistrationReportToggle={handleNewRegistrationReportToggle} onNewRegistrationReportRetry={()=>loadNewRegistrationReportStates()} />
+          {sentPeriodSummaries.length ? <div style={{ ...SECTION, padding:"15px 16px" }}>
+            <AçılırBugünBölümü title={`Gönderilmiş Özetler (${sentPeriodSummaries.length})`} color="#111">
+              <SentPeriodSummariesSheet embedded rows={sentPeriodSummaries} busyStudentId={summaryOpeningId} onStudentClick={setDetailSt} onSummary={handlePaketOzetiAc} onCorrect={openPeriodCorrection} />
+            </AçılırBugünBölümü>
+          </div> : null}
+        </> : null}
         {mainTab === "liste" ? (
           <div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8, marginBottom:14 }}>
